@@ -1658,7 +1658,7 @@ def cmd_knowledge(args):
         from omega.knowledge.engine import scan_directory, list_documents, search_documents  # noqa: F401
     except ImportError:
         print("Knowledge base is a pro feature.")
-        print("Learn more: https://omegamemory.com/pro")
+        print("Learn more: https://omegamax.co/pro")
         return
 
     subcmd = getattr(args, "kb_command", None)
@@ -1695,7 +1695,7 @@ def cmd_cloud(args):
         from omega.cloud.sync import get_sync  # noqa: F401
     except ImportError:
         print("Cloud sync is a pro feature.")
-        print("Learn more: https://omegamemory.com/pro")
+        print("Learn more: https://omegamax.co/pro")
         return
 
     from omega.cli_ui import print_header
@@ -1767,7 +1767,7 @@ def cmd_mobile(args):
         from omega.cloud.sync import get_sync  # noqa: F401
     except ImportError:
         print("Mobile access is a pro feature.")
-        print("Learn more: https://omegamemory.com/pro")
+        print("Learn more: https://omegamax.co/pro")
         return
 
     subcmd = getattr(args, "mobile_command", None)

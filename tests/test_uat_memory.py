@@ -351,7 +351,7 @@ class TestUATSessionScoping:
             "session_id": "session-aaa",
         })
         await HANDLERS["omega_store"]({
-            "content": "Session BBB memory about setting up the development environment for Acme App project",
+            "content": "Session BBB memory about setting up the development environment for frontend project",
             "event_type": "lesson_learned",
             "session_id": "session-bbb",
         })
