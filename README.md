@@ -7,6 +7,8 @@
 [![PyPI](https://img.shields.io/pypi/v/omega-memory.svg)](https://pypi.org/project/omega-memory/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
+Forgetting Intelligence included — memories decay, conflicts auto-resolve, every deletion is audited.
+
 ---
 
 ## Quick Install
@@ -85,6 +87,12 @@ That's it. Memories persist across sessions, accumulate over time, and are surfa
 
 - **Encryption at Rest** *(optional)* — AES-256-GCM encrypted storage with macOS Keychain integration. `pip install omega-memory[encrypt]`
 
+- **Forgetting Audit Trail** — Every deletion logged with reason (TTL, LRU, consolidation, feedback, user). Query the log anytime.
+
+- **Decay Curves** — Old unaccessed memories rank lower automatically. Preferences and errors never decay. Floor at 0.35.
+
+- **Conflict Detection** — Contradictions auto-detected on store. Decisions auto-resolve, lessons get flagged.
+
 - **Plugin Architecture** — Extensible via entry points. Add custom tools and handlers through the plugin system.
 
 ## How OMEGA Compares
@@ -97,6 +105,7 @@ That's it. Memories persist across sessions, accumulate over time, and are surfa
 | Auto-capture & surfacing | Yes | No | No | Partial |
 | Graph relationships | Yes | No | No | No |
 | Privacy (fully local) | Yes | No | No | No |
+| Intelligent forgetting | Yes | No | No | No |
 | Free & open source | Yes (Apache-2.0) | Freemium | Freemium | Bundled |
 
 ## Architecture
@@ -109,7 +118,7 @@ That's it. Memories persist across sessions, accumulate over time, and are surfa
                           │ stdio/MCP
                ┌──────────▼──────────┐
                │   OMEGA MCP Server   │
-               │   25 memory tools    │
+               │   26 memory tools    │
                └──────────┬──────────┘
                           │
                ┌──────────▼──────────┐
@@ -123,7 +132,7 @@ Single database, modular handlers. Additional tools available via the plugin sys
 
 ## MCP Tools Reference
 
-OMEGA runs as an MCP server inside Claude Code. Once installed, 25 memory tools are available. Additional tools can be added via the plugin system.
+OMEGA runs as an MCP server inside Claude Code. Once installed, 26 memory tools are available. Additional tools can be added via the plugin system.
 
 | Tool | What it does |
 |------|-------------|
@@ -140,6 +149,7 @@ OMEGA runs as an MCP server inside Claude Code. Once installed, 25 memory tools 
 | `omega_traverse` | Walk the relationship graph |
 | `omega_checkpoint` | Save task state for cross-session continuity |
 | `omega_resume_task` | Resume a previously checkpointed task |
+| `omega_forgetting_log` | Query the forgetting audit trail (deletions with reasons) |
 
 ## CLI
 
@@ -190,6 +200,7 @@ All hooks dispatch via `fast_hook.py` → daemon UDS socket, with fail-open sema
 3. **Type-weighted scoring** (decisions/lessons weighted 2x)
 4. **Contextual re-ranking** (boosts by tag, project, and content match)
 5. **Deduplication** at query time
+6. **Time-decay weighting** (old unaccessed memories rank lower)
 
 ### Memory Lifecycle
 
@@ -198,6 +209,8 @@ All hooks dispatch via `fast_hook.py` → daemon UDS socket, with fail-open sema
 - **TTL**: Session summaries expire after 1 day, lessons/preferences are permanent
 - **Auto-relate**: Creates `related` edges (similarity >= 0.45) to top-3 similar memories
 - **Compaction**: Clusters and summarizes related memories
+- **Decay**: Unaccessed memories lose ranking weight over time (floor 0.35); preferences and errors exempt
+- **Conflict detection**: Contradicting memories auto-detected on store; decisions auto-resolve, lessons flagged
 
 ### Memory Footprint
 
