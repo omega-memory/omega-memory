@@ -61,6 +61,7 @@ async def handle_omega_store(arguments: dict) -> dict:
     event_type = arguments.get("event_type", "memory")
     metadata = arguments.get("metadata", {})
     session_id = arguments.get("session_id")
+    project = arguments.get("project") or (metadata or {}).get("project")
     entity_id = arguments.get("entity_id")
     agent_type = arguments.get("agent_type")
 
@@ -82,6 +83,7 @@ async def handle_omega_store(arguments: dict) -> dict:
             event_type=event_type,
             metadata=metadata,
             session_id=session_id,
+            project=project,
             entity_id=entity_id,
             agent_type=agent_type,
         )
