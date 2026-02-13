@@ -33,9 +33,11 @@ omega setup
 `omega setup` will:
 1. Create `~/.omega/` directory
 2. Download the ONNX embedding model (~90 MB) to `~/.cache/omega/models/`
-3. Register `omega-memory` as an MCP server with Claude Code
-4. Install session hooks into `~/.claude/settings.json`
-5. Add an OMEGA block to `~/.claude/CLAUDE.md`
+3. Register `omega-memory` as an MCP server in `~/.claude.json`
+4. Install session hooks in `~/.claude/settings.json`
+5. Add a managed `<!-- OMEGA:BEGIN -->` block to `~/.claude/CLAUDE.md`
+
+All changes are idempotent — running `omega setup` again won't duplicate entries.
 
 ## The Problem
 
@@ -107,7 +109,7 @@ That's it. Memories persist across sessions, accumulate over time, and are surfa
                           │ stdio/MCP
                ┌──────────▼──────────┐
                │   OMEGA MCP Server   │
-               │   24 memory tools    │
+               │   25 memory tools    │
                └──────────┬──────────┘
                           │
                ┌──────────▼──────────┐
@@ -121,7 +123,7 @@ Single database, modular handlers. Additional tools available via the plugin sys
 
 ## MCP Tools Reference
 
-OMEGA runs as an MCP server inside Claude Code. Once installed, 24 memory tools are available. Additional tools can be added via the plugin system.
+OMEGA runs as an MCP server inside Claude Code. Once installed, 25 memory tools are available. Additional tools can be added via the plugin system.
 
 | Tool | What it does |
 |------|-------------|
@@ -202,16 +204,6 @@ All hooks dispatch via `fast_hook.py` → daemon UDS socket, with fail-open sema
 - Startup: ~31 MB RSS
 - After first query (ONNX model loaded): ~337 MB RSS
 - Database: ~10.5 MB for ~242 memories
-
-### What Gets Modified
-
-`omega setup` modifies these files outside `~/.omega/`:
-
-- `~/.claude.json` — Adds `omega-memory` MCP server entry
-- `~/.claude/settings.json` — Adds hook entries
-- `~/.claude/CLAUDE.md` — Adds a managed `<!-- OMEGA:BEGIN -->` block
-
-All changes are idempotent.
 
 </details>
 

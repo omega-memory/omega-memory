@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 OMEGA — persistent memory for AI coding agents. First public release under Apache-2.0.
 
 #### Core Memory System
-- **24 MCP tools** for storing, querying, and managing long-term memory
+- **25 MCP tools** for storing, querying, and managing long-term memory
 - Semantic search via bge-small-en-v1.5 embeddings + sqlite-vec
 - FTS5 full-text search for exact phrase queries
 - Graph relationships (related, supersedes, contradicts) with BFS traversal
