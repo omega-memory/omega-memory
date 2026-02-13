@@ -647,6 +647,14 @@ def auto_capture(
     """
     content = unicodedata.normalize("NFC", content)
 
+    # Auto-resolve entity_id from project if not explicitly provided
+    if not entity_id and project:
+        try:
+            from omega.entity.engine import resolve_project_entity
+            entity_id = resolve_project_entity(project)
+        except Exception:
+            pass  # Fail-open: entity resolution is best-effort
+
     # Determine source early — hooks vs direct API calls have different filtering rules.
     _source = (metadata or {}).get("source", "")
     _is_hook = _source.startswith("auto_") or _source.endswith("_hook")
@@ -897,6 +905,7 @@ def store(
     event_type: str = "memory",
     metadata: Optional[Dict[str, Any]] = None,
     session_id: Optional[str] = None,
+    project: Optional[str] = None,
     entity_id: Optional[str] = None,
     agent_type: Optional[str] = None,
 ) -> str:
@@ -906,6 +915,7 @@ def store(
         event_type=event_type,
         metadata=metadata,
         session_id=session_id,
+        project=project,
         entity_id=entity_id,
         agent_type=agent_type,
     )
