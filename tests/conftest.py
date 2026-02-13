@@ -29,20 +29,36 @@ def _reset_embeddings_after_test():
 
 @pytest.fixture(autouse=True)
 def _reset_hook_server_state():
-    """Clear hook_server debounce dicts before each test."""
+    """Clear hook_server debounce dicts and entity engine cache before each test."""
     try:
         from omega.server import hook_server
+        hook_server._last_claim.clear()
+        hook_server._last_overlap_notify.clear()
         hook_server._last_coord_query.clear()
         hook_server._last_reminder_check = 0.0
         hook_server._pending_urgent.clear()
+        hook_server._session_intent.clear()
+    except (ImportError, AttributeError):
+        pass
+    try:
+        import omega.entity.engine as ee
+        ee._cache_ts = 0.0
     except (ImportError, AttributeError):
         pass
     yield
     try:
         from omega.server import hook_server
+        hook_server._last_claim.clear()
+        hook_server._last_overlap_notify.clear()
         hook_server._last_coord_query.clear()
         hook_server._last_reminder_check = 0.0
         hook_server._pending_urgent.clear()
+        hook_server._session_intent.clear()
+    except (ImportError, AttributeError):
+        pass
+    try:
+        import omega.entity.engine as ee
+        ee._cache_ts = 0.0
     except (ImportError, AttributeError):
         pass
 
@@ -55,3 +71,13 @@ def store(tmp_omega_dir):
     s = SQLiteStore(db_path=db_path)
     yield s
     s.close()
+
+
+@pytest.fixture
+def coord_mgr(tmp_omega_dir):
+    """Create a fresh CoordinationManager for testing."""
+    from omega.coordination import CoordinationManager
+    db_path = tmp_omega_dir / "test.db"
+    mgr = CoordinationManager(db_path=db_path)
+    yield mgr
+    mgr.close()

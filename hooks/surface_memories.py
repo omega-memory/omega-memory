@@ -138,6 +138,28 @@ def _ext_to_tags(file_path: str) -> list:
     return _EXT_MAP.get(ext, [])
 
 
+def _lookup_session_tasks(results: list) -> dict:
+    """Look up session task descriptions for memory results.
+
+    Returns a dict mapping session_id -> task description (truncated).
+    Uses coord_sessions table; returns empty dict on failure.
+    """
+    session_ids = {r.get("session_id") for r in results if r.get("session_id")}
+    if not session_ids:
+        return {}
+    try:
+        from omega.coordination import get_manager
+        mgr = get_manager()
+        placeholders = ",".join("?" for _ in session_ids)
+        cursor = mgr._conn.execute(
+            f"SELECT session_id, task FROM coord_sessions WHERE session_id IN ({placeholders})",
+            list(session_ids),
+        )
+        return {row[0]: (row[1] or "")[:40] for row in cursor.fetchall() if row[1]}
+    except Exception:
+        return {}
+
+
 def _apply_confidence_boost(results: list) -> list:
     """Boost relevance scores by capture confidence: high=1.2x, low=0.7x."""
     for r in results:
@@ -172,6 +194,9 @@ def _surface_for_edit(file_path: str, session_id: str, project: str, count_surfa
         if not results:
             return
 
+        # Look up session task descriptions for source attribution
+        session_tasks = _lookup_session_tasks(results)
+
         print(f"\n[MEMORY] Relevant context for {filename}:")
         for r in results:
             score = r.get("relevance", 0.0)
@@ -180,8 +205,18 @@ def _surface_for_edit(file_path: str, session_id: str, project: str, count_surfa
             nid = r.get("id", "")[:8]
             created = r.get("created_at", "")
             age = _relative_time_from_iso(created) if created else ""
-            age_part = f" ({age})" if age else ""
-            print(f"  [{score:.0%}] {etype}{age_part}: {preview} (id:{nid})")
+            # Build attribution: "(2d ago, from 'implementing auth')" or "(2d ago)"
+            mem_session = r.get("session_id", "")
+            task_desc = session_tasks.get(mem_session, "")
+            if age and task_desc:
+                attr = f" ({age}, from \"{task_desc}\")"
+            elif age:
+                attr = f" ({age})"
+            elif task_desc:
+                attr = f" (from \"{task_desc}\")"
+            else:
+                attr = ""
+            print(f"  [{score:.0%}] {etype}{attr}: {preview} (id:{nid})")
 
         # First-recall milestone
         try:
@@ -402,9 +437,13 @@ def _capture_error(tool_output: str, session_id: str, project: str):
             project=project,
         )
         if result and ("Memory Captured" in result or "Memory Evolved" in result):
-            tag = "updated" if "Evolved" in result else "saved"
             first_line = error_summary.split('\n')[0][:80]
-            print(f"[MEMORY {tag.upper()}] error: {first_line}")
+            if "Evolved" in result:
+                evo_match = re.search(r"Evolution #(\d+)", result)
+                evo_num = evo_match.group(1) if evo_match else "?"
+                print(f"[OMEGA] Memory evolved: error pattern updated (evolution #{evo_num}) — {first_line}")
+            else:
+                print(f"[OMEGA] Captured: error — {first_line}")
     except ImportError:
         pass
     except Exception as e:

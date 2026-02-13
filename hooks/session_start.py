@@ -174,7 +174,33 @@ def main():
                    else f"{int(secs/86400)}d ago")
         else:
             ago = "never"
-        print(f"**Health:** {health_label} | **Edges:** {edge_count:,} | **Last capture:** {ago}")
+        node_count = store.count()
+        if node_count > 0:
+            ratio = edge_count / node_count
+            graph_label = "rich" if ratio >= 1.5 else ("good" if ratio >= 0.5 else "sparse")
+            graph_info = f" | **Graph:** {graph_label} ({edge_count:,} edges, {ratio:.1f}x)"
+        else:
+            graph_info = ""
+        print(f"**Health:** {health_label} | **Last capture:** {ago}{graph_info}")
+    except Exception:
+        pass
+
+    # Profile summary
+    try:
+        from omega.profile.engine import get_profile_engine
+        _pe = get_profile_engine()
+        with _pe._lock:
+            _prow = _pe._conn.execute("SELECT COUNT(*) as cnt FROM secure_profile").fetchone()
+        _pcnt = _prow["cnt"] if _prow else 0
+        if _pcnt > 0:
+            print(f"**Profile:** {_pcnt} encrypted field(s) stored")
+    except Exception:
+        pass
+
+    # Proactive maintenance suggestion when graph is sparse
+    try:
+        if node_count > 0 and edge_count / node_count < 0.5:
+            print("[MAINTENANCE] Graph connectivity is sparse — consider running omega_compact to consolidate related memories")
     except Exception:
         pass
 
