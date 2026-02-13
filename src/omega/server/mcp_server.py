@@ -19,9 +19,8 @@ from omega.server.handlers import HANDLERS as _CORE_HANDLERS
 TOOL_SCHEMAS = list(_CORE_SCHEMAS)
 HANDLERS = dict(_CORE_HANDLERS)
 
-# Built-in optional modules (coordination, router, profile, knowledge, entity)
-# These are part of the monorepo during development but become plugin-provided
-# in the open-core distribution. Try each in turn; missing modules are fine.
+# Built-in optional modules (coordination, router, profile, knowledge, entity).
+# Each is tried in turn; missing modules are silently skipped.
 _BUILTIN_MODULES = [
     ("omega.server.coord_schemas", "COORD_TOOL_SCHEMAS", "omega.server.coord_handlers", "COORD_HANDLERS"),
     ("omega.router.tool_schemas", "ROUTER_TOOL_SCHEMAS", "omega.router.handlers", "ROUTER_HANDLERS"),
