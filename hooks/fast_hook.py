@@ -22,10 +22,17 @@ _FALLBACK_SCRIPTS = {
     "session_stop": "session_stop",
     "surface_memories": "surface_memories",
     "auto_capture": "auto_capture",
+    "coord_session_start": "coord_session_start",
+    "coord_session_stop": "coord_session_stop",
+    "coord_heartbeat": "coord_heartbeat",
+    "auto_claim_file": "auto_claim_file",
+    "pre_file_guard": "pre_file_guard",
+    "pre_task_guard": "pre_task_guard",
+    "pre_push_guard": "pre_push_guard",
 }
 
 # Hooks that require longer timeouts (e.g., git network operations)
-_SLOW_HOOKS = set()
+_SLOW_HOOKS = {"pre_push_guard"}
 
 
 def delegate(hook_names, payload, timeout=5.0):

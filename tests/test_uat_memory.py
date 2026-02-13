@@ -351,7 +351,7 @@ class TestUATSessionScoping:
             "session_id": "session-aaa",
         })
         await HANDLERS["omega_store"]({
-            "content": "Session BBB memory about setting up the development environment for the backend service",
+            "content": "Session BBB memory about setting up the development environment for Element1 project",
             "event_type": "lesson_learned",
             "session_id": "session-bbb",
         })
@@ -460,10 +460,9 @@ class TestUATPreferenceManagement:
         assert "Test User" in text or "Developer" in text
 
     @pytest.mark.asyncio
-    async def test_save_profile_empty_returns_current(self):
-        """UAT: save_profile with empty dict returns current profile (read mode)."""
+    async def test_save_profile_empty_is_noop(self):
+        """UAT: save_profile with empty dict is a no-op (returns current profile)."""
         result = await HANDLERS["omega_save_profile"]({"profile": {}})
-        # Empty dict is falsy, so handler falls through to read mode
         assert not _is_error(result)
 
 

@@ -45,6 +45,40 @@ _captured_count = 0
 MAX_CAPTURES_PER_SESSION = 20
 
 
+def _summarize_content(prompt: str, max_len: int = 60) -> str:
+    """Extract a concise summary from the prompt for the echo line."""
+    # Strip common prefixes like "Decision: " or "Lesson: "
+    text = re.sub(r"^(Decision|Lesson):\s*", "", prompt, flags=re.IGNORECASE).strip()
+    # Take first sentence or first max_len chars
+    first_sentence = re.split(r"[.!?\n]", text)[0].strip()
+    if len(first_sentence) <= max_len:
+        return first_sentence
+    return first_sentence[:max_len].rsplit(" ", 1)[0] + "..."
+
+
+def _echo_capture(result: str, event_type: str, prompt: str):
+    """Print a 1-line capture confirmation visible to the user.
+
+    Parses bridge.auto_capture() return value to distinguish:
+    - New capture → [OMEGA] Captured: decision about X
+    - Evolution   → [OMEGA] Memory evolved: added insight to existing memory
+    - Dedup/Block → silent (no output)
+    """
+    if not result:
+        return
+
+    summary = _summarize_content(prompt)
+
+    if "Memory Evolved" in result:
+        # Extract evolution number from "Evolution #N"
+        evo_match = re.search(r"Evolution #(\d+)", result)
+        evo_num = evo_match.group(1) if evo_match else "?"
+        print(f"[OMEGA] Memory evolved: {event_type} updated (evolution #{evo_num}) — {summary}")
+    elif "Memory Captured" in result:
+        print(f"[OMEGA] Captured: {event_type} — {summary}")
+    # Dedup/Blocked → stay silent
+
+
 def _detect_decision(prompt: str) -> bool:
     """Check if prompt contains a decision pattern."""
     if len(prompt) < MIN_PROMPT_LENGTH:
@@ -86,7 +120,7 @@ def main():
     if _detect_decision(prompt):
         try:
             from omega.bridge import auto_capture
-            auto_capture(
+            result = auto_capture(
                 content=f"Decision: {prompt[:500]}",
                 event_type="decision",
                 metadata={"source": "auto_capture_hook", "project": cwd},
@@ -94,6 +128,7 @@ def main():
                 project=cwd,
             )
             _captured_count += 1
+            _echo_capture(result, "decision", prompt)
         except ImportError:
             pass
         except Exception:
@@ -110,7 +145,7 @@ def main():
 
         try:
             from omega.bridge import auto_capture
-            auto_capture(
+            result = auto_capture(
                 content=f"Lesson: {prompt[:500]}",
                 event_type="lesson_learned",
                 metadata={"source": "auto_capture_hook", "project": cwd},
@@ -118,6 +153,7 @@ def main():
                 project=cwd,
             )
             _captured_count += 1
+            _echo_capture(result, "lesson", prompt)
         except ImportError:
             pass
         except Exception:

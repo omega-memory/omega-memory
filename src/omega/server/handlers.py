@@ -88,7 +88,16 @@ async def handle_omega_store(arguments: dict) -> dict:
         return mcp_response(result)
     except Exception as e:
         logger.error("omega_store failed: %s", e)
-        return mcp_error("Failed to store memory")
+        import traceback
+        tb = traceback.format_exc()
+        logger.error("omega_store traceback: %s", tb)
+        # Write to debug file for investigation
+        try:
+            with open("/tmp/omega_store_debug.log", "a") as f:
+                f.write(f"--- omega_store failed ---\n{tb}\n")
+        except Exception:
+            pass
+        return mcp_error(f"Failed to store memory: {e}")
 
 
 # ============================================================================

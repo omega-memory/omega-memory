@@ -5,7 +5,7 @@ All notable changes to OMEGA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-02-13
+## [0.5.0] - 2026-02-13
 
 ### Initial Open Source Release
 
@@ -38,4 +38,4 @@ OMEGA — persistent memory for AI coding agents. First public release under Apa
 - `omega query/store/remember` — CLI access to memory
 - Plugin architecture via entry points for extensibility
 
-[0.1.0]: https://github.com/omega-memory/core/releases/tag/v0.1.0
+[0.5.0]: https://github.com/omega-memory/core/releases/tag/v0.5.0

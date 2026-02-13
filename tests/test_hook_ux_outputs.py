@@ -182,6 +182,7 @@ class TestHealthPulse:
 
         mock_store = MagicMock()
         mock_store.edge_count.return_value = edge_count
+        mock_store.count.return_value = overrides.get("node_count", 50)
         mock_store.get_last_capture_time.return_value = last_ts
 
         captured = StringIO()
@@ -205,7 +206,7 @@ class TestHealthPulse:
 
     def test_edge_count_thousands_separator(self, fake_home, tmp_omega_dir):
         output = self._run_main_capture(fake_home, tmp_omega_dir, edge_count=12345)
-        assert "**Edges:** 12,345" in output
+        assert "12,345 edges" in output
 
     def test_last_capture_never(self, fake_home, tmp_omega_dir):
         output = self._run_main_capture(fake_home, tmp_omega_dir, last_ts=None)
@@ -228,7 +229,7 @@ class TestHealthPulse:
     def test_full_health_line_format(self, fake_home, tmp_omega_dir):
         output = self._run_main_capture(fake_home, tmp_omega_dir, edge_count=50)
         assert "**Health:**" in output
-        assert "**Edges:**" in output
+        assert "**Graph:**" in output
         assert "**Last capture:**" in output
 
 
