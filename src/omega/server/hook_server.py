@@ -3417,9 +3417,8 @@ def _log_push_event(project: str, branch: str, session_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Handler dispatch table — core handlers are always available; commercial
-# handlers (coordination, etc.) are loaded when present in the monorepo
-# or provided by plugins (e.g. omega-pro).
+# Handler dispatch table — core handlers are always available; additional
+# handlers (coordination, etc.) are loaded when present or provided by plugins.
 # ---------------------------------------------------------------------------
 
 # Core memory handlers — always shipped with omega-memory
@@ -3430,7 +3429,7 @@ _CORE_HOOK_HANDLERS = {
     "auto_capture": handle_auto_capture,
 }
 
-# Commercial handlers — present in monorepo, becomes plugin-provided in open-core
+# Additional handlers — loaded when available, or provided by plugins
 _COMMERCIAL_HOOK_HANDLERS = {
     "coord_session_start": handle_coord_session_start,
     "coord_session_stop": handle_coord_session_stop,

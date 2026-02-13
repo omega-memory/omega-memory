@@ -305,13 +305,13 @@ class SQLiteStore:
         "decision":         (0.8, 0.6, 0.5, 1.0, 2.0),  # Decisions chain to prior decisions
         "lesson_learned":   (1.5, 0.8, 0.5, 0.8, 1.0),  # Abstract knowledge = semantic
         "user_preference":  (0.6, 1.0, 1.5, 0.3, 0.3),  # Keyword + preference boost
-        # --- LongMemEval question-type profiles (benchmark) ---
-        "single-session-assistant":  (1.0, 1.0, 1.0, 1.0, 1.0),  # 98.2% — at ceiling
-        "single-session-user":       (1.0, 1.1, 1.2, 1.0, 1.0),  # 94.3% — slight word boost
-        "knowledge-update":          (0.8, 1.3, 1.5, 1.0, 1.0),  # 85.9% — word match for exact fact
-        "single-session-preference": (0.8, 1.0, 1.5, 1.0, 1.0),  # 83.3% — preference keywords
-        "multi-session":             (1.3, 1.0, 1.3, 1.0, 1.0),  # 74.1% — broad vec + word recall
-        "temporal-reasoning":        (1.0, 1.3, 1.3, 1.0, 1.0),  # ~70% — text/word for event IDs
+        # --- Question-type retrieval profiles ---
+        "single-session-assistant":  (1.0, 1.0, 1.0, 1.0, 1.0),
+        "single-session-user":       (1.0, 1.1, 1.2, 1.0, 1.0),
+        "knowledge-update":          (0.8, 1.3, 1.5, 1.0, 1.0),
+        "single-session-preference": (0.8, 1.0, 1.5, 1.0, 1.0),
+        "multi-session":             (1.3, 1.0, 1.3, 1.0, 1.0),
+        "temporal-reasoning":        (1.0, 1.3, 1.3, 1.0, 1.0),
         # --- Fallback ---
         "_default":         (1.0, 1.0, 1.0, 1.0, 1.0),  # Preserves current behavior
     }

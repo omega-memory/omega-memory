@@ -12,8 +12,6 @@ from pathlib import Path
 
 OMEGA_DIR = Path.home() / ".omega"
 OMEGA_CACHE = Path.home() / ".cache" / "omega"
-MAGMA_DIR = Path.home() / ".magma"
-MAGMA_GRAPHS = Path.home() / ".claude" / "magma"
 BGE_MODEL_DIR = OMEGA_CACHE / "models" / "bge-small-en-v1.5-onnx"
 MINILM_MODEL_DIR = OMEGA_CACHE / "models" / "all-MiniLM-L6-v2-onnx"
 # Primary model dir — bge-small-en-v1.5, falls back to all-MiniLM-L6-v2
@@ -611,17 +609,7 @@ def cmd_setup(args):
                 print("  TIP: Run 'omega setup --download-model' to upgrade to bge-small-en-v1.5")
                 steps_done.append("Embedding model (downloaded)")
 
-    # 3. Check for existing MAGMA model and symlink
-    gnosis_model = Path.home() / ".cache" / "gnosis" / "models" / "all-MiniLM-L6-v2-onnx"
-    minilm_model_path = MINILM_MODEL_DIR / "model.onnx"
-    if gnosis_model.exists() and not minilm_model_path.exists() and not (BGE_MODEL_DIR / "model.onnx").exists():
-        print(f"  Found existing model at {gnosis_model}, creating symlink...")
-        if MINILM_MODEL_DIR.exists():
-            shutil.rmtree(MINILM_MODEL_DIR)
-        MINILM_MODEL_DIR.symlink_to(gnosis_model)
-        print("  Symlinked to existing model")
-
-    # 4. Create default config
+    # 3. Create default config
     config_path = OMEGA_DIR / "config.json"
     if not config_path.exists():
         config = {
@@ -788,87 +776,6 @@ def cmd_status(args):
         print_kv([("Cloud", "not configured")])
 
     print()
-
-
-def cmd_migrate(args):
-    """Migrate data from MAGMA (~/.magma/) to OMEGA (~/.omega/). Non-destructive copy."""
-    print("Migrating MAGMA data to OMEGA...")
-
-    OMEGA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    (OMEGA_DIR / "graphs").mkdir(exist_ok=True, mode=0o700)
-
-    copied = 0
-
-    # Copy store.jsonl
-    src = MAGMA_DIR / "store.jsonl"
-    dst = OMEGA_DIR / "store.jsonl"
-    if src.exists() and not dst.exists():
-        shutil.copy2(src, dst)
-        print(f"  Copied store.jsonl ({src.stat().st_size / 1024:.1f} KB)")
-        copied += 1
-    elif src.exists() and dst.exists():
-        print(f"  Skipping store.jsonl (already exists in {OMEGA_DIR})")
-    else:
-        print(f"  No store.jsonl found at {src}")
-
-    # Copy facts.jsonl
-    src = MAGMA_DIR / "facts.jsonl"
-    dst = OMEGA_DIR / "facts.jsonl"
-    if src.exists() and not dst.exists():
-        shutil.copy2(src, dst)
-        print("  Copied facts.jsonl")
-        copied += 1
-
-    # Copy profile.json
-    src = MAGMA_DIR / "profile.json"
-    dst = OMEGA_DIR / "profile.json"
-    if src.exists() and not dst.exists():
-        shutil.copy2(src, dst)
-        print("  Copied profile.json")
-        copied += 1
-
-    # Copy config.json (update storage_path)
-    src = MAGMA_DIR / "config.json"
-    dst = OMEGA_DIR / "config.json"
-    if src.exists() and not dst.exists():
-        config = json.loads(src.read_text())
-        # Update paths
-        for key in list(config.keys()):
-            if isinstance(config[key], str):
-                config[key] = config[key].replace(".magma", ".omega").replace("gnosis", "omega")
-        dst.write_text(json.dumps(config, indent=2))
-        print("  Copied config.json (paths updated)")
-        copied += 1
-
-    # Copy graph state files
-    if MAGMA_GRAPHS.exists():
-        for graph_file in MAGMA_GRAPHS.glob("*.json"):
-            dst = OMEGA_DIR / "graphs" / graph_file.name
-            if not dst.exists():
-                shutil.copy2(graph_file, dst)
-                print(f"  Copied graph: {graph_file.name}")
-                copied += 1
-
-    # Symlink ONNX model if available from gnosis
-    gnosis_model = Path.home() / ".cache" / "gnosis" / "models" / "all-MiniLM-L6-v2-onnx"
-    omega_model = OMEGA_CACHE / "models" / "all-MiniLM-L6-v2-onnx"
-    if gnosis_model.exists() and not omega_model.exists():
-        omega_model.parent.mkdir(parents=True, exist_ok=True)
-        omega_model.symlink_to(gnosis_model)
-        print(f"  Symlinked ONNX model from {gnosis_model}")
-        copied += 1
-
-    if copied > 0:
-        print(f"\nMigration complete! Copied {copied} files.")
-    else:
-        print("\nNothing to migrate (all files already exist or no MAGMA data found).")
-    print("Original MAGMA data is untouched.")
-
-    # Auto-reingest into graph system
-    store_path = OMEGA_DIR / "store.jsonl"
-    if store_path.exists():
-        print("\nIngesting store.jsonl into graph system...")
-        cmd_reingest(args)
 
 
 def cmd_reingest(args):
@@ -1893,7 +1800,6 @@ def main():
     doctor_parser = subparsers.add_parser("doctor", help="Verify installation: import, model, database")
     doctor_parser.add_argument("--client", choices=["claude-code"], help="Include client-specific checks (MCP, hooks)")
 
-    subparsers.add_parser("migrate", help="Copy MAGMA data to OMEGA (non-destructive)")
     migrate_db_parser = subparsers.add_parser("migrate-db", help="Migrate JSON graphs to SQLite backend")
     migrate_db_parser.add_argument("--force", action="store_true", help="Overwrite existing SQLite database")
     subparsers.add_parser("reingest", help="Load store.jsonl entries into graph system")
@@ -1992,7 +1898,6 @@ def main():
         "setup": cmd_setup,
         "status": cmd_status,
         "doctor": cmd_doctor,
-        "migrate": cmd_migrate,
         "migrate-db": cmd_migrate_db,
         "reingest": cmd_reingest,
         "consolidate": cmd_consolidate,
