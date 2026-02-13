@@ -5,6 +5,16 @@ All notable changes to OMEGA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-13
+
+### Forgetting Intelligence
+
+- **Forgetting Audit Trail** — every deletion logged with reason (TTL, LRU, consolidation, feedback, user). New `omega_forgetting_log` tool to query the log.
+- **Decay Curves** — old unaccessed memories rank lower in search results. Preferences and errors exempt. Floor at 0.35.
+- **Conflict Detection** — contradictions auto-detected on store. Decisions auto-resolve (newest wins), lessons get flagged for manual review.
+
+26 MCP tools total (+1). 31 new tests for forgetting intelligence features.
+
 ## [0.5.0] - 2026-02-13
 
 ### Initial Open Source Release
@@ -38,4 +48,5 @@ OMEGA — persistent memory for AI coding agents. First public release under Apa
 - `omega query/store/remember` — CLI access to memory
 - Plugin architecture via entry points for extensibility
 
+[0.6.0]: https://github.com/omega-memory/core/releases/tag/v0.6.0
 [0.5.0]: https://github.com/omega-memory/core/releases/tag/v0.5.0
