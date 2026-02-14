@@ -1248,7 +1248,16 @@ def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> 
     profile = get_profile()
     node_count = db.node_count()
 
-    return {
+    # Check for missing embedding model
+    warnings = []
+    from omega.graphs import get_active_backend
+    if get_active_backend() is None:
+        warnings.append(
+            "Embedding model not found — semantic search is disabled. "
+            "Run 'omega setup' to download the model (~90 MB)."
+        )
+
+    result = {
         "greeting": f"Welcome back! You have {node_count} memories stored.",
         "recent_memories": [
             {
@@ -1265,6 +1274,9 @@ def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> 
         "profile": profile,
         "memory_count": node_count,
     }
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 def get_session_context(
