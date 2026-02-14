@@ -377,6 +377,18 @@ def cmd_query(args):
             else:
                 print(f'No results for "{query_text}" ({elapsed:.2f}s)')
 
+            # Warn if semantic search is degraded
+            from omega.graphs import get_active_backend
+            if get_active_backend() is None:
+                print(
+                    "\n  NOTE: Semantic search unavailable — results use text matching only.",
+                    file=sys.stderr,
+                )
+                print(
+                    "  Run 'omega setup' to download the embedding model.",
+                    file=sys.stderr,
+                )
+
 
 _CLI_TYPE_MAP = {
     "memory": "memory",

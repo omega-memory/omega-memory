@@ -5,6 +5,12 @@ All notable changes to OMEGA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-02-14
+
+### Fixed
+
+- **Missing model warning** — when the ONNX embedding model is not downloaded, OMEGA now shows a clear actionable error ("Run 'omega setup' to download the model") instead of silently falling back to degraded text-only search. Warnings appear in CLI queries, model loading, and the MCP welcome briefing.
+
 ## [0.7.1] - 2026-02-14
 
 ### Fixed
@@ -83,6 +89,7 @@ OMEGA — persistent memory for AI coding agents. First public release under Apa
 - `omega query/store/remember` — CLI access to memory
 - Plugin architecture via entry points for extensibility
 
+[0.7.2]: https://github.com/omega-memory/core/releases/tag/v0.7.2
 [0.7.1]: https://github.com/omega-memory/core/releases/tag/v0.7.1
 [0.7.0]: https://github.com/omega-memory/core/releases/tag/v0.7.0
 [0.6.1]: https://github.com/omega-memory/core/releases/tag/v0.6.1
