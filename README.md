@@ -6,7 +6,15 @@
 [![Tests](https://github.com/omega-memory/core/actions/workflows/test.yml/badge.svg)](https://github.com/omega-memory/core/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/omega-memory.svg)](https://pypi.org/project/omega-memory/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-Forgetting Intelligence included — memories decay, conflicts auto-resolve, every deletion is audited.
+
+## The Problem
+
+AI coding agents are stateless. Every new session starts from zero.
+
+- **Context loss.** Agents forget every decision, preference, and architectural choice between sessions. Developers spend 10-30 minutes per session re-explaining context that was already established.
+- **Repeated mistakes.** Without learning from past sessions, agents make the same errors over and over. They don't remember what worked, what failed, or why a particular approach was chosen.
+
+OMEGA gives AI coding agents long-term memory and cross-session learning — all running locally on your machine.
 
 <p align="center">
   <img src="assets/demo.gif" alt="OMEGA demo — cross-session memory recall" width="700">
@@ -18,63 +26,25 @@ Forgetting Intelligence included — memories decay, conflicts auto-resolve, eve
 
 ```bash
 pip install omega-memory
-
-# Set up (creates ~/.omega/, downloads embedding model, registers MCP server)
 omega setup
-
-# Verify
 omega doctor
 ```
 
-### From Source
+## What Happens Next
 
-```bash
-git clone https://github.com/omega-memory/core.git
-cd omega
-pip install -e ".[dev]"
-omega setup
-```
+After `omega setup`, OMEGA works in the background. No commands to learn.
 
-`omega setup` will:
-1. Create `~/.omega/` directory
-2. Download the ONNX embedding model (~90 MB) to `~/.cache/omega/models/`
-3. Register `omega-memory` as an MCP server in `~/.claude.json`
-4. Install session hooks in `~/.claude/settings.json`
-5. Add a managed `<!-- OMEGA:BEGIN -->` block to `~/.claude/CLAUDE.md`
+**Auto-capture** — When you make a decision or debug an issue, OMEGA detects it and stores it automatically.
 
-All changes are idempotent — running `omega setup` again won't duplicate entries.
+**Auto-surface** — When you edit a file or start a session, OMEGA surfaces relevant memories from past sessions — even ones you forgot about.
 
-## The Problem
+**Checkpoint & resume** — Stop mid-task, pick up in a new session exactly where you left off.
 
-AI coding agents are stateless. Every new session starts from zero.
+You can also explicitly tell Claude to remember things:
 
-- **Context loss.** Agents forget every decision, preference, and architectural choice between sessions. Developers spend 10-30 minutes per session re-explaining context that was already established.
-- **Repeated mistakes.** Without learning from past sessions, agents make the same errors over and over. They don't remember what worked, what failed, or why a particular approach was chosen.
+> "Remember that we use JWT tokens, not session cookies"
 
-OMEGA gives AI coding agents long-term memory and cross-session learning — all running locally on your machine.
-
-## 60-Second Quickstart
-
-OMEGA works through natural language — no API calls, no configuration. Just talk to Claude.
-
-**1. Tell Claude to remember something:**
-> "Remember that the auth system uses JWT tokens, not session cookies"
-
-Claude stores this as a permanent memory with semantic embeddings.
-
-**2. Close the session. Open a new one.**
-
-**3. Ask about it:**
-> "What did I decide about authentication?"
-
-OMEGA surfaces the relevant memory automatically:
-```
-Found 1 relevant memory:
-  [decision] "The auth system uses JWT tokens, not session cookies"
-  Stored 2 days ago | accessed 3 times
-```
-
-That's it. Memories persist across sessions, accumulate over time, and are surfaced automatically when relevant — even if you don't explicitly ask.
+But the real value is what OMEGA does without being asked.
 
 ## Examples
 
@@ -128,23 +98,19 @@ No more re-debugging the same issue.
 
 ## Key Features
 
+- **Auto-Capture & Surfacing** — Hook system automatically captures decisions and lessons, and surfaces relevant memories before edits, at session start, and during work.
+
 - **Persistent Memory** — Stores decisions, lessons, error patterns, and preferences with semantic search. Your agent recalls what matters without you re-explaining everything each session.
 
 - **Semantic Search** — bge-small-en-v1.5 embeddings + sqlite-vec for fast, accurate retrieval. Finds relevant memories even when the wording is different.
 
 - **Cross-Session Learning** — Lessons, preferences, and error patterns accumulate over time. Agents learn from past mistakes and build on previous decisions.
 
-- **Auto-Capture & Surfacing** — Hook system automatically captures important context and surfaces relevant memories before edits, at session start, and during work.
+- **Forgetting Intelligence** — Memories decay naturally over time, conflicts auto-resolve, and every deletion is audited. Preferences and error patterns are exempt from decay.
 
 - **Graph Relationships** — Memories are linked with typed edges (related, supersedes, contradicts). Traverse the knowledge graph to find connected context.
 
 - **Encryption at Rest** *(optional)* — AES-256-GCM encrypted storage with macOS Keychain integration. `pip install omega-memory[encrypt]`
-
-- **Forgetting Audit Trail** — Every deletion logged with reason (TTL, LRU, consolidation, feedback, user). Query the log anytime.
-
-- **Decay Curves** — Old unaccessed memories rank lower automatically. Preferences and errors never decay. Floor at 0.35.
-
-- **Conflict Detection** — Contradictions auto-detected on store. Decisions auto-resolve, lessons get flagged.
 
 - **Plugin Architecture** — Extensible via entry points. Add custom tools and handlers through the plugin system.
 
@@ -161,10 +127,6 @@ No more re-debugging the same issue.
 | Intelligent forgetting | Yes | No | No | No |
 | Free & open source | Yes (Apache-2.0) | Freemium | Freemium | Bundled |
 
-## Open Source
-
-OMEGA is fully open source under Apache-2.0. All 25 memory tools, semantic search, hooks, forgetting intelligence, graph relationships, encryption, and the plugin system are free.
-
 ## Compatibility
 
 | Client | Support Level | Setup |
@@ -176,7 +138,10 @@ OMEGA is fully open source under Apache-2.0. All 25 memory tools, semantic searc
 
 Requires Python 3.11+. macOS and Linux supported. Windows via WSL.
 
-## Architecture
+<details>
+<summary><strong>Architecture & Advanced Details</strong></summary>
+
+### Architecture
 
 ```
                ┌─────────────────────┐
@@ -186,7 +151,7 @@ Requires Python 3.11+. macOS and Linux supported. Windows via WSL.
                           │ stdio/MCP
                ┌──────────▼──────────┐
                │   OMEGA MCP Server   │
-               │   25 memory tools    │
+               │   26 memory tools    │
                └──────────┬──────────┘
                           │
                ┌──────────▼──────────┐
@@ -196,11 +161,11 @@ Requires Python 3.11+. macOS and Linux supported. Windows via WSL.
                └──────────────────────┘
 ```
 
-Single database, modular handlers. Additional tools available via the plugin system. No separate daemons, no microservices.
+Single database, modular handlers. Additional tools available via the plugin system.
 
-## MCP Tools Reference
+### MCP Tools Reference
 
-OMEGA runs as an MCP server inside Claude Code. Once installed, 25 memory tools are available. Additional tools can be added via the plugin system.
+26 memory tools are available as an MCP server. Additional tools can be added via plugins.
 
 | Tool | What it does |
 |------|-------------|
@@ -219,7 +184,7 @@ OMEGA runs as an MCP server inside Claude Code. Once installed, 25 memory tools 
 | `omega_resume_task` | Resume a previously checkpointed task |
 | `omega_forgetting_log` | Query the forgetting audit trail (deletions with reasons) |
 
-## CLI
+### CLI
 
 | Command | Description |
 |---------|-------------|
@@ -238,10 +203,7 @@ OMEGA runs as an MCP server inside Claude Code. Once installed, 25 memory tools 
 | `omega logs` | Show recent hook errors |
 | `omega migrate-db` | Migrate legacy JSON to SQLite |
 
-<details>
-<summary><strong>Advanced Details</strong></summary>
-
-### Hooks (4 hooks, 4 handlers)
+### Hooks
 
 All hooks dispatch via `fast_hook.py` → daemon UDS socket, with fail-open semantics.
 
@@ -285,6 +247,24 @@ All hooks dispatch via `fast_hook.py` → daemon UDS socket, with fail-open sema
 - Startup: ~31 MB RSS
 - After first query (ONNX model loaded): ~337 MB RSS
 - Database: ~10.5 MB for ~242 memories
+
+### Install from Source
+
+```bash
+git clone https://github.com/omega-memory/core.git
+cd omega
+pip install -e ".[dev]"
+omega setup
+```
+
+`omega setup` will:
+1. Create `~/.omega/` directory
+2. Download the ONNX embedding model (~90 MB) to `~/.cache/omega/models/`
+3. Register `omega-memory` as an MCP server in `~/.claude.json`
+4. Install session hooks in `~/.claude/settings.json`
+5. Add a managed `<!-- OMEGA:BEGIN -->` block to `~/.claude/CLAUDE.md`
+
+All changes are idempotent — running `omega setup` again won't duplicate entries.
 
 </details>
 
