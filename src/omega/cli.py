@@ -695,11 +695,19 @@ def cmd_setup(args):
                 subprocess.run([sys.executable, str(script), str(MINILM_MODEL_DIR)], check=True)
             else:
                 try:
-                    hf_base = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx"
-                    for fname in ["model.onnx", "tokenizer.json", "config.json", "tokenizer_config.json", "vocab.txt"]:
+                    hf_repo = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main"
+                    # model.onnx lives under onnx/, tokenizer/config files are at repo root
+                    files = {
+                        "model.onnx": f"{hf_repo}/onnx/model.onnx",
+                        "tokenizer.json": f"{hf_repo}/tokenizer.json",
+                        "config.json": f"{hf_repo}/config.json",
+                        "tokenizer_config.json": f"{hf_repo}/tokenizer_config.json",
+                        "vocab.txt": f"{hf_repo}/vocab.txt",
+                    }
+                    for fname, url in files.items():
                         target = MINILM_MODEL_DIR / fname
                         if not target.exists():
-                            _download_file(f"{hf_base}/{fname}", target)
+                            _download_file(url, target)
                 except Exception as e:
                     errors.append(e)
                     print(f"  ERROR: Model download failed: {e}")
