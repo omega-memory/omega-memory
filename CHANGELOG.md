@@ -5,6 +5,18 @@ All notable changes to OMEGA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-02-14
+
+### Added
+
+- **`omega status --json`** — machine-readable JSON output for scripted access to memory count, DB size, model status, and vector search availability.
+- **`omega export`** — export memories to a JSON file, with optional `--type` filter (e.g. `omega export --type decision decisions.json`).
+- **`omega import`** — import memories from a JSON file, with optional `--clear` to replace existing data.
+
+### Changed
+
+- **CONTRIBUTING.md** — expanded with full dev setup, test commands, code style guide, MCP server testing instructions, project structure, and PR process.
+
 ## [0.7.3] - 2026-02-14
 
 ### Fixed
@@ -95,6 +107,7 @@ OMEGA — persistent memory for AI coding agents. First public release under Apa
 - `omega query/store/remember` — CLI access to memory
 - Plugin architecture via entry points for extensibility
 
+[0.8.0]: https://github.com/omega-memory/core/releases/tag/v0.8.0
 [0.7.3]: https://github.com/omega-memory/core/releases/tag/v0.7.3
 [0.7.2]: https://github.com/omega-memory/core/releases/tag/v0.7.2
 [0.7.1]: https://github.com/omega-memory/core/releases/tag/v0.7.1
