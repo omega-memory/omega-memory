@@ -7,6 +7,7 @@
 [![PyPI](https://img.shields.io/pypi/v/omega-memory.svg)](https://pypi.org/project/omega-memory/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![LongMemEval](https://img.shields.io/badge/LongMemEval-95.4%25%20(%231%20overall)-brightgreen.svg)](https://omegamax.co/benchmarks)
+[![Star History](https://img.shields.io/github/stars/omega-memory/core?style=social)](https://github.com/omega-memory/core)
 
 ## The Problem
 
@@ -127,14 +128,14 @@ No more re-debugging the same issue.
 
 | Feature | OMEGA | Mem0 | Zep/Graphiti | Letta | Claude Memory |
 |---------|:-----:|:----:|:-----------:|:-----:|:------------:|
-| MCP Tools | 26 | 9 (cloud) / 4 (local) | 9-10 | 7 (community) | 0 |
+| MCP Tools | 25 | 9 (cloud) / 4 (local) | 9-10 | 7 (community) | 0 |
 | Local-first (no cloud) | Yes | No (API key required) | No (Neo4j required) | Yes | Yes |
 | Semantic search | Yes | Yes | Yes | Yes | No |
 | Cross-session learning | Yes | Yes | Yes | Yes | Limited |
 | Auto-capture & surfacing | Yes | Yes (cloud) | Cloud only | No | Partial |
 | Intelligent forgetting | Yes | No | No | No | No |
 | Checkpoint / Resume | Yes | No | No | No | No |
-| Zero external dependencies | Yes (SQLite + ONNX) | No | No | No | Yes |
+| Zero external services | Yes (SQLite + ONNX) | No (API key required) | No (Neo4j required) | Yes | Yes |
 | LongMemEval score | **95.4% (#1)** | Not published | 71.2% | Not published | Not published |
 | License | Apache-2.0 | Freemium | BSD-3 | Apache-2.0 | Proprietary |
 
@@ -142,7 +143,7 @@ Sources: [Mem0 docs](https://docs.mem0.ai), [Zep/Graphiti paper](https://arxiv.o
 
 ## Benchmark
 
-OMEGA scores **95.4% (466/500, task-averaged)** on [LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025), an academic benchmark that tests long-term memory across 6 categories: information extraction, multi-session reasoning, temporal reasoning, knowledge updates, and preference tracking. This is the **#1 score on the leaderboard**.
+OMEGA scores **95.4% task-averaged** on [LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025), an academic benchmark that tests long-term memory across 5 categories: information extraction, multi-session reasoning, temporal reasoning, knowledge updates, and preference tracking. Raw accuracy is 466/500 (93.2%). Task-averaged scoring (mean of per-category accuracies) is the standard methodology used by other systems on the leaderboard. This is the **#1 score on the leaderboard**.
 
 | System | Score | Notes |
 |--------|------:|-------|
@@ -155,7 +156,7 @@ Details and methodology at [omegamax.co/benchmarks](https://omegamax.co/benchmar
 
 ## Compatibility
 
-| Client | 26 MCP Tools | Auto-Capture Hooks | Setup Command |
+| Client | 25 MCP Tools | Auto-Capture Hooks | Setup Command |
 |--------|:------------:|:------------------:|---------------|
 | Claude Code | Yes | Yes | `omega setup` |
 | Cursor | Yes | No | `omega setup --client cursor` |
@@ -163,9 +164,31 @@ Details and methodology at [omegamax.co/benchmarks](https://omegamax.co/benchmar
 | Zed | Yes | No | `omega setup --client zed` |
 | Any MCP Client | Yes | No | Manual config (see docs) |
 
-All clients get full access to 26 memory tools. Auto-capture hooks (automatic memory surfacing and context capture) require Claude Code.
+All clients get full access to all memory tools. Auto-capture hooks (automatic memory surfacing and context capture) require Claude Code.
 
 Requires Python 3.11+. macOS and Linux supported. Windows via WSL.
+
+## Remote / SSH Setup
+
+Claude Code's SSH support lets you run your agent on a remote server from any device. OMEGA makes that server **remember everything** across sessions and reconnections.
+
+```bash
+# On your remote server (any Linux VPS — no GPU needed)
+pip install omega-memory
+omega setup
+omega doctor
+```
+
+That's it. Every SSH session — from your laptop, phone, or tablet — now has full memory of every previous session on that server.
+
+**Why this matters:**
+
+- **Device-agnostic memory** — SSH in from any device, OMEGA's memory graph is on the server waiting for you
+- **Survives disconnects** — SSH drops? Reconnect and `omega_resume_task` picks up exactly where you left off
+- **Always-on accumulation** — A cloud VM running 24/7 means your memory graph grows continuously
+- **Team-ready** — Multiple developers SSH to the same server? OMEGA tracks who's working on what with file claims, handoff notes, and peer messaging
+
+**Requirements:** Any VPS with Python 3.11+ (~337 MB RAM after first query). SQLite + CPU-only ONNX embeddings — zero external services.
 
 <details>
 <summary><strong>Architecture & Advanced Details</strong></summary>
@@ -180,7 +203,7 @@ Requires Python 3.11+. macOS and Linux supported. Windows via WSL.
                           │ stdio/MCP
                ┌──────────▼──────────┐
                │   OMEGA MCP Server   │
-               │   26 memory tools    │
+               │   25 memory tools    │
                └──────────┬──────────┘
                           │
                ┌──────────▼──────────┐
@@ -194,24 +217,26 @@ Single database, modular handlers. Additional tools available via the plugin sys
 
 ### MCP Tools Reference
 
-26 memory tools are available as an MCP server. Additional tools can be added via plugins.
+25 memory tools are available as an MCP server. Additional tools can be added via plugins.
 
 | Tool | What it does |
 |------|-------------|
-| `omega_remember` | Store a permanent memory ("remember this") |
-| `omega_store` | Store typed memory (decision, lesson, error, summary) |
-| `omega_query` | Semantic search with tag filters and contextual re-ranking |
-| `omega_phrase_search` | Exact phrase search via FTS5 |
+| `omega_store` | Store typed memory (decision, lesson, error, preference, summary) |
+| `omega_query` | Semantic or phrase search with tag filters and contextual re-ranking |
 | `omega_lessons` | Cross-session lessons ranked by access count |
 | `omega_welcome` | Session briefing with recent memories and profile |
+| `omega_profile` | Read or update the user profile |
+| `omega_checkpoint` | Save task state for cross-session continuity |
+| `omega_resume_task` | Resume a previously checkpointed task |
+| `omega_similar` | Find memories similar to a given one |
+| `omega_traverse` | Walk the relationship graph |
 | `omega_compact` | Cluster and summarize related memories |
 | `omega_consolidate` | Prune stale memories, cap summaries, clean edges |
 | `omega_timeline` | Memories grouped by day |
-| `omega_similar` | Find memories similar to a given one |
-| `omega_traverse` | Walk the relationship graph |
-| `omega_checkpoint` | Save task state for cross-session continuity |
-| `omega_resume_task` | Resume a previously checkpointed task |
-| `omega_forgetting_log` | Query the forgetting audit trail (deletions with reasons) |
+| `omega_remind` | Set time-based reminders |
+| `omega_feedback` | Rate surfaced memories (helpful, unhelpful, outdated) |
+
+Plus 11 more tools for health checks, backup/restore, stats, editing, and deletion. See `tool_schemas.py` for the full list.
 
 ### CLI
 
@@ -281,7 +306,7 @@ All hooks dispatch via `fast_hook.py` → daemon UDS socket, with fail-open sema
 
 ```bash
 git clone https://github.com/omega-memory/core.git
-cd omega
+cd core
 pip install -e ".[dev]"
 omega setup
 ```
@@ -329,6 +354,10 @@ pip uninstall omega-memory
 ```
 
 Manually remove OMEGA entries from `~/.claude/settings.json` and the `<!-- OMEGA:BEGIN -->` block from `~/.claude/CLAUDE.md`.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=omega-memory/core&type=Date)](https://star-history.com/#omega-memory/core&Date)
 
 ## Contributing
 
