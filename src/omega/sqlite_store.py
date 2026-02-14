@@ -45,6 +45,31 @@ _last_cleanup: Optional[float] = None
 _CLEANUP_INTERVAL = 3600  # seconds
 
 # ---------------------------------------------------------------------------
+# SQLite retry — handles multi-process write contention on shared omega.db.
+# WAL mode + busy_timeout handle most cases, but under heavy contention
+# (3+ MCP server processes) the busy_timeout can still expire. This wrapper
+# retries with exponential backoff before surfacing the error.
+# ---------------------------------------------------------------------------
+_DB_RETRY_ATTEMPTS = 3
+_DB_RETRY_BASE_DELAY = 1.0  # seconds
+
+
+def _retry_on_locked(fn, *args, **kwargs):
+    """Call fn with retry on 'database is locked' OperationalError."""
+    for attempt in range(_DB_RETRY_ATTEMPTS):
+        try:
+            return fn(*args, **kwargs)
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e) and attempt < _DB_RETRY_ATTEMPTS - 1:
+                delay = _DB_RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning("database is locked (attempt %d/%d), retrying in %.1fs",
+                               attempt + 1, _DB_RETRY_ATTEMPTS, delay)
+                _time.sleep(delay)
+            else:
+                raise
+
+
+# ---------------------------------------------------------------------------
 # Query result cache — avoids re-running vector + FTS5 pipeline for repeated
 # queries within a short window (e.g., surface_memories on sequential edits).
 # Invalidated on any write (store/delete/update).
@@ -400,7 +425,7 @@ class SQLiteStore:
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA cache_size=-16000")  # 16MB cache
         conn.execute("PRAGMA mmap_size=33554432")  # 32MB memory-mapped I/O
-        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA busy_timeout=30000")  # 30s — handles multi-process contention
         conn.execute("PRAGMA foreign_keys=ON")
 
         # Try to load sqlite-vec extension
@@ -601,6 +626,19 @@ class SQLiteStore:
         c.commit()
 
     # ------------------------------------------------------------------
+    # Resilient commit — retries on multi-process lock contention
+    # ------------------------------------------------------------------
+
+    def _commit(self) -> None:
+        """Commit with retry on 'database is locked'.
+
+        WAL mode + busy_timeout=30s handles most contention, but under
+        heavy multi-process load (3+ MCP servers) the timeout can still
+        expire.  This retries with exponential backoff before giving up.
+        """
+        _retry_on_locked(self._conn.commit)
+
+    # ------------------------------------------------------------------
     # Core CRUD
     # ------------------------------------------------------------------
 
@@ -675,7 +713,7 @@ class SQLiteStore:
                     "UPDATE memories SET access_count = access_count + 1 WHERE node_id = ?",
                     (canonical_existing[0],),
                 )
-                self._conn.commit()
+                self._commit()
                 self.stats.setdefault("dedup_canonical", 0)
                 self.stats["dedup_canonical"] += 1
                 return canonical_existing[0]
@@ -692,7 +730,7 @@ class SQLiteStore:
                 self._conn.execute(
                     "UPDATE memories SET access_count = access_count + 1 WHERE node_id = ?", (existing[0],)
                 )
-                self._conn.commit()
+                self._commit()
                 self.stats.setdefault("dedup_exact", 0)
                 self.stats["dedup_exact"] += 1
                 return existing[0]
@@ -712,7 +750,7 @@ class SQLiteStore:
                                 self._conn.execute(
                                     "UPDATE memories SET access_count = access_count + 1 WHERE id = ?", (top_rowid,)
                                 )
-                                self._conn.commit()
+                                self._commit()
                                 self.stats.setdefault("dedup_skips", 0)
                                 self.stats["dedup_skips"] += 1
                                 return row[0]
@@ -781,7 +819,7 @@ class SQLiteStore:
                         (node_id, dep_id, now),
                     )
 
-            self._conn.commit()
+            self._commit()
             self.stats["stores"] += 1
 
         return node_id
@@ -804,7 +842,7 @@ class SQLiteStore:
                 "UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE node_id = ?",
                 (now, node_id),
             )
-            self._conn.commit()
+            self._commit()
 
             return self._row_to_result(row)
 
@@ -828,7 +866,7 @@ class SQLiteStore:
                 except Exception as e:
                     logger.debug("Failed to delete vec embedding rowid=%s: %s", rowid, e)
 
-            self._conn.commit()
+            self._commit()
         return True
 
     def node_count(self) -> int:
@@ -917,7 +955,7 @@ class SQLiteStore:
                         )
                     except Exception as e:
                         logger.debug("update_node: vec update failed: %s", e)
-            self._conn.commit()
+            self._commit()
         return True
 
     # ------------------------------------------------------------------
@@ -1477,7 +1515,7 @@ class SQLiteStore:
                 logger.warning(f"FTS5 search failed: {e} — attempting auto-repair")
                 try:
                     self._conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
-                    self._conn.commit()
+                    self._commit()
                     logger.info("FTS5 index rebuilt successfully")
                     # Retry the query once after repair
                     rows = self._conn.execute(
@@ -1684,7 +1722,7 @@ class SQLiteStore:
                     node_ids + node_ids,
                 )
 
-            self._conn.commit()
+            self._commit()
             return len(rows)
 
     # ------------------------------------------------------------------
@@ -1715,7 +1753,7 @@ class SQLiteStore:
                         logger.debug("Failed to delete vec embedding rowid=%s: %s", rowid, e)
                 self._conn.execute("DELETE FROM edges WHERE source_id = ? OR target_id = ?", (node_id, node_id))
 
-            self._conn.commit()
+            self._commit()
             return len(rows)
 
     def evict_lru(self, count: int = 1) -> int:
@@ -1740,7 +1778,7 @@ class SQLiteStore:
                 evicted += 1
 
             if evicted:
-                self._conn.commit()
+                self._commit()
             return evicted
 
     def consolidate(
@@ -1842,7 +1880,7 @@ class SQLiteStore:
                 except Exception as e:
                     logger.debug("Vec orphan check failed: %s", e)
 
-            self._conn.commit()
+            self._commit()
 
         stats["node_count_after"] = self.node_count()
         return stats
@@ -1935,7 +1973,7 @@ class SQLiteStore:
                         except Exception as e:
                             logger.warning(f"reembed failed for id={mem_id}: {e}")
                             failed += 1
-                    self._conn.commit()
+                    self._commit()
             except Exception as e:
                 logger.warning(f"reembed batch failed: {e}")
                 failed += len(batch_rows)
@@ -2042,7 +2080,7 @@ class SQLiteStore:
                 meta["flagged_for_review"] = True
 
             self._conn.execute("UPDATE memories SET metadata = ? WHERE node_id = ?", (json.dumps(meta), node_id))
-            self._conn.commit()
+            self._commit()
 
             return {
                 "node_id": node_id,
@@ -2064,7 +2102,7 @@ class SQLiteStore:
                        VALUES (?, ?, ?, ?, ?)""",
                     (source_id, target_id, edge_type, round(weight, 3), now),
                 )
-                self._conn.commit()
+                self._commit()
                 return True
             except Exception as e:
                 logger.debug(f"add_edge failed: {e}")
@@ -2207,7 +2245,7 @@ class SQLiteStore:
                 except Exception as e:
                     logger.debug("Vec table clear during import failed: %s", e)
             self._conn.execute("DELETE FROM edges")
-            self._conn.commit()
+            self._commit()
 
         imported = 0
         for node_data in nodes:
