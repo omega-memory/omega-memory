@@ -802,8 +802,75 @@ def cmd_setup(args):
         print("  Run 'omega doctor' to verify.")
 
 
+def _collect_status_data() -> dict:
+    """Collect status data as a dict (shared by human and JSON output)."""
+    data: dict = {}
+
+    db_path = OMEGA_DIR / "omega.db"
+    if db_path.exists():
+        import sqlite3
+
+        size_mb = db_path.stat().st_size / (1024 * 1024)
+        data["backend"] = "sqlite"
+        data["database"] = str(db_path)
+        data["db_size_mb"] = round(size_mb, 2)
+        try:
+            conn = sqlite3.connect(str(db_path))
+            data["memory_count"] = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+            try:
+                import sqlite_vec
+                conn.enable_load_extension(True)
+                sqlite_vec.load(conn)
+                conn.enable_load_extension(False)
+                data["vector_search"] = True
+            except Exception:
+                data["vector_search"] = False
+            conn.close()
+        except Exception as e:
+            data["error"] = str(e)
+    else:
+        store_path = OMEGA_DIR / "store.jsonl"
+        if store_path.exists():
+            size_mb = store_path.stat().st_size / (1024 * 1024)
+            with open(store_path) as f:
+                line_count = sum(1 for _ in f)
+            data["backend"] = "jsonl"
+            data["memory_count"] = line_count
+            data["db_size_mb"] = round(size_mb, 2)
+        else:
+            data["backend"] = None
+            data["memory_count"] = 0
+
+    bge_path = BGE_MODEL_DIR / "model.onnx"
+    minilm_path = MINILM_MODEL_DIR / "model.onnx"
+    if bge_path.exists():
+        data["model"] = "bge-small-en-v1.5"
+        data["model_size_mb"] = round(bge_path.stat().st_size / (1024 * 1024), 0)
+    elif minilm_path.exists():
+        data["model"] = "all-MiniLM-L6-v2"
+        data["model_size_mb"] = round(minilm_path.stat().st_size / (1024 * 1024), 0)
+    else:
+        data["model"] = None
+
+    data["profile"] = (OMEGA_DIR / "profile.json").exists()
+    config_path = OMEGA_DIR / "config.json"
+    if config_path.exists():
+        try:
+            data["config_version"] = json.loads(config_path.read_text()).get("version")
+        except Exception:
+            pass
+
+    return data
+
+
 def cmd_status(args):
     """Show OMEGA status: memory count, store size, model status."""
+    use_json = getattr(args, "json", False)
+
+    if use_json:
+        print(json.dumps(_collect_status_data(), indent=2))
+        return
+
     from omega.cli_ui import print_header, print_kv
 
     print_header("OMEGA Status")
@@ -1013,6 +1080,54 @@ def cmd_backup(args):
     for old in backups[5:]:
         old.unlink()
         print(f"  Rotated old backup: {old.name}")
+
+
+def cmd_export(args):
+    """Export memories to a JSON file."""
+    filepath = args.filepath
+    type_filter = getattr(args, "type", None)
+
+    from omega.bridge import _get_store
+
+    db = _get_store()
+
+    if type_filter:
+        # Filtered export: get all memories, filter by type, write manually
+        all_nodes = db.get_recent(limit=100000)
+        filtered = [
+            n for n in all_nodes
+            if (n.metadata or {}).get("event_type", "memory") == type_filter
+        ]
+        export_data = []
+        for n in filtered:
+            entry = {
+                "id": n.id,
+                "content": n.content,
+                "metadata": n.metadata or {},
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+            }
+            export_data.append(entry)
+        Path(filepath).write_text(json.dumps(export_data, indent=2, default=str))
+        print(f"Exported {len(export_data)} {type_filter} memories to {filepath}")
+    else:
+        from omega.bridge import export_memories
+        result = export_memories(filepath)
+        print(result)
+
+
+def cmd_import(args):
+    """Import memories from a JSON file."""
+    filepath = args.filepath
+    if not Path(filepath).exists():
+        print(f"File not found: {filepath}", file=sys.stderr)
+        sys.exit(1)
+
+    clear = getattr(args, "clear", False)
+
+    from omega.bridge import import_memories
+
+    result = import_memories(filepath, clear_existing=clear)
+    print(result)
 
 
 def cmd_compact(args):
@@ -1930,7 +2045,8 @@ def main():
         help="Configure a specific client (default: auto-detect Claude Code)"
     )
 
-    subparsers.add_parser("status", help="Show memory count, store size, model status")
+    status_parser = subparsers.add_parser("status", help="Show memory count, store size, model status")
+    status_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     doctor_parser = subparsers.add_parser("doctor", help="Verify installation: import, model, database")
     doctor_parser.add_argument("--client", choices=["claude-code"], help="Include client-specific checks (MCP, hooks)")
@@ -1943,6 +2059,16 @@ def main():
         "--prune-days", type=int, default=30, help="Prune entries older than N days with 0 access (default: 30)"
     )
     subparsers.add_parser("backup", help="Back up omega.db to ~/.omega/backups/ (keeps last 5)")
+    export_parser = subparsers.add_parser("export", help="Export memories to a JSON file")
+    export_parser.add_argument("filepath", help="Output file path (e.g. memories.json)")
+    export_parser.add_argument(
+        "-t", "--type",
+        choices=["memory", "decision", "lesson_learned", "error_pattern", "user_preference", "task_completion"],
+        help="Export only memories of this type",
+    )
+    import_parser = subparsers.add_parser("import", help="Import memories from a JSON file")
+    import_parser.add_argument("filepath", help="Input file path (e.g. memories.json)")
+    import_parser.add_argument("--clear", action="store_true", help="Clear existing memories before import")
     compact_parser = subparsers.add_parser("compact", help="Cluster and summarize related memories")
     compact_parser.add_argument(
         "-t",
@@ -2037,6 +2163,8 @@ def main():
         "reingest": cmd_reingest,
         "consolidate": cmd_consolidate,
         "backup": cmd_backup,
+        "export": cmd_export,
+        "import": cmd_import,
         "compact": cmd_compact,
         "stats": cmd_stats,
         "activity": cmd_activity,
