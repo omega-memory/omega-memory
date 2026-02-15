@@ -1,0 +1,81 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0/funding.schema.json",
+  "entity": {
+    "type": "organisation",
+    "role": "owner",
+    "name": "Kokyo Keisho Zaidan Stichting",
+    "email": "jason@omegamax.co",
+    "description": "Dutch foundation stewarding OMEGA, an open-source persistent memory system for AI agents. Apache 2.0 licensed, local-first, privacy-respecting.",
+    "webpageUrl": {
+      "url": "https://omegamax.co"
+    }
+  },
+  "projects": [
+    {
+      "guid": "omega-memory",
+      "name": "OMEGA Memory",
+      "description": "Open-source, local-first persistent memory and coordination system for AI agents. Built as an MCP server. Scores 95.4% on LongMemEval (#1 on the public leaderboard).",
+      "webpageUrl": {
+        "url": "https://omegamax.co"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/omega-memory/core"
+      },
+      "licenses": [
+        "spdx:Apache-2.0"
+      ],
+      "tags": [
+        "ai",
+        "mcp",
+        "memory",
+        "agents",
+        "python",
+        "local-first",
+        "privacy",
+        "open-source"
+      ]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "github-sponsors",
+        "type": "payment-provider",
+        "address": "https://github.com/sponsors/omega-memory"
+      },
+      {
+        "guid": "bitcoin",
+        "type": "other",
+        "description": "Bitcoin (BTC)",
+        "address": "3Lh99fU3fAbg8TLQ5DojHyAsHHYvKmYZkV"
+      }
+    ],
+    "plans": [
+      {
+        "guid": "one-time",
+        "status": "active",
+        "name": "One-time donation",
+        "description": "Support OMEGA development with a one-time contribution of any amount.",
+        "amount": 0,
+        "currency": "USD",
+        "frequency": "one-time",
+        "channels": [
+          "github-sponsors",
+          "bitcoin"
+        ]
+      },
+      {
+        "guid": "monthly",
+        "status": "active",
+        "name": "Monthly supporter",
+        "description": "Recurring monthly support for ongoing OMEGA development.",
+        "amount": 0,
+        "currency": "USD",
+        "frequency": "monthly",
+        "channels": [
+          "github-sponsors"
+        ]
+      }
+    ]
+  }
+}
