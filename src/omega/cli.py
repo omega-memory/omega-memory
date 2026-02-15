@@ -1464,11 +1464,22 @@ def cmd_validate(args):
 
 
 def cmd_serve(args):
-    """Run the OMEGA MCP server (stdio mode)."""
+    """Run the OMEGA MCP server (stdio or HTTP mode)."""
     import asyncio
-    from omega.server.mcp_server import main
 
-    asyncio.run(main())
+    if getattr(args, "http", False):
+        from omega.server.http_server import run_http, get_or_create_api_key
+
+        api_key = None if args.no_auth else (os.environ.get("OMEGA_API_KEY") or get_or_create_api_key())
+        if api_key:
+            print(f"API Key: {api_key[:8]}...")
+        print(f"Starting OMEGA HTTP server on {args.host}:{args.port}")
+        print(f"MCP endpoint: http://{args.host}:{args.port}/mcp")
+        asyncio.run(run_http(args.host, args.port, api_key))
+    else:
+        from omega.server.mcp_server import main
+
+        asyncio.run(main())
 
 
 def cmd_doctor(args):
@@ -1932,12 +1943,11 @@ def cmd_mobile(args):
 ## OMEGA Mobile Access Setup
 
 ### Prerequisites
-1. Install mcp-proxy: `pipx install mcp-proxy`
-2. Install Tailscale: `brew install tailscale && tailscale up`
+1. Install Tailscale: `brew install tailscale && tailscale up`
 
 ### Quick Start (4 steps)
 
-1. Start OMEGA HTTP proxy:
+1. Start OMEGA HTTP server:
    ```
    omega mobile serve
    ```
@@ -1955,9 +1965,11 @@ def cmd_mobile(args):
 4. Add to Claude mobile app:
    - Settings → MCP Servers → Add
    - URL: https://<your-tailscale-hostname>/mcp
+   - Header: X-API-Key: <your-key-from-~/.omega/api_key>
    - All OMEGA tools available from your phone!
 
 ### Security
+- API key authentication (stored in ~/.omega/api_key)
 - Tailscale uses WireGuard encryption (zero-trust mesh)
 - Only your enrolled devices can connect
 - No ports exposed to the public internet
@@ -1970,31 +1982,21 @@ def cmd_mobile(args):
 """)
 
     elif subcmd == "serve":
-        import subprocess
-        import sys
+        import asyncio
+        from omega.server.http_server import run_http, get_or_create_api_key
 
         port = args.port
         host = args.host
-        print(f"Starting OMEGA MCP proxy on {host}:{port}...")
+        api_key = os.environ.get("OMEGA_API_KEY") or get_or_create_api_key()
+        print(f"Starting OMEGA HTTP server on {host}:{port}...")
+        print(f"API Key: {api_key[:8]}...")
         print(f"Connect via: http://{host}:{port}/mcp")
         print("Press Ctrl+C to stop.\n")
 
         try:
-            subprocess.run(
-                [
-                    sys.executable, "-m", "mcp_proxy",
-                    "--transport", "streamablehttp",
-                    "--host", host,
-                    "--port", str(port),
-                    "--",
-                    sys.executable, "-m", "omega.server.mcp_server",
-                ],
-                check=True,
-            )
-        except FileNotFoundError:
-            print("Error: mcp-proxy not found. Install with: pipx install mcp-proxy")
+            asyncio.run(run_http(host, port, api_key))
         except KeyboardInterrupt:
-            print("\nProxy stopped.")
+            print("\nServer stopped.")
 
     else:
         print("Usage: omega mobile {setup|serve}")
@@ -2090,7 +2092,11 @@ def main():
     logs_parser.add_argument("-n", "--lines", type=int, default=50, help="Number of lines to show (default: 50)")
     validate_parser = subparsers.add_parser("validate", help="Validate omega.db integrity (SQLite + FTS5)")
     validate_parser.add_argument("--repair", action="store_true", help="Attempt to repair FTS5 index if corrupted")
-    subparsers.add_parser("serve", help="Run MCP server (stdio mode)")
+    serve_parser = subparsers.add_parser("serve", help="Run MCP server (stdio or HTTP)")
+    serve_parser.add_argument("--http", action="store_true", help="Run as HTTP server (Streamable HTTP transport)")
+    serve_parser.add_argument("--port", type=int, default=8787, help="HTTP port (default: 8787)")
+    serve_parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    serve_parser.add_argument("--no-auth", action="store_true", help="Disable API key authentication")
 
     # --- Reminder commands (experimental) ---
     remind_parser = subparsers.add_parser("remind", help="Manage time-based reminders (experimental)")
