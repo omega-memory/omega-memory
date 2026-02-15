@@ -10,7 +10,6 @@ Dependencies (starlette, uvicorn) are already transitive deps of mcp>=1.0.0.
 """
 
 import contextlib
-import os
 import secrets
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -91,6 +90,7 @@ def create_http_app(server, api_key: str | None = None) -> Starlette:
             Mount("/mcp", app=mcp_asgi_app),
             Route("/health", endpoint=health),
             Route("/.well-known/mcp.json", endpoint=server_card),
+            Route("/.well-known/mcp/server-card.json", endpoint=server_card),
         ],
         lifespan=lifespan,
     )
