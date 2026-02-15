@@ -1,9 +1,20 @@
 # Changelog
 
-All notable changes to OMEGA will be documented in this file.
+All notable changes to OMEGA (`omega-memory`) will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.9.0] - 2026-02-15
+
+### Added
+
+- **Contradiction detection** — ingest-side intelligence that auto-detects conflicting memories on store. When a new decision contradicts an existing one, the older memory is automatically superseded with a `contradicts` relationship edge, keeping the knowledge graph consistent without manual cleanup.
+- **Atomic fact splitting** — compound memories (e.g. "Project uses React and deploys to Vercel") are automatically decomposed into individual fact nodes during ingestion, improving retrieval precision for targeted queries.
+- **Corpus hygiene** — automated deduplication of near-duplicate memories, reducing noise and token waste in search results over long-lived sessions.
+- **Compact MCP tool responses** — all MCP tool responses optimized for token efficiency, reducing context window consumption when agents interact with OMEGA.
 
 ## [0.8.0] - 2026-02-14
 
@@ -50,10 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.1] - 2026-02-14
 
-### Fixed
-
-- **SQLite lock contention** — increased `busy_timeout` from 5s to 30s and added retry-with-backoff on all write paths. Fixes "database is locked" errors when multiple Claude Code sessions share the same `omega.db`.
-
 ### Added
 
 - **Entity auto-capture** — `resolve_project_entity()` wired into `bridge.auto_capture()` for automatic entity scoping.
@@ -64,15 +71,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - README restructured: leads with problem statement, demo GIF, and examples section.
 
+### Fixed
+
+- **SQLite lock contention** — increased `busy_timeout` from 5s to 30s and added retry-with-backoff on all write paths. Fixes "database is locked" errors when multiple Claude Code sessions share the same `omega.db`.
+
 ## [0.6.0] - 2026-02-13
 
-### Forgetting Intelligence
+### Added
 
-- **Forgetting Audit Trail** — every deletion logged with reason (TTL, LRU, consolidation, feedback, user). New `omega_forgetting_log` tool to query the log.
+- **Forgetting Audit Trail** — every deletion logged with reason (TTL, LRU, consolidation, feedback, user).
 - **Decay Curves** — old unaccessed memories rank lower in search results. Preferences and errors exempt. Floor at 0.35.
 - **Conflict Detection** — contradictions auto-detected on store. Decisions auto-resolve (newest wins), lessons get flagged for manual review.
-
-26 MCP tools total (+1). 31 new tests for forgetting intelligence features.
+- 31 new tests for forgetting intelligence features.
 
 ## [0.5.0] - 2026-02-13
 
@@ -107,11 +117,13 @@ OMEGA — persistent memory for AI coding agents. First public release under Apa
 - `omega query/store/remember` — CLI access to memory
 - Plugin architecture via entry points for extensibility
 
-[0.8.0]: https://github.com/omega-memory/core/releases/tag/v0.8.0
-[0.7.3]: https://github.com/omega-memory/core/releases/tag/v0.7.3
-[0.7.2]: https://github.com/omega-memory/core/releases/tag/v0.7.2
-[0.7.1]: https://github.com/omega-memory/core/releases/tag/v0.7.1
-[0.7.0]: https://github.com/omega-memory/core/releases/tag/v0.7.0
-[0.6.1]: https://github.com/omega-memory/core/releases/tag/v0.6.1
-[0.6.0]: https://github.com/omega-memory/core/releases/tag/v0.6.0
+[Unreleased]: https://github.com/omega-memory/core/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/omega-memory/core/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/omega-memory/core/compare/v0.7.3...v0.8.0
+[0.7.3]: https://github.com/omega-memory/core/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/omega-memory/core/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/omega-memory/core/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/omega-memory/core/compare/v0.6.1...v0.7.0
+[0.6.1]: https://github.com/omega-memory/core/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/omega-memory/core/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/omega-memory/core/releases/tag/v0.5.0

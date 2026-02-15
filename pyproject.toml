@@ -1,7 +1,7 @@
 [project]
 name = "omega-memory"
-version = "0.8.2"
-description = "Persistent memory for AI coding agents"
+version = "0.9.0"
+description = "Persistent memory for AI coding agents — #1 on LongMemEval benchmark"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -36,8 +36,12 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Database",
+    "Typing :: Typed",
+    "Environment :: Console",
+    "Framework :: MCP",
 ]
 dependencies = [
     "mcp>=1.0.0",

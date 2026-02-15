@@ -2,12 +2,14 @@
 
 **The memory system for AI coding agents.** Decisions, lessons, and context that persist across sessions.
 
+<!-- Demo GIF will be added here -->
+
+[![PyPI version](https://img.shields.io/pypi/v/omega-memory.svg)](https://pypi.org/project/omega-memory/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://github.com/omega-memory/core/actions/workflows/test.yml/badge.svg)](https://github.com/omega-memory/core/actions/workflows/test.yml)
-[![PyPI](https://img.shields.io/pypi/v/omega-memory.svg)](https://pypi.org/project/omega-memory/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/omega-memory/core?style=social)](https://github.com/omega-memory/core)
+[![Tests](https://github.com/omega-memory/core/actions/workflows/test.yml/badge.svg)](https://github.com/omega-memory/core/actions/workflows/test.yml)
 [![LongMemEval](https://img.shields.io/badge/LongMemEval-95.4%25%20(%231%20overall)-brightgreen.svg)](https://omegamax.co/benchmarks)
-[![Star History](https://img.shields.io/github/stars/omega-memory/core?style=social)](https://github.com/omega-memory/core)
 
 mcp-name: io.github.omega-memory/core
 
@@ -26,13 +28,15 @@ OMEGA gives AI coding agents long-term memory and cross-session learning — all
 
 ---
 
-## Quick Install
+## Quick Start
 
 ```bash
-pip install omega-memory
-omega setup                          # auto-detects Claude Code
-omega doctor
+pip install omega-memory    # install from PyPI
+omega setup                 # auto-configures Claude Code + hooks
+omega doctor                # verify everything works
 ```
+
+That's it. Start a new Claude Code session and say **"Remember that we always use early returns and never nest more than 2 levels."** Close the session. Open a new one and ask **"What are my code style preferences?"** -- OMEGA recalls it instantly.
 
 **Using Cursor, Windsurf, or Zed?**
 
@@ -128,20 +132,24 @@ No more re-debugging the same issue.
 
 ## How OMEGA Compares
 
-| Feature | OMEGA | Mem0 | Zep/Graphiti | Letta | Claude Memory |
-|---------|:-----:|:----:|:-----------:|:-----:|:------------:|
-| MCP Tools | 25 | 9 (cloud) / 4 (local) | 9-10 | 7 (community) | 0 |
-| Local-first (no cloud) | Yes | No (API key required) | No (Neo4j required) | Yes | Yes |
-| Semantic search | Yes | Yes | Yes | Yes | No |
-| Cross-session learning | Yes | Yes | Yes | Yes | Limited |
-| Auto-capture & surfacing | Yes | Yes (cloud) | Cloud only | No | Partial |
-| Intelligent forgetting | Yes | No | No | No | No |
-| Checkpoint / Resume | Yes | No | No | No | No |
-| Zero external services | Yes (SQLite + ONNX) | No (API key required) | No (Neo4j required) | Yes | Yes |
-| LongMemEval score | **95.4% (#1)** | Not published | 71.2% | Not published | Not published |
-| License | Apache-2.0 | Freemium | BSD-3 | Apache-2.0 | Proprietary |
+| Feature | OMEGA | MEMORY.md | Mem0 | Basic MCP Memory |
+|---------|:-----:|:---------:|:----:|:----------------:|
+| Persistent across sessions | Yes | Yes | Yes | Yes |
+| Semantic search | Yes | No (file grep only) | Yes | Varies |
+| Auto-capture (no manual effort) | Yes | No (manual edits) | Yes (cloud) | No |
+| Contradiction detection | Yes | No | No | No |
+| Checkpoint & resume tasks | Yes | No | No | No |
+| Graph relationships | Yes | No | No | No |
+| Cross-session learning | Yes | Limited | Yes | No |
+| Intelligent forgetting | Yes | No (grows forever) | No | No |
+| Local-only (no cloud/API keys) | Yes | Yes | No (API key required) | Yes |
+| Setup complexity | `pip install` + `omega setup` | Zero (built-in) | API key + cloud config | Manual JSON config |
 
-Sources: [Mem0 docs](https://docs.mem0.ai), [Zep/Graphiti paper](https://arxiv.org/abs/2501.13987), [Letta MCP](https://github.com/letta-ai/letta/tree/main/letta/mcp), [LongMemEval benchmark](https://github.com/xiaowu0162/LongMemEval). Full comparison with methodology at [omegamax.co/compare](https://omegamax.co/compare).
+**MEMORY.md** is Claude Code's built-in markdown file -- great for simple notes, but no search, no auto-capture, and it grows unbounded. **Mem0** offers strong semantic memory but requires cloud API keys and has no checkpoint/resume or contradiction detection. **Basic MCP memory servers** (e.g., simple key-value stores) provide persistence but lack the intelligence layer -- no semantic search, no forgetting, no graph.
+
+OMEGA gives you the best of all worlds: fully local, zero cloud dependencies, with intelligent features that go far beyond simple storage.
+
+Full comparison with methodology at [omegamax.co/compare](https://omegamax.co/compare).
 
 ## Benchmark
 
