@@ -8,6 +8,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/omega-memory/core?style=social)](https://github.com/omega-memory/core)
 [![Tests](https://github.com/omega-memory/core/actions/workflows/test.yml/badge.svg)](https://github.com/omega-memory/core/actions/workflows/test.yml)
 [![LongMemEval](https://img.shields.io/badge/LongMemEval-95.4%25%20(%231%20overall)-brightgreen.svg)](https://omegamax.co/benchmarks)
+[![smithery badge](https://smithery.ai/badge/omegamemory/omega-memory)](https://smithery.ai/server/omegamemory/omega-memory)
 
 mcp-name: io.github.omega-memory/core
 
