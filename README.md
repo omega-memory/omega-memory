@@ -2,8 +2,6 @@
 
 **The memory system for AI coding agents.** Decisions, lessons, and context that persist across sessions.
 
-<!-- Demo GIF will be added here -->
-
 [![PyPI version](https://img.shields.io/pypi/v/omega-memory.svg)](https://pypi.org/project/omega-memory/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -23,7 +21,7 @@ AI coding agents are stateless. Every new session starts from zero.
 OMEGA gives AI coding agents long-term memory and cross-session learning — all running locally on your machine.
 
 <p align="center">
-  <img src="assets/demo.gif" alt="OMEGA demo — cross-session memory recall" width="700">
+  <img src="https://raw.githubusercontent.com/omega-memory/core/main/assets/demo.gif" alt="OMEGA demo — cross-session memory recall" width="700">
 </p>
 
 ---
