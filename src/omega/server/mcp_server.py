@@ -98,6 +98,7 @@ _write_timestamps: collections.deque = collections.deque()
 
 _WRITE_TOOLS = frozenset({
     "omega_store", "omega_checkpoint", "omega_remind",
+    "omega_memory", "omega_maintain",
     "omega_profile_set", "omega_entity_create", "omega_entity_update",
     "omega_ingest_document", "omega_task_create",
     "omega_file_claim", "omega_branch_claim",

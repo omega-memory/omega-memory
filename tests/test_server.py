@@ -29,7 +29,7 @@ def test_handler_count():
         assert name in HANDLERS, f"Missing handler for schema: {name}"
     # Handlers may have aliases (backward compat) so len(HANDLERS) >= len(TOOL_SCHEMAS)
     assert len(HANDLERS) >= len(TOOL_SCHEMAS)
-    assert len(TOOL_SCHEMAS) == 25  # 24 base + weekly_digest
+    assert len(TOOL_SCHEMAS) == 12  # 12 consolidated action-discriminated composites
 
 
 # ============================================================================
@@ -514,6 +514,6 @@ def test_tool_schemas_docstring_count():
     import omega.server.tool_schemas as ts
     import inspect
     source = inspect.getsource(ts)
-    # Docstring says "25 tools"
-    assert "25 tools" in source
-    assert len(TOOL_SCHEMAS) == 25  # 24 base + weekly_digest
+    # Docstring says "12 tools"
+    assert "12 tools" in source
+    assert len(TOOL_SCHEMAS) == 12  # 12 consolidated action-discriminated composites

@@ -102,12 +102,16 @@ async def handle_omega_store(arguments: dict) -> dict:
 
 
 async def handle_omega_query(arguments: dict) -> dict:
-    """Search memories — semantic (default) or exact phrase match."""
+    """Search memories — semantic, phrase, or timeline mode."""
+    mode = arguments.get("mode", "semantic")
+
+    # Timeline mode — delegate to timeline handler
+    if mode == "timeline":
+        return await handle_omega_timeline(arguments)
+
     query_text = arguments.get("query", "").strip()
     if not query_text:
         return mcp_error("query is required")
-
-    mode = arguments.get("mode", "semantic")
 
     # Phrase mode — delegate to bridge.phrase_search
     if mode == "phrase":
@@ -192,12 +196,17 @@ async def handle_omega_welcome(arguments: dict) -> dict:
 
 
 async def handle_omega_profile(arguments: dict) -> dict:
-    """Read or update the user profile.
+    """Read or update the user profile, or list preferences.
 
     If 'update' dict is provided, merges those fields and saves.
     Otherwise, returns the current profile.
     Also handles legacy omega_save_profile calls via 'profile' param.
     """
+    # Action-based routing for composite tool
+    action = arguments.get("action", "").strip()
+    if action == "list_preferences":
+        return await handle_omega_list_preferences(arguments)
+
     # Support legacy omega_save_profile param name
     update_data = arguments.get("update") or arguments.get("profile")
 
@@ -1018,24 +1027,100 @@ async def handle_omega_protocol(arguments: dict) -> dict:
 
 
 # ============================================================================
+# Composite Routing Handlers (action-discriminated)
+# ============================================================================
+
+
+async def handle_omega_memory(arguments: dict) -> dict:
+    """Route omega_memory composite to individual handlers by action."""
+    action = arguments.get("action", "").strip()
+    if action == "edit":
+        return await handle_omega_edit_memory(arguments)
+    elif action == "delete":
+        return await handle_omega_delete_memory(arguments)
+    elif action == "feedback":
+        return await handle_omega_feedback(arguments)
+    elif action == "similar":
+        return await handle_omega_similar(arguments)
+    elif action == "traverse":
+        return await handle_omega_traverse(arguments)
+    else:
+        return mcp_error(f"Unknown omega_memory action: {action!r}. Use: edit, delete, feedback, similar, traverse")
+
+
+async def handle_omega_remind_composite(arguments: dict) -> dict:
+    """Route omega_remind composite to individual handlers by action."""
+    action = arguments.get("action", "set").strip()
+    if action == "set":
+        return await handle_omega_remind(arguments)
+    elif action == "list":
+        return await handle_omega_remind_list(arguments)
+    elif action == "dismiss":
+        return await handle_omega_remind_dismiss(arguments)
+    else:
+        return mcp_error(f"Unknown omega_remind action: {action!r}. Use: set, list, dismiss")
+
+
+async def handle_omega_maintain(arguments: dict) -> dict:
+    """Route omega_maintain composite to individual handlers by action."""
+    action = arguments.get("action", "").strip()
+    if action == "health":
+        return await handle_omega_health(arguments)
+    elif action == "consolidate":
+        return await handle_omega_consolidate(arguments)
+    elif action == "compact":
+        return await handle_omega_compact(arguments)
+    elif action == "backup":
+        return await handle_omega_backup({**arguments, "mode": "export"})
+    elif action == "restore":
+        return await handle_omega_backup({**arguments, "mode": "import"})
+    elif action == "clear_session":
+        return await handle_omega_clear_session(arguments)
+    else:
+        return mcp_error(f"Unknown omega_maintain action: {action!r}. Use: health, consolidate, compact, backup, restore, clear_session")
+
+
+async def handle_omega_stats(arguments: dict) -> dict:
+    """Route omega_stats composite to individual handlers by action."""
+    action = arguments.get("action", "").strip()
+    if action == "types":
+        return await handle_omega_type_stats(arguments)
+    elif action == "sessions":
+        return await handle_omega_session_stats(arguments)
+    elif action == "digest":
+        return await handle_omega_weekly_digest(arguments)
+    else:
+        return mcp_error(f"Unknown omega_stats action: {action!r}. Use: types, sessions, digest")
+
+
+# ============================================================================
 # Handler Registry
 # ============================================================================
 
 HANDLERS: Dict[str, Any] = {
-    "omega_remember": lambda args: handle_omega_store(
-        {**args, "event_type": args.get("event_type", "user_preference")}
-    ),  # Alias — backward compat (defaults to user_preference like old remember)
+    # === 12 consolidated tools ===
     "omega_store": handle_omega_store,
     "omega_query": handle_omega_query,
     "omega_welcome": handle_omega_welcome,
+    "omega_protocol": handle_omega_protocol,
+    "omega_lessons": handle_omega_lessons,
+    "omega_checkpoint": handle_omega_checkpoint,
+    "omega_resume_task": handle_omega_resume_task,
+    "omega_memory": handle_omega_memory,
     "omega_profile": handle_omega_profile,
+    "omega_remind": handle_omega_remind_composite,
+    "omega_maintain": handle_omega_maintain,
+    "omega_stats": handle_omega_stats,
+    # === Backward compatibility aliases (old tool names -> handlers) ===
+    "omega_remember": lambda args: handle_omega_store(
+        {**args, "event_type": args.get("event_type", "user_preference")}
+    ),
     "omega_delete_memory": handle_omega_delete_memory,
     "omega_edit_memory": handle_omega_edit_memory,
     "omega_list_preferences": handle_omega_list_preferences,
     "omega_health": handle_omega_health,
     "omega_backup": handle_omega_backup,
-    "omega_lessons": handle_omega_lessons,
-    "omega_save_profile": handle_omega_profile,  # Alias — backward compat
+    "omega_save_profile": handle_omega_profile,
     "omega_feedback": handle_omega_feedback,
     "omega_clear_session": handle_omega_clear_session,
     "omega_similar": handle_omega_similar,
@@ -1045,14 +1130,10 @@ HANDLERS: Dict[str, Any] = {
     "omega_compact": handle_omega_compact,
     "omega_phrase_search": lambda args: handle_omega_query(
         {**args, "query": args.get("phrase", args.get("query", "")), "mode": "phrase"}
-    ),  # Alias — backward compat
-    "omega_checkpoint": handle_omega_checkpoint,
-    "omega_resume_task": handle_omega_resume_task,
+    ),
     "omega_type_stats": handle_omega_type_stats,
     "omega_session_stats": handle_omega_session_stats,
     "omega_weekly_digest": handle_omega_weekly_digest,
-    "omega_remind": handle_omega_remind,
     "omega_remind_list": handle_omega_remind_list,
     "omega_remind_dismiss": handle_omega_remind_dismiss,
-    "omega_protocol": handle_omega_protocol,
 }

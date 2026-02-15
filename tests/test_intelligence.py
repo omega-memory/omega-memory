@@ -246,16 +246,16 @@ class TestMCPHandlers:
         from omega.server.handlers import HANDLERS
         assert "omega_lessons" in HANDLERS  # merged cross_project_lessons into lessons
         assert "omega_backup" in HANDLERS  # merged export+import into backup
-        assert len(HANDLERS) == 28  # 24 base + 3 reminder tools + 1 weekly_digest
+        assert len(HANDLERS) == 32  # 12 consolidated + 20 backward-compat aliases
 
     def test_schema_count(self):
         """Verify schemas include expected tools."""
         from omega.server.tool_schemas import TOOL_SCHEMAS
         schema_names = {s["name"] for s in TOOL_SCHEMAS}
         assert "omega_lessons" in schema_names
-        assert "omega_backup" in schema_names
-        assert "omega_weekly_digest" in schema_names
-        assert len(TOOL_SCHEMAS) == 25  # 24 base + weekly_digest
+        assert "omega_maintain" in schema_names
+        assert "omega_stats" in schema_names
+        assert len(TOOL_SCHEMAS) == 12  # 12 consolidated action-discriminated composites
 
     def test_handler_schema_parity(self):
         """Every schema has a matching handler."""
