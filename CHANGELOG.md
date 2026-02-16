@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-02-16
+
+### Changed
+
+- **MCP is now an optional dependency.** `pip install omega-memory` installs the core library only (storage, retrieval, embeddings). For MCP server integration with Claude Code, Cursor, Windsurf, or Zed, install with `pip install omega-memory[server]`. This reduces the base install size and eliminates the MCP server process for users who only need the Python API.
+- **Expanded public Python API.** 9 new functions exported from the top-level `omega` package: `batch_store`, `record_feedback`, `deduplicate`, `get_session_context`, `get_activity_summary`, `create_reminder`, `list_reminders`, `dismiss_reminder`, `get_due_reminders`.
+
+### Added
+
+- **`omega setup --hooks-only`** configures Claude Code hooks and CLAUDE.md without registering the MCP server, saving ~600MB RAM per session. Hooks call bridge.py directly.
+- **Direct Python API** for scripts, CI/CD, and automation without running an MCP server:
+  ```python
+  from omega import store, query, remember
+  store("Always use TypeScript strict mode", "user_preference")
+  results = query("TypeScript preferences")
+  ```
+- MCP import guard in `mcp_server.py` prints a clear error message with install instructions if the `mcp` package is missing.
+
+### Migration
+
+If you use OMEGA with an MCP client (Claude Code, Cursor, etc.), update your install command:
+
+```bash
+# Before (0.9.x)
+pip install omega-memory
+
+# After (0.10.0+)
+pip install omega-memory[server]
+```
+
+If you only use OMEGA as a Python library, `pip install omega-memory` continues to work and is now lighter.
+
 ## [0.9.0] - 2026-02-15
 
 ### Added
@@ -117,7 +149,8 @@ OMEGA — persistent memory for AI coding agents. First public release under Apa
 - `omega query/store/remember` — CLI access to memory
 - Plugin architecture via entry points for extensibility
 
-[Unreleased]: https://github.com/omega-memory/omega-memory/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/omega-memory/omega-memory/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/omega-memory/omega-memory/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/omega-memory/omega-memory/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/omega-memory/omega-memory/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/omega-memory/omega-memory/compare/v0.7.2...v0.7.3
