@@ -1089,8 +1089,39 @@ async def handle_omega_stats(arguments: dict) -> dict:
         return await handle_omega_session_stats(arguments)
     elif action == "digest":
         return await handle_omega_weekly_digest(arguments)
+    elif action == "access_rate":
+        return await handle_omega_access_rate(arguments)
     else:
-        return mcp_error(f"Unknown omega_stats action: {action!r}. Use: types, sessions, digest")
+        return mcp_error(f"Unknown omega_stats action: {action!r}. Use: types, sessions, digest, access_rate")
+
+
+async def handle_omega_access_rate(arguments: dict) -> dict:
+    """Return access rate breakdown for memories."""
+    try:
+        from omega.bridge import access_rate_stats
+
+        stats = access_rate_stats()
+
+        output = "# Memory Access Rate\n\n"
+        output += f"- **Total memories:** {stats['total_memories']}\n"
+        output += f"- **Never accessed:** {stats['zero_access_count']} ({stats['never_accessed_pct']}%)\n"
+        output += f"- **Average access count:** {stats['avg_access_count']}\n\n"
+
+        output += "## By Event Type\n"
+        output += "| Type | Count | Avg Access | Never Accessed |\n"
+        output += "|------|-------|------------|----------------|\n"
+        for t in stats["by_type"]:
+            output += f"| {t['event_type']} | {t['count']} | {t['avg_access_count']} | {t['zero_access_count']} ({t['zero_access_pct']}%) |\n"
+
+        if stats["top_accessed"]:
+            output += "\n## Top 10 Most Accessed\n"
+            for m in stats["top_accessed"]:
+                output += f"- **{m['access_count']}x** [{m['event_type']}] {m['content']}\n"
+
+        return mcp_response(output)
+    except Exception as e:
+        logger.error("omega_access_rate failed: %s", e)
+        return mcp_error(f"Access rate query failed: {e}")
 
 
 # ============================================================================

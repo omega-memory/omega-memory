@@ -1060,6 +1060,7 @@ def handle_session_stop(payload: dict) -> dict:
             session_id=session_id,
             project=project,
             entity_id=entity_id,
+            agent_type="claude-code",
         )
     except Exception as e:
         _log_hook_error("session_stop", e)
@@ -2273,6 +2274,7 @@ def _capture_error(tool_output: str, session_id: str, project: str, *, entity_id
             session_id=session_id,
             project=project,
             entity_id=entity_id,
+            agent_type="claude-code",
         )
     except Exception as e:
         _log_hook_error("capture_error", e)

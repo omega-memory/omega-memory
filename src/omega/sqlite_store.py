@@ -1091,12 +1091,21 @@ class SQLiteStore:
                     vec_limit = max(limit * vec_mult, self._MIN_VEC_CANDIDATES)
                     vec_results = self._vec_query(query_emb, limit=vec_limit)
                     for rowid, distance in vec_results:
-                        row = self._conn.execute(
-                            """SELECT node_id, content, metadata, created_at,
-                                      access_count, last_accessed, ttl_seconds
-                               FROM memories WHERE id = ?""",
-                            (rowid,),
-                        ).fetchone()
+                        if entity_id:
+                            row = self._conn.execute(
+                                """SELECT node_id, content, metadata, created_at,
+                                          access_count, last_accessed, ttl_seconds
+                                   FROM memories WHERE id = ?
+                                   AND (entity_id = ? OR entity_id IS NULL)""",
+                                (rowid, entity_id),
+                            ).fetchone()
+                        else:
+                            row = self._conn.execute(
+                                """SELECT node_id, content, metadata, created_at,
+                                          access_count, last_accessed, ttl_seconds
+                                   FROM memories WHERE id = ?""",
+                                (rowid,),
+                            ).fetchone()
                         if row:
                             result = self._row_to_result(row)
                             similarity = 1.0 - distance
@@ -1470,16 +1479,29 @@ class SQLiteStore:
                 if len(words) >= 3:
                     bigrams = [f'"{words[i]} {words[i+1]}"' for i in range(len(words) - 1)]
                     fts_terms = fts_terms + " OR " + " OR ".join(bigrams)
-                rows = self._conn.execute(
-                    """SELECT m.node_id, m.content, m.metadata, m.created_at,
-                               m.access_count, m.last_accessed, m.ttl_seconds,
-                               f.rank
-                        FROM memories_fts f
-                        JOIN memories m ON f.rowid = m.id
-                        WHERE memories_fts MATCH ?
-                        ORDER BY f.rank LIMIT ?""",
-                    (fts_terms, limit * 3),
-                ).fetchall()
+                if entity_id:
+                    rows = self._conn.execute(
+                        """SELECT m.node_id, m.content, m.metadata, m.created_at,
+                                   m.access_count, m.last_accessed, m.ttl_seconds,
+                                   f.rank
+                            FROM memories_fts f
+                            JOIN memories m ON f.rowid = m.id
+                            WHERE memories_fts MATCH ?
+                            AND (m.entity_id = ? OR m.entity_id IS NULL)
+                            ORDER BY f.rank LIMIT ?""",
+                        (fts_terms, entity_id, limit * 3),
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        """SELECT m.node_id, m.content, m.metadata, m.created_at,
+                                   m.access_count, m.last_accessed, m.ttl_seconds,
+                                   f.rank
+                            FROM memories_fts f
+                            JOIN memories m ON f.rowid = m.id
+                            WHERE memories_fts MATCH ?
+                            ORDER BY f.rank LIMIT ?""",
+                        (fts_terms, limit * 3),
+                    ).fetchall()
 
                 if not rows:
                     return []
@@ -1518,16 +1540,29 @@ class SQLiteStore:
                     self._commit()
                     logger.info("FTS5 index rebuilt successfully")
                     # Retry the query once after repair
-                    rows = self._conn.execute(
-                        """SELECT m.node_id, m.content, m.metadata, m.created_at,
-                                   m.access_count, m.last_accessed, m.ttl_seconds,
-                                   f.rank
-                            FROM memories_fts f
-                            JOIN memories m ON f.rowid = m.id
-                            WHERE memories_fts MATCH ?
-                            ORDER BY f.rank LIMIT ?""",
-                        (fts_terms, limit * 3),
-                    ).fetchall()
+                    if entity_id:
+                        rows = self._conn.execute(
+                            """SELECT m.node_id, m.content, m.metadata, m.created_at,
+                                       m.access_count, m.last_accessed, m.ttl_seconds,
+                                       f.rank
+                                FROM memories_fts f
+                                JOIN memories m ON f.rowid = m.id
+                                WHERE memories_fts MATCH ?
+                                AND (m.entity_id = ? OR m.entity_id IS NULL)
+                                ORDER BY f.rank LIMIT ?""",
+                            (fts_terms, entity_id, limit * 3),
+                        ).fetchall()
+                    else:
+                        rows = self._conn.execute(
+                            """SELECT m.node_id, m.content, m.metadata, m.created_at,
+                                       m.access_count, m.last_accessed, m.ttl_seconds,
+                                       f.rank
+                                FROM memories_fts f
+                                JOIN memories m ON f.rowid = m.id
+                                WHERE memories_fts MATCH ?
+                                ORDER BY f.rank LIMIT ?""",
+                            (fts_terms, limit * 3),
+                        ).fetchall()
                     if not rows:
                         return []
                     results = []
@@ -1580,15 +1615,27 @@ class SQLiteStore:
     # Index-style lookups (replacing TypeIndex, SessionIndex)
     # ------------------------------------------------------------------
 
-    def get_by_type(self, event_type: str, limit: int = 100) -> List[MemoryResult]:
+    def get_by_type(
+        self, event_type: str, limit: int = 100, entity_id: Optional[str] = None
+    ) -> List[MemoryResult]:
         """Get memories by event type, sorted by recency."""
-        rows = self._conn.execute(
-            """SELECT node_id, content, metadata, created_at,
-                      access_count, last_accessed, ttl_seconds
-               FROM memories WHERE event_type = ?
-               ORDER BY created_at DESC LIMIT ?""",
-            (event_type, limit),
-        ).fetchall()
+        if entity_id:
+            rows = self._conn.execute(
+                """SELECT node_id, content, metadata, created_at,
+                          access_count, last_accessed, ttl_seconds
+                   FROM memories WHERE event_type = ?
+                   AND (entity_id = ? OR entity_id IS NULL)
+                   ORDER BY created_at DESC LIMIT ?""",
+                (event_type, entity_id, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT node_id, content, metadata, created_at,
+                          access_count, last_accessed, ttl_seconds
+                   FROM memories WHERE event_type = ?
+                   ORDER BY created_at DESC LIMIT ?""",
+                (event_type, limit),
+            ).fetchall()
         return [self._row_to_result(row) for row in rows]
 
     def get_by_session(self, session_id: str, limit: int = 100) -> List[MemoryResult]:
@@ -2031,11 +2078,22 @@ class SQLiteStore:
             warnings.append(f"Node count {count} exceeds max {max_nodes}")
             recommendations.append("Run omega consolidate to deduplicate and prune")
 
+        # Access rate tracking
+        zero_access = self._conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE access_count = 0"
+        ).fetchone()[0]
+        never_accessed_pct = (zero_access / count * 100) if count > 0 else 0
+        if never_accessed_pct > 80:
+            warnings.append(f"{never_accessed_pct:.0f}% of memories never accessed")
+            recommendations.append("Run omega_maintain(action='consolidate') to prune stale memories")
+
         return {
             "status": status,
             "memory_mb": rss_mb,
             "db_size_mb": round(db_size_mb, 2),
             "node_count": count,
+            "never_accessed_pct": round(never_accessed_pct, 1),
+            "zero_access_count": zero_access,
             "warnings": warnings,
             "recommendations": recommendations,
             "usage": {
@@ -2356,6 +2414,7 @@ class SQLiteStore:
         limit: int = 10,
         project_path: str = "",
         scope: str = "project",
+        entity_id: Optional[str] = None,
     ) -> List[MemoryResult]:
         """Exact substring search across memories."""
         conditions = []
@@ -2375,6 +2434,10 @@ class SQLiteStore:
         if project_path and scope == "project":
             conditions.append("(project IS NULL OR project = '' OR project = ?)")
             params.append(project_path)
+
+        if entity_id:
+            conditions.append("(entity_id = ? OR entity_id IS NULL)")
+            params.append(entity_id)
 
         params.append(limit)
 

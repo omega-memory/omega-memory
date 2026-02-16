@@ -205,7 +205,7 @@ TOOL_SCHEMAS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["types", "sessions", "digest"], "description": "Which stats to retrieve"},
+                "action": {"type": "string", "enum": ["types", "sessions", "digest", "access_rate"], "description": "Which stats to retrieve"},
                 "days": {"type": "integer", "description": "Days for digest (default 7)", "default": 7},
             },
             "required": ["action"],

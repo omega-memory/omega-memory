@@ -1016,7 +1016,7 @@ def query(
 
         results = db.query(
             enhanced,
-            limit=limit * 3 if (filter_tags or entity_id or agent_type) else limit,
+            limit=limit * 2 if (filter_tags or entity_id or agent_type) else limit,
             session_id=session_id,
             context_file=context_file or "",
             context_tags=context_tags,
@@ -1105,7 +1105,7 @@ def query_structured(
 
         results = db.query(
             enhanced,
-            limit=limit * 3 if (filter_tags or entity_id or agent_type) else limit,
+            limit=limit * 2 if (filter_tags or entity_id or agent_type) else limit,
             session_id=session_id,
             context_file=context_file or "",
             context_tags=context_tags,
@@ -2552,6 +2552,67 @@ def session_stats() -> Dict[str, int]:
     """Get memory counts grouped by session ID."""
     db = _get_store()
     return db.get_session_stats()
+
+
+def access_rate_stats() -> Dict[str, Any]:
+    """Get access rate breakdown: never-accessed count, by-type, top accessed."""
+    db = _get_store()
+    total = db.node_count()
+
+    zero_access = db._conn.execute(
+        "SELECT COUNT(*) FROM memories WHERE access_count = 0"
+    ).fetchone()[0]
+    never_accessed_pct = (zero_access / total * 100) if total > 0 else 0
+
+    # Breakdown by event_type: avg access_count per type
+    type_rows = db._conn.execute(
+        """SELECT event_type, COUNT(*) as cnt,
+                  AVG(access_count) as avg_access,
+                  SUM(CASE WHEN access_count = 0 THEN 1 ELSE 0 END) as zero_cnt
+           FROM memories
+           GROUP BY event_type
+           ORDER BY avg_access DESC"""
+    ).fetchall()
+    by_type = []
+    for row in type_rows:
+        by_type.append({
+            "event_type": row[0] or "unknown",
+            "count": row[1],
+            "avg_access_count": round(row[2], 2),
+            "zero_access_count": row[3],
+            "zero_access_pct": round(row[3] / row[1] * 100, 1) if row[1] > 0 else 0,
+        })
+
+    # Top 10 most-accessed memories
+    top_rows = db._conn.execute(
+        """SELECT node_id, content, access_count, event_type
+           FROM memories
+           WHERE access_count > 0
+           ORDER BY access_count DESC LIMIT 10"""
+    ).fetchall()
+    top_accessed = []
+    for row in top_rows:
+        top_accessed.append({
+            "id": row[0],
+            "content": row[1][:100],
+            "access_count": row[2],
+            "event_type": row[3] or "unknown",
+        })
+
+    # Overall average
+    avg_row = db._conn.execute(
+        "SELECT AVG(access_count) FROM memories"
+    ).fetchone()
+    avg_access = round(avg_row[0], 2) if avg_row[0] is not None else 0
+
+    return {
+        "total_memories": total,
+        "zero_access_count": zero_access,
+        "never_accessed_pct": round(never_accessed_pct, 1),
+        "avg_access_count": avg_access,
+        "by_type": by_type,
+        "top_accessed": top_accessed,
+    }
 
 
 # ---------------------------------------------------------------------------
