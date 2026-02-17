@@ -145,9 +145,11 @@ class TestCLIDoctor:
     """Verify omega doctor runs without crashing."""
 
     def test_doctor_runs(self):
+        src_dir = str(Path(__file__).resolve().parent.parent / "src")
+        env = {**os.environ, "PYTHONPATH": src_dir}
         result = subprocess.run(
             [sys.executable, "-m", "omega.cli", "doctor"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, env=env,
         )
         # Doctor may exit 0 or 1 depending on environment, but should not crash
         assert result.returncode in (0, 1)
