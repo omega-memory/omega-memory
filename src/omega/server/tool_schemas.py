@@ -68,12 +68,12 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "omega_welcome",
-        "description": "Get a session welcome briefing with recent relevant memories and user profile.",
+        "description": "Session startup briefing. Call at the beginning of every session to load recent context, active reminders, and user profile. Returns what the agent needs to continue where the last session left off.",
         "inputSchema": {"type": "object", "properties": {"session_id": {"type": "string"}, "project": {"type": "string"}}},
     },
     {
         "name": "omega_protocol",
-        "description": "Get your coordination playbook: dynamically assembled operating instructions. Call at session start (step 2 after omega_welcome) or when you need protocol guidance.",
+        "description": "Retrieve your operating rules and behavioral guidelines for this session. Returns context-sensitive instructions covering memory usage, coordination, reminders, and workflow. Call after omega_welcome at session start, or on-demand for a specific section.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -84,7 +84,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "omega_lessons",
-        "description": "Retrieve cross-session or cross-project lessons learned, ranked by verification count and access frequency.",
+        "description": "Retrieve lessons learned from past sessions to avoid repeating mistakes. Use before starting a task to check for known pitfalls. Results ranked by verification count and access frequency. Supports cross-project search.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -132,7 +132,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "omega_memory",
-        "description": "Manage individual memories: edit content, delete, give feedback (helpful/unhelpful/outdated), find similar memories, or traverse the relationship graph.",
+        "description": "Manage a specific memory by ID: edit its content, delete it, mark it as helpful/unhelpful/outdated, find similar memories, or traverse relationship edges. Use when acting on an individual memory rather than searching broadly.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -150,7 +150,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "omega_profile",
-        "description": "Read or update user profile, or list stored preferences. Default action is 'read'.",
+        "description": "Read or update the user's persistent profile (name, preferences, working style) or list all stored preferences. The profile persists across sessions and informs agent behavior. Default action is 'read'.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -178,7 +178,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "omega_maintain",
-        "description": "System maintenance: health checks, memory consolidation, compaction, backup/restore, and session cleanup.",
+        "description": "System housekeeping for the memory store. Use 'health' to check database size and integrity, 'consolidate' to prune stale memories, 'compact' to merge near-duplicates, 'backup'/'restore' for data safety, 'clear_session' to purge a session's data. Call periodically or when memory grows large.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -201,7 +201,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "omega_stats",
-        "description": "Memory analytics: type breakdown, session stats, or weekly digest.",
+        "description": "View analytics about stored memories: breakdown by type, per-session statistics, weekly activity digest, or access rate trends. Use to understand memory growth, usage patterns, and health over time.",
         "inputSchema": {
             "type": "object",
             "properties": {
