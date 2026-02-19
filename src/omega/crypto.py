@@ -5,8 +5,8 @@ When enabled, all graph JSON and JSONL entries are encrypted with Fernet
 (AES-128-CBC + HMAC-SHA256). The encryption key is derived from a
 machine-specific secret stored at ~/.omega/.key.
 
-Enable: OMEGA_ENCRYPT=1
-Disable: unset OMEGA_ENCRYPT (default)
+Enabled by default since v1.1.
+Disable: OMEGA_ENCRYPT=0
 
 The key file is created automatically on first use. Guard it with
 filesystem permissions (0600). Losing it means losing access to
@@ -36,8 +36,14 @@ def _key_path() -> Path:
 
 
 def is_enabled() -> bool:
-    """Check if encryption at rest is enabled."""
-    return os.environ.get("OMEGA_ENCRYPT", "").strip() in ("1", "true", "yes")
+    """Check if encryption at rest is enabled (on by default since v1.1).
+
+    Set OMEGA_ENCRYPT=0 to explicitly disable.
+    """
+    val = os.environ.get("OMEGA_ENCRYPT", "").strip().lower()
+    if val in ("0", "false", "no"):
+        return False
+    return True  # Default: enabled
 
 
 def reset_crypto_state() -> None:
@@ -119,21 +125,26 @@ def decrypt(data: str) -> str:
     If the data doesn't start with 'ENC:', it's returned as-is (plaintext).
     This allows transparent migration: old plaintext files are readable,
     new writes are encrypted.
+
+    Raises ValueError if decryption fails (bad key, corrupted data, or
+    cryptography package missing) so callers get a clear signal instead
+    of receiving raw ciphertext.
     """
     if not data.startswith("ENC:"):
         return data
 
     f = _get_fernet()
     if f is None:
-        logger.error("Cannot decrypt: encryption not available")
-        return data
+        raise ValueError(
+            "Cannot decrypt: cryptography package not available. "
+            "Install with: pip install cryptography"
+        )
 
     try:
         token = data[4:].encode("ascii")
         return f.decrypt(token).decode("utf-8")
     except Exception as e:
-        logger.error(f"Decryption failed: {e}")
-        return data
+        raise ValueError(f"Decryption failed: {e}") from e
 
 
 def encrypt_line(line: str) -> str:

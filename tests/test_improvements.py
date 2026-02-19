@@ -1,4 +1,5 @@
 """Tests for OMEGA SOTA improvements: graph traversal, contextual re-ranking, memory compaction."""
+import importlib.util
 import os
 import pytest
 
@@ -173,6 +174,10 @@ class TestContextualReranking:
             if python_result:
                 assert python_result[0].relevance >= results_with_ctx[-1].relevance
 
+    @pytest.mark.skipif(
+        not importlib.util.find_spec("sqlite_vec"),
+        reason="sqlite-vec not installed"
+    )
     def test_context_tags_boost(self, store):
         """Memories with matching tags should get a relevance boost."""
         store.store(

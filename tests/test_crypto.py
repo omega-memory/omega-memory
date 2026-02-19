@@ -32,9 +32,9 @@ def _reset_crypto():
 
 
 class TestIsEnabled:
-    def test_disabled_by_default(self, monkeypatch):
+    def test_enabled_by_default(self, monkeypatch):
         monkeypatch.delenv("OMEGA_ENCRYPT", raising=False)
-        assert is_enabled() is False
+        assert is_enabled() is True
 
     def test_enabled_with_1(self, monkeypatch):
         monkeypatch.setenv("OMEGA_ENCRYPT", "1")
@@ -52,9 +52,17 @@ class TestIsEnabled:
         monkeypatch.setenv("OMEGA_ENCRYPT", "0")
         assert is_enabled() is False
 
-    def test_disabled_with_empty(self, monkeypatch):
-        monkeypatch.setenv("OMEGA_ENCRYPT", "")
+    def test_disabled_with_false(self, monkeypatch):
+        monkeypatch.setenv("OMEGA_ENCRYPT", "false")
         assert is_enabled() is False
+
+    def test_disabled_with_no(self, monkeypatch):
+        monkeypatch.setenv("OMEGA_ENCRYPT", "no")
+        assert is_enabled() is False
+
+    def test_enabled_with_empty(self, monkeypatch):
+        monkeypatch.setenv("OMEGA_ENCRYPT", "")
+        assert is_enabled() is True
 
 
 # ============================================================================
@@ -64,14 +72,14 @@ class TestIsEnabled:
 
 class TestPlaintextPassthrough:
     def test_encrypt_returns_plaintext_when_disabled(self, monkeypatch):
-        monkeypatch.delenv("OMEGA_ENCRYPT", raising=False)
+        monkeypatch.setenv("OMEGA_ENCRYPT", "0")
         assert encrypt("hello world") == "hello world"
 
     def test_decrypt_returns_plaintext_without_prefix(self):
         assert decrypt("just plain text") == "just plain text"
 
     def test_encrypt_line_returns_line_when_disabled(self, monkeypatch):
-        monkeypatch.delenv("OMEGA_ENCRYPT", raising=False)
+        monkeypatch.setenv("OMEGA_ENCRYPT", "0")
         line = '{"content": "test"}'
         assert encrypt_line(line) == line
 
