@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-02-20
+
+### Added
+
+- Windows/WSL installation guide in README with step-by-step setup and 5 WSL-specific gotchas.
+- `src/omega/db_utils.py` shared SQLite retry helpers (`retry_on_locked`, `retry_write_on_locked`) for database-locked error recovery.
+
+### Fixed
+
+- SQLite connections in CLI commands now use `timeout=30` to prevent WAL lock hangs under multi-process contention. Doctor health checks use `timeout=5`.
+- `SESSION_START` surfacing thresholds broadened (0.60/0.45/0.15 to 0.45/0.40/0.10) for better context at session startup.
+- Three noise filters added to auto-capture: infrastructure events, zero-token outcomes, and JSON blob decisions.
+- Cross-session dedup exception for decisions (same decision restated across sessions now correctly deduplicates).
+- Shortened capture output messages ("Deduped", "Evolved") for cleaner hook output.
+- Lowered dedup thresholds: session summaries 0.95 to 0.75, decisions 0.85 to 0.80.
+- `exc_info=True` added to all `logger.error()` calls in bridge.py.
+
+## [0.10.4] - 2026-02-20
+
+### Added
+
+- Full `--json` test coverage for `query`, `status`, `timeline`, `stats`, and `activity` CLI commands (closes #9).
+
+### Changed
+
+- Session summary TTL changed from SHORT_TERM to EPHEMERAL (1h) to prevent accumulation.
+- Generic `memory` type TTL changed from LONG_TERM to SHORT_TERM (1d) for faster expiry.
+- `consolidate` prune_days default lowered from 30 to 14 days.
+- Added `exc_info=True` to all 30 `logger.error()` calls in handlers for better tracebacks.
+- Eliminated all `datetime.utcnow()` deprecation warnings (Python 3.12+).
+
 ## [0.10.3] - 2026-02-20
 
 ### Changed
