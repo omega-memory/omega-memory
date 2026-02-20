@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-02-20
+
+### Added
+
+- WAL checkpoint management: TRUNCATE on init, PASSIVE on close, and periodic PASSIVE checkpoint every N writes (configurable via `OMEGA_WAL_CHECKPOINT_INTERVAL` env var). Prevents unbounded WAL growth under multi-process contention.
+- Auto-backup on startup: creates a JSON backup when the most recent is >24h old, keeps max 5 rotated in `~/.omega/backups/`.
+- `_run_sql()` retry wrapper for individual SQL statements under lock contention.
+- Thread-safe query cache with `_cache_lock` protecting all reads/writes.
+- Smart partial cache invalidation: only evicts cache entries with trigram overlap >= 0.20 with new content, instead of full wipe.
+
+### Fixed
+
+- `find_similar()` now filters expired and superseded memories, with 2x over-fetch to maintain result count.
+
 ## [0.10.5] - 2026-02-20
 
 ### Added
