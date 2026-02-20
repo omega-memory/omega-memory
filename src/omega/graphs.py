@@ -310,15 +310,6 @@ def _get_embedding_model():
             f"ONNX dir: {_get_onnx_model_dir()}, "
             f"SentenceTransformers available: {_check_sentence_transformers()}"
         )
-        # User-visible warning on first failure only (not every retry)
-        if _get_embedding_model._attempt_count == 1 and _get_onnx_model_dir() is None:
-            import sys
-            print(
-                "\n  WARNING: ONNX embedding model not found.\n"
-                "  Semantic search is disabled — queries will use text matching only.\n"
-                "  Run 'omega setup' to download the model (~90 MB).\n",
-                file=sys.stderr,
-            )
 
     return _EMBEDDING_MODEL
 

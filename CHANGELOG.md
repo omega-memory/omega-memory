@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-02-20
+
+### Changed
+
+- Removed noisy stderr warning when ONNX model is not downloaded (logger.warning still fires for debugging).
+- Version alignment: `__init__.py` and `pyproject.toml` now both report 0.10.3.
+
 ## [0.10.0] - 2026-02-16
 
 ### Changed
