@@ -364,6 +364,7 @@ class SQLiteStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         self._lock = threading.Lock()
+        self._cache_lock = threading.Lock()  # Protects _query_cache and _recent_query_context
         self._vec_available = False
         self._query_cache: OrderedDict = OrderedDict()  # key → (timestamp, results)
         self._conn = self._connect()
@@ -392,12 +393,65 @@ class SQLiteStore:
         # Load persisted stats
         self._load_stats()
 
+        # WAL checkpoint: trigger PASSIVE checkpoint every N writes to prevent
+        # WAL bloat under multi-process contention (4+ MCP server processes).
+        self._wal_write_count = 0
+        _WAL_CHECKPOINT_INTERVAL = 10  # checkpoint every 10 writes
+        raw_interval = int(os.environ.get("OMEGA_WAL_CHECKPOINT_INTERVAL", str(_WAL_CHECKPOINT_INTERVAL)))
+        self._WAL_CHECKPOINT_INTERVAL = max(1, min(raw_interval, 1000))  # clamp to [1, 1000]
+
         # Engram-inspired caches (#2)
         self._hot_memories: Dict[str, MemoryResult] = {}
         self._hot_cache_ts: float = 0.0
         self._session_cache: Dict[str, List[MemoryResult]] = {}
         self._prefetch_cache: Dict[str, List[MemoryResult]] = {}
         self._refresh_hot_cache()
+
+        # Startup WAL checkpoint: clear bloated WAL from multi-process contention.
+        # TRUNCATE mode resets the WAL file (safe when this is the only writer at init).
+        try:
+            result = self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if result and result[1] > 0:
+                logger.info("Startup WAL checkpoint: %d/%d pages checkpointed", result[1], result[2])
+        except Exception as e:
+            logger.debug("Startup WAL checkpoint failed (non-fatal): %s", e)
+
+        # Auto-backup on startup if last backup is >24h old
+        self._auto_backup_if_stale()
+
+    def _auto_backup_if_stale(self) -> None:
+        """Create automatic backup if the most recent one is >24h old. Keeps max 5."""
+        try:
+            backup_dir = self.db_path.parent / "backups"
+            if not backup_dir.exists():
+                backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+            # Check most recent backup age
+            backups = sorted(backup_dir.glob("omega-auto-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if backups:
+                newest_mtime = backups[0].stat().st_mtime
+                age_hours = (_time.time() - newest_mtime) / 3600
+                if age_hours < 24:
+                    return  # Recent backup exists
+
+            # Check if store has any data worth backing up
+            count = self._conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+            if count == 0:
+                return  # Empty store, nothing to back up
+
+            # Create backup
+            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+            backup_path = backup_dir / f"omega-auto-{ts}.json"
+            result = self.export_to_file(backup_path)
+            logger.info("Auto-backup created: %s (%d nodes)", backup_path.name, result.get("nodes", 0))
+
+            # Rotate: keep max 5 auto-backups
+            auto_backups = sorted(backup_dir.glob("omega-auto-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            for old_backup in auto_backups[5:]:
+                old_backup.unlink()
+                logger.debug("Rotated old backup: %s", old_backup.name)
+        except Exception as e:
+            logger.debug("Auto-backup skipped: %s", e)
 
     def register_plugin_profiles(self, profiles: Dict[str, tuple]) -> None:
         """Register retrieval profiles from a plugin. Plugin profiles override
@@ -645,14 +699,79 @@ class SQLiteStore:
         expire.  This retries with exponential backoff before giving up.
         """
         _retry_on_locked(self._conn.commit)
+        self._maybe_wal_checkpoint()
+
+    def _maybe_wal_checkpoint(self) -> None:
+        """Run a PASSIVE WAL checkpoint every N writes.
+
+        With multiple MCP server processes holding persistent connections,
+        automatic WAL checkpointing gets starved (requires exclusive access).
+        PASSIVE mode checkpoints whatever it can without blocking readers or
+        writers, preventing unbounded WAL growth.
+        """
+        self._wal_write_count += 1
+        if self._wal_write_count >= self._WAL_CHECKPOINT_INTERVAL:
+            self._wal_write_count = 0
+            try:
+                result = self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+                if result:
+                    busy, checkpointed, total = result
+                    if checkpointed > 0:
+                        logger.debug("WAL checkpoint: %d/%d pages checkpointed (%d busy)",
+                                     checkpointed, total, busy)
+            except Exception as e:
+                logger.debug("WAL checkpoint failed (non-fatal): %s", e)
+
+    def _run_sql(self, sql, params=None):
+        """Run SQL with retry on 'database is locked'.
+
+        Supplements _commit() retry: individual SQL statements can also fail
+        with 'database is locked' under heavy multi-process contention when
+        busy_timeout expires.  Retries with exponential backoff.
+        """
+        if params is not None:
+            return _retry_on_locked(self._conn.execute, sql, params)
+        return _retry_on_locked(self._conn.execute, sql)
 
     # ------------------------------------------------------------------
     # Core CRUD
     # ------------------------------------------------------------------
 
-    def _invalidate_query_cache(self) -> None:
-        """Clear query result cache after writes."""
-        self._query_cache.clear()
+    def _invalidate_query_cache(self, new_content: Optional[str] = None) -> None:
+        """Invalidate query cache after writes.
+
+        If new_content is provided, only evict cache entries whose key has
+        trigram overlap >= 0.20 with the new content (partial invalidation).
+        Falls back to full wipe when trigrams can't be computed or new_content
+        is None.
+        """
+        with self._cache_lock:
+            if new_content and len(new_content) >= 3 and self._query_cache:
+                content_lower = new_content.lower()
+                content_trigrams = {content_lower[i:i+3] for i in range(len(content_lower) - 2)}
+                if content_trigrams:
+                    keys_to_evict = []
+                    for key in self._query_cache:
+                        # Cache key is a tuple; first element is the query text
+                        key_text = str(key[0]).lower() if isinstance(key, tuple) else str(key).lower()
+                        if len(key_text) < 3:
+                            keys_to_evict.append(key)
+                            continue
+                        key_trigrams = {key_text[i:i+3] for i in range(len(key_text) - 2)}
+                        if not key_trigrams:
+                            keys_to_evict.append(key)
+                            continue
+                        overlap = len(content_trigrams & key_trigrams) / len(key_trigrams)
+                        if overlap >= 0.20:
+                            keys_to_evict.append(key)
+                    for key in keys_to_evict:
+                        self._query_cache.pop(key, None)
+                else:
+                    self._query_cache.clear()
+            else:
+                self._query_cache.clear()
+            self._session_cache.clear()
+            self._prefetch_cache.clear()
         self._hot_cache_ts = 0.0  # Force hot cache refresh on next query (#2)
 
     def store(
@@ -1019,17 +1138,18 @@ class SQLiteStore:
                 temporal_range, entity_id, agent_type, query_hint,
                 surfacing_context,
             )
-            cached = self._query_cache.get(_cache_key)
-            if cached is not None:
-                ts, results, confidence = cached
-                ttl = _QUERY_CACHE_WARM_TTL_S if confidence > 0.7 else _QUERY_CACHE_TTL_S
-                if (now_mono - ts) < ttl:
-                    self._query_cache.move_to_end(_cache_key)
-                    self.stats["queries"] += 1
-                    self.stats["hits"] += 1
-                    return results
-                else:
-                    del self._query_cache[_cache_key]
+            with self._cache_lock:
+                cached = self._query_cache.get(_cache_key)
+                if cached is not None:
+                    ts, results, confidence = cached
+                    ttl = _QUERY_CACHE_WARM_TTL_S if confidence > 0.7 else _QUERY_CACHE_TTL_S
+                    if (now_mono - ts) < ttl:
+                        self._query_cache.move_to_end(_cache_key)
+                        self.stats["queries"] += 1
+                        self.stats["hits"] += 1
+                        return results
+                    else:
+                        del self._query_cache[_cache_key]
         if _last_cleanup is None or (now_mono - _last_cleanup) > _CLEANUP_INTERVAL:
             _last_cleanup = now_mono
             try:
@@ -1045,9 +1165,10 @@ class SQLiteStore:
         if fast_path_results:
             self.stats["fast_path_hits"] = self.stats.get("fast_path_hits", 0) + 1
             if _cache_key is not None:
-                self._query_cache[_cache_key] = (now_mono, fast_path_results, 0.9)
-                while len(self._query_cache) > _QUERY_CACHE_MAX:
-                    self._query_cache.popitem(last=False)
+                with self._cache_lock:
+                    self._query_cache[_cache_key] = (now_mono, fast_path_results, 0.9)
+                    while len(self._query_cache) > _QUERY_CACHE_MAX:
+                        self._query_cache.popitem(last=False)
             if session_id:
                 self._session_cache[session_id] = fast_path_results
             return fast_path_results
@@ -1438,28 +1559,29 @@ class SQLiteStore:
             self.stats["misses"] += 1
 
         # --- Query result cache: store (tiered TTL #2) ---
-        if _cache_key is not None:
-            _confidence = 0.0
-            if deduped:
-                _confidence = sum(n.relevance for n in deduped[:3]) / min(len(deduped), 3)
-            self._query_cache[_cache_key] = (now_mono, deduped, _confidence)
-            while len(self._query_cache) > _QUERY_CACHE_MAX:
-                self._query_cache.popitem(last=False)
-        if session_id and deduped:
-            self._session_cache[session_id] = deduped
+        with self._cache_lock:
+            if _cache_key is not None:
+                _confidence = 0.0
+                if deduped:
+                    _confidence = sum(n.relevance for n in deduped[:3]) / min(len(deduped), 3)
+                self._query_cache[_cache_key] = (now_mono, deduped, _confidence)
+                while len(self._query_cache) > _QUERY_CACHE_MAX:
+                    self._query_cache.popitem(last=False)
+            if session_id and deduped:
+                self._session_cache[session_id] = deduped
 
-        # --- A/B feedback tracking: record retrieval context for returned results ---
-        for n in deduped:
-            self._recent_query_context[n.id] = {
-                "query_text": query_text[:200],
-                "query_hint": query_hint,
-                "score": round(node_scores.get(n.id, 0.0), 4),
-                "vec_sim": round(raw_vec_sims.get(n.id, 0.0), 4),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            self._recent_query_context.move_to_end(n.id)
-        while len(self._recent_query_context) > 50:
-            self._recent_query_context.popitem(last=False)
+            # --- A/B feedback tracking: record retrieval context for returned results ---
+            for n in deduped:
+                self._recent_query_context[n.id] = {
+                    "query_text": query_text[:200],
+                    "query_hint": query_hint,
+                    "score": round(node_scores.get(n.id, 0.0), 4),
+                    "vec_sim": round(raw_vec_sims.get(n.id, 0.0), 4),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                self._recent_query_context.move_to_end(n.id)
+            while len(self._recent_query_context) > 50:
+                self._recent_query_context.popitem(last=False)
 
         return deduped
 
@@ -2143,7 +2265,8 @@ class SQLiteStore:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             # Attach retrieval context if available (A/B tracking)
-            retrieval_ctx = self._recent_query_context.get(node_id)
+            with self._cache_lock:
+                retrieval_ctx = self._recent_query_context.get(node_id)
             if retrieval_ctx:
                 signal["retrieval_context"] = retrieval_ctx
             meta["feedback_signals"].append(signal)
@@ -2387,11 +2510,15 @@ class SQLiteStore:
         return _deserialize_f32(vec_row[0])
 
     def find_similar(self, embedding: List[float], limit: int = 10) -> List[MemoryResult]:
-        """Find semantically similar memories by embedding."""
+        """Find semantically similar memories by embedding.
+
+        Filters out expired and superseded memories automatically.
+        """
         if not self._vec_available or not embedding:
             return []
 
-        vec_results = self._vec_query(embedding, limit=limit)
+        # Over-fetch to account for filtered results
+        vec_results = self._vec_query(embedding, limit=limit * 2)
         results = []
         for rowid, distance in vec_results:
             row = self._conn.execute(
@@ -2402,8 +2529,12 @@ class SQLiteStore:
             ).fetchone()
             if row:
                 result = self._row_to_result(row)
+                if result.is_expired() or result.metadata.get("superseded"):
+                    continue
                 result.relevance = 1.0 - distance
                 results.append(result)
+                if len(results) >= limit:
+                    break
         return results
 
     def get_timeline(self, days: int = 7, limit_per_day: int = 10) -> Dict[str, List[MemoryResult]]:
@@ -2802,6 +2933,11 @@ class SQLiteStore:
     def close(self) -> None:
         """Close the database connection."""
         self._save_stats()
+        try:
+            # Flush WAL before closing — helps other processes checkpoint
+            self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        except Exception:
+            pass
         try:
             self._conn.close()
         except Exception as e:
