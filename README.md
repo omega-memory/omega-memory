@@ -91,6 +91,21 @@ Add to your editor's MCP config file:
 }
 ```
 
+Or with `uvx` (faster, no venv needed):
+
+```json
+{
+  "context_servers": {
+    "omega-memory": {
+      "command": {
+        "path": "uvx",
+        "args": ["omega-memory"]
+      }
+    }
+  }
+}
+```
+
 Open Zed settings: `Zed > Settings > Open Settings` (or edit `~/.config/zed/settings.json`)
 
 **Config file locations by editor:**
