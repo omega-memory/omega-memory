@@ -76,6 +76,23 @@ Add to your editor's MCP config file:
 }
 ```
 
+**Zed editor:** Zed uses a different key structure (`context_servers` instead of `mcpServers`):
+
+```json
+{
+  "context_servers": {
+    "omega-memory": {
+      "command": {
+        "path": "python3",
+        "args": ["-m", "omega.server.mcp_server"]
+      }
+    }
+  }
+}
+```
+
+Open Zed settings: `Zed > Settings > Open Settings` (or edit `~/.config/zed/settings.json`)
+
 **Config file locations by editor:**
 
 | Editor | Config File |
