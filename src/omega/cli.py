@@ -2565,7 +2565,7 @@ def main():
     )
     setup_parser.add_argument(
         "--client",
-        choices=["claude-code", "cursor", "windsurf", "zed", "antigravity", "codex"],
+        choices=["claude-code", "cursor", "windsurf", "zed", "antigravity", "codex", "venv"],
         help="Configure a specific client (default: auto-detect Claude Code)"
     )
     setup_parser.add_argument(
