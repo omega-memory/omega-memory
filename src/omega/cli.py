@@ -36,24 +36,46 @@ OMEGA_BEGIN = "<!-- OMEGA:BEGIN"
 OMEGA_END = "<!-- OMEGA:END -->"
 
 
-def _resolve_python_path() -> str:
-    """Resolve the best Python interpreter path for hooks.
+def _python_has_omega(python_path: str) -> bool:
+    """Check if a Python interpreter has omega installed."""
+    try:
+        result = subprocess.run(
+            [python_path, "-c", "import omega; import mcp"],
+            capture_output=True, timeout=5,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
-    Priority:
-    1. sys.executable if it exists and is not inside a temporary venv
-    2. 'python3' from PATH (via shutil.which)
-    3. Hardcoded /opt/homebrew/bin/python3 as last resort (macOS)
+
+def _resolve_python_path() -> str:
+    """Resolve the best Python interpreter path for hooks and MCP configs.
+
+    Priority: first interpreter that can import omega wins.
+    1. sys.executable (even if inside a venv — that's where omega lives)
+    2. 'python3' from PATH
+    3. /opt/homebrew/bin/python3 (macOS Homebrew fallback)
+    4. sys.executable as-is (best effort)
     """
+    candidates = []
+
     exe = sys.executable
-    if exe and Path(exe).exists() and "venv" not in exe:
-        return exe
+    if exe and Path(exe).exists():
+        candidates.append(exe)
+
     which_py = shutil.which("python3")
-    if which_py:
-        return which_py
-    # Last resort for macOS Homebrew
+    if which_py and which_py not in candidates:
+        candidates.append(which_py)
+
     fallback = "/opt/homebrew/bin/python3"
-    if Path(fallback).exists():
-        return fallback
+    if Path(fallback).exists() and fallback not in candidates:
+        candidates.append(fallback)
+
+    for candidate in candidates:
+        if _python_has_omega(candidate):
+            return candidate
+
+    # No candidate has omega — return sys.executable as best effort
     return exe or "python3"
 
 
@@ -837,6 +859,90 @@ def _setup_zed(errors_ref: list):
         print(f"  ERROR: Could not write {config_path}: {e}")
 
 
+def _setup_antigravity(errors_ref: list):
+    """Antigravity IDE setup: write MCP config to ~/.gemini/antigravity/mcp_config.json."""
+    print("  Configuring Antigravity IDE...")
+    config_path = Path.home() / ".gemini" / "antigravity" / "mcp_config.json"
+    if _write_mcp_config(config_path, "mcpServers", errors_ref):
+        print("  Restart Antigravity to activate OMEGA.")
+        print("  NOTE: Hooks (auto-capture, memory surfacing) are only available with Claude Code.")
+
+
+def _setup_codex(errors_ref: list):
+    """OpenAI Codex CLI setup: merge MCP server into ~/.codex/config.toml."""
+    print("  Configuring OpenAI Codex CLI...")
+    config_path = Path.home() / ".codex" / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    python_path = _resolve_python_path()
+
+    # Read existing TOML content (preserve manually since tomllib is read-only)
+    lines = []
+    if config_path.exists():
+        try:
+            lines = config_path.read_text().splitlines(keepends=True)
+        except OSError as e:
+            errors_ref.append(e)
+            print(f"  ERROR: Could not read {config_path}: {e}")
+            return
+
+    # Check if omega-memory is already configured
+    content = "".join(lines)
+    if "mcp_servers.omega-memory" in content:
+        print(f"  omega-memory already configured in {config_path}")
+        return
+
+    # Build the TOML block to insert
+    toml_block = (
+        '\n[mcp_servers.omega-memory]\n'
+        f'command = "{python_path}"\n'
+        'args = ["-m", "omega.server.mcp_server"]\n'
+    )
+
+    # Insert before the first [projects.*] section if present, otherwise append
+    insert_idx = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("[projects."):
+            insert_idx = i
+            break
+
+    if insert_idx is not None:
+        lines.insert(insert_idx, toml_block + "\n")
+    else:
+        lines.append(toml_block)
+
+    try:
+        config_path.write_text("".join(lines))
+        print(f"  Wrote MCP config to {config_path}")
+        print("  Restart Codex CLI to activate OMEGA.")
+        print("  NOTE: Hooks (auto-capture, memory surfacing) are only available with Claude Code.")
+    except OSError as e:
+        errors_ref.append(e)
+        print(f"  ERROR: Could not write {config_path}: {e}")
+
+
+def _setup_venv(errors_ref: list):
+    """Venv setup: print MCP and CLI paths for manual client configuration."""
+    python_path = _resolve_python_path()
+    omega_bin = shutil.which("omega") or str(Path(python_path).parent / "omega")
+
+    print(f"\n  OMEGA venv configuration:")
+    print(f"  Python:  {python_path}")
+    print(f"  CLI:     {omega_bin}")
+    print(f"\n  MCP server (stdio):")
+    print(f"    command: {python_path}")
+    print(f'    args:    ["-m", "omega.server.mcp_server"]')
+    print(f"\n  JSON config block (copy into your client):")
+    config = json.dumps({
+        "omega-memory": {
+            "command": python_path,
+            "args": ["-m", "omega.server.mcp_server"],
+        }
+    }, indent=2)
+    for line in config.splitlines():
+        print(f"    {line}")
+
+
 def cmd_setup(args):
     """Set up OMEGA: create dirs, download model, initialize DB. Optionally configure a client."""
     # ── Python version check ──────────────────────────────────────────
@@ -858,6 +964,14 @@ def cmd_setup(args):
         else:
             print("  Install Python 3.11+: https://www.python.org/downloads/")
         sys.exit(1)
+
+    # ── MCP dependency check ─────────────────────────────────────────
+    try:
+        import mcp as _mcp_check  # noqa: F401
+    except ImportError:
+        print("WARNING: 'mcp' package not installed. MCP server won't start.")
+        print("  Fix: pip install omega-memory[server]")
+        print()
 
     client = getattr(args, "client", None)
     hooks_only = getattr(args, "hooks_only", False)
@@ -881,6 +995,9 @@ def cmd_setup(args):
         print("    omega setup --client cursor        # MCP registration only")
         print("    omega setup --client windsurf      # MCP registration only")
         print("    omega setup --client zed           # MCP registration only")
+        print("    omega setup --client antigravity   # MCP registration only")
+        print("    omega setup --client codex         # MCP registration only")
+        print("    omega setup --client venv          # print venv paths for manual config")
         print()
     else:
         print("Setting up OMEGA...")
@@ -997,6 +1114,17 @@ def cmd_setup(args):
         _setup_zed(errors)
         steps_done.append("MCP server registration (Zed)")
         files_modified.append("~/.config/zed/settings.json")
+    elif client == "antigravity":
+        _setup_antigravity(errors)
+        steps_done.append("MCP server registration (Antigravity)")
+        files_modified.append("~/.gemini/antigravity/mcp_config.json")
+    elif client == "codex":
+        _setup_codex(errors)
+        steps_done.append("MCP server registration (Codex)")
+        files_modified.append("~/.codex/config.toml")
+    elif client == "venv":
+        _setup_venv(errors)
+        steps_done.append("Venv configuration printed")
     else:
         steps_skipped.append("MCP server registration (no client specified)")
         steps_skipped.append("Hooks (no client specified)")
@@ -2437,7 +2565,7 @@ def main():
     )
     setup_parser.add_argument(
         "--client",
-        choices=["claude-code", "cursor", "windsurf", "zed"],
+        choices=["claude-code", "cursor", "windsurf", "zed", "antigravity", "codex"],
         help="Configure a specific client (default: auto-detect Claude Code)"
     )
     setup_parser.add_argument(
