@@ -45,4 +45,8 @@ Thumbs.db
 
 # Project-local agent instructions (contains internal references)
 CLAUDE.md
+.claude/
+
+# Installer packages
+*.pkg
 docs/submissions/

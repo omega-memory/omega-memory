@@ -22,7 +22,7 @@ pip3 install omega-memory[server]
 omega setup
 ```
 
-Works with **Claude Code** | **Cursor** | **Windsurf** | **Zed** | any MCP client
+Works with **Claude Code** | **Cursor** | **Windsurf** | **Zed** | **OpenAI Codex** | **Antigravity** | any MCP client
 
 [![Watch the demo](https://img.youtube.com/vi/hTtNPGnQcMA/maxresdefault.jpg)](https://youtu.be/hTtNPGnQcMA)
 
@@ -58,6 +58,8 @@ That's it. Start a new Claude Code session and say **"Remember that we always us
 omega setup --client cursor          # writes ~/.cursor/mcp.json
 omega setup --client windsurf        # writes ~/.codeium/windsurf/mcp_config.json
 omega setup --client zed             # writes ~/.config/zed/settings.json
+omega setup --client codex           # writes ~/.codex/config.toml
+omega setup --client antigravity     # writes ~/.gemini/antigravity/mcp_config.json
 ```
 
 <details>
@@ -87,7 +89,8 @@ Add to your editor's MCP config file:
 | Cline | VS Code settings → Cline MCP Servers |
 | VS Code (Copilot) | `.vscode/mcp.json` in your project |
 | Augment | `~/.augment/mcp.json` |
-| OpenAI Codex CLI | `~/.codex/mcp.json` |
+| OpenAI Codex | `~/.codex/config.toml` (under `[mcp_servers]`) |
+| Antigravity | `~/.gemini/antigravity/mcp_config.json` |
 | Gemini CLI | `~/.gemini/settings.json` |
 
 </details>
@@ -96,10 +99,13 @@ Add to your editor's MCP config file:
 <summary><strong>Alternative install methods</strong></summary>
 
 ```bash
-pipx install omega-memory[server]              # recommended for global install (no venv needed)
+uv pip install omega-memory[server]            # recommended — fast, reliable dependency resolution
+pipx install omega-memory[server]              # global install (no venv needed)
 pip3 install omega-memory[server]              # standard (may need a venv)
 python3 -m pip install omega-memory[server]    # if pip3 is not available
 ```
+
+**Why uv?** [uv](https://github.com/astral-sh/uv) resolves and installs dependencies 10–100x faster than pip, handles venvs automatically, and avoids common dependency conflicts. If you don't have it: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
 </details>
 
@@ -258,6 +264,8 @@ Details and methodology at [omegamax.co/benchmarks](https://omegamax.co/benchmar
 | Cursor | Yes | No | `omega setup --client cursor` |
 | Windsurf | Yes | No | `omega setup --client windsurf` |
 | Zed | Yes | No | `omega setup --client zed` |
+| OpenAI Codex | Yes | No | `omega setup --client codex` |
+| Antigravity | Yes | No | `omega setup --client antigravity` |
 | Any MCP Client | Yes | No | Manual config ([docs](https://omegamax.co/docs)) |
 
 Auto-capture hooks are currently only supported by Claude Code's hook system. All MCP-compatible clients get the full 12-tool memory API.
@@ -281,7 +289,7 @@ Auto-capture hooks are currently only supported by Claude Code's hook system. Al
 
 ## Who Uses OMEGA
 
-OMEGA is used by developers running Claude Code, Cursor, and Windsurf who need local-first memory and learning across sessions. From solo developers to teams running multi-agent workflows.
+OMEGA is used by developers running Claude Code, Cursor, Windsurf, Codex CLI, and Antigravity who need local-first memory and learning across sessions. From solo developers to teams running multi-agent workflows.
 
 > *"I installed OMEGA and forgot about it. Two weeks later I realized my Claude sessions just... knew things from previous sessions."*
 
@@ -446,7 +454,8 @@ All hooks dispatch via `fast_hook.py` with fail-open semantics.
 ```bash
 git clone https://github.com/omega-memory/omega-memory.git
 cd omega-memory
-pip3 install -e ".[server,dev]"
+uv venv && uv pip install -e ".[server,dev]"   # recommended (fast, isolated)
+# or: pip3 install -e ".[server,dev]"           # traditional pip
 omega setup
 ```
 
