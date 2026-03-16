@@ -102,16 +102,29 @@ class CloudSync:
         self._user_id = self._load_user_id()
 
     @staticmethod
-    def _load_user_id() -> Optional[str]:
-        """Load user_id from ~/.omega/config.json for cloud sync attribution."""
+    def _load_user_id() -> str:
+        """Load user_id from ~/.omega/config.json, generating one if missing."""
+        import uuid
         config_path = _omega_home() / "config.json"
+        config = {}
         if config_path.exists():
             try:
                 config = json.loads(config_path.read_text())
-                return config.get("user_id")
             except Exception:
                 pass
-        return None
+        
+        user_id = config.get("user_id")
+        if not user_id:
+            user_id = str(uuid.uuid4())
+            config["user_id"] = user_id
+            try:
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                config_path.write_text(json.dumps(config, indent=2))
+                logger.info("Generated new user_id for cloud sync: %s", user_id)
+            except Exception as e:
+                logger.error("Failed to save generated user_id: %s", e)
+        
+        return user_id
 
     def _get_client(self):
         if self._supabase is None:
@@ -138,7 +151,13 @@ class CloudSync:
 
         try:
             # Get last synced local_id from Supabase
-            result = client.table("sync_state").select("last_local_id").eq("table_name", "memories").execute()
+            result = (
+                client.table("sync_state")
+                .select("last_local_id")
+                .eq("table_name", "memories")
+                .eq("user_id", self._user_id)
+                .execute()
+            )
             last_id = result.data[0]["last_local_id"] if result.data else 0
 
             # Fetch new local memories
@@ -180,14 +199,15 @@ class CloudSync:
                     "memory_type": row["memory_type"],
                     "access_count": row["access_count"] or 0,
                     "synced_at": datetime.now(timezone.utc).isoformat(),
+                    "user_id": self._user_id,
                 }
-                if self._user_id:
-                    record["user_id"] = self._user_id
                 records.append(record)
                 max_id = max(max_id, row["id"])
 
             # Upsert to Supabase
-            client.table("memories").upsert(records, on_conflict="local_id").execute()
+            client.table("memories").upsert(
+                records, on_conflict="local_id,user_id"
+            ).execute()
 
             # Sync embeddings for these memories
             self._sync_memory_embeddings(conn, client, [r["local_id"] for r in records])
@@ -198,12 +218,10 @@ class CloudSync:
                 "last_local_id": max_id,
                 "last_sync_at": datetime.now(timezone.utc).isoformat(),
                 "sync_count": len(records),
+                "user_id": self._user_id,
             }
-            if self._user_id:
-                sync_record["user_id"] = self._user_id
-            conflict_key = "table_name,user_id" if self._user_id else "table_name"
             client.table("sync_state").upsert(
-                sync_record, on_conflict=conflict_key
+                sync_record, on_conflict="table_name,user_id"
             ).execute()
 
             return {"synced": len(records), "last_id": max_id, "status": "ok"}
