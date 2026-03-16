@@ -1,0 +1,137 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Privacy Policy" description="How OMEGA handles your data and protects your privacy.">
+  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
+    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
+      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
+        <span>&Omega;</span>
+        <span>OMEGA</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
+        <a href="/docs" class="hover:text-[var(--ink-primary)] transition-colors">Docs</a>
+        <a href="/pricing" class="hover:text-[var(--ink-primary)] transition-colors">Pricing</a>
+        <a href="/blog" class="hover:text-[var(--ink-primary)] transition-colors">Blog</a>
+        <a href="/benchmarks" class="hover:text-[var(--ink-primary)] transition-colors">Benchmarks</a>
+        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
+        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pt-32 pb-20 px-6">
+    <div class="max-w-3xl mx-auto">
+      <h1 class="text-4xl font-bold mb-2 animate-fade-in">Privacy Policy</h1>
+      <p class="text-sm text-[var(--ink-faint)] mb-12">Last updated: March 1, 2026</p>
+
+      <div class="space-y-8 text-[var(--ink-secondary)] text-sm leading-relaxed">
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">Overview</h2>
+          <p>OMEGA Memory ("OMEGA", "we", "us") is a local-first persistent memory system for AI agents. We are committed to protecting your privacy. This policy explains what data we collect, how we use it, and your rights.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">Local-First Architecture</h2>
+          <p class="mb-3">OMEGA is designed to keep your data on your machine by default. When you use the free, local version of OMEGA:</p>
+          <ul class="list-disc list-inside space-y-1 pl-2">
+            <li>All memories are stored locally in SQLite on your device</li>
+            <li>Embeddings are generated locally using on-device models</li>
+            <li>No data is sent to our servers or any third party</li>
+            <li>No account or registration is required</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">Data We Collect</h2>
+          <p class="mb-3"><strong class="text-[var(--ink-primary)]">Free/Local Users:</strong> We collect no data whatsoever. OMEGA runs entirely on your machine.</p>
+          <p class="mb-3"><strong class="text-[var(--ink-primary)]">Pro Users (Cloud Sync):</strong> When you opt into cloud sync, we process:</p>
+          <ul class="list-disc list-inside space-y-1 pl-2">
+            <li>Account information (email, name) for authentication</li>
+            <li>Payment information (processed by Stripe; we do not store card details)</li>
+            <li>Memory data you choose to sync to cloud backends</li>
+            <li>Usage metrics (memory count, sync frequency) for service operation</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">How We Use Your Data</h2>
+          <p class="mb-3">For Pro users, we use your data solely to:</p>
+          <ul class="list-disc list-inside space-y-1 pl-2">
+            <li>Provide the cloud sync service you requested</li>
+            <li>Process payments and manage your subscription</li>
+            <li>Send transactional emails (receipts, service updates)</li>
+            <li>Maintain and improve service reliability</li>
+          </ul>
+          <p class="mt-3">We do not sell, rent, or share your data with third parties for marketing purposes. We do not train AI models on your memory data.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">Data Storage and Security</h2>
+          <ul class="list-disc list-inside space-y-1 pl-2">
+            <li>Cloud data is encrypted at rest and in transit (TLS 1.3)</li>
+            <li>We support mTLS for zero-trust agent-to-server communication</li>
+            <li>Cloud backends are hosted in SOC 2 compliant data centers</li>
+            <li>You can delete all cloud data at any time from your dashboard</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">Your Rights</h2>
+          <p class="mb-3">You have the right to:</p>
+          <ul class="list-disc list-inside space-y-1 pl-2">
+            <li>Access your data at any time</li>
+            <li>Export all your data in standard formats</li>
+            <li>Delete your account and all associated data</li>
+            <li>Opt out of cloud sync and return to local-only use</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">Cookies and Analytics</h2>
+          <p>This website uses minimal, essential cookies for session management. We do not use third-party tracking or advertising cookies. We may use privacy-respecting analytics (e.g., Plausible) to understand aggregate site usage.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">Changes to This Policy</h2>
+          <p>We may update this privacy policy from time to time. We will notify Pro users of material changes via email. The latest version will always be available at this URL.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">Contact</h2>
+          <p>For privacy-related questions, contact us at <a href="mailto:privacy@omega-memory.dev" class="text-[var(--accent)] hover:underline">privacy@omega-memory.dev</a>.</p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="border-t border-[var(--border)] py-12 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
+      <div>
+        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&Omega; OMEGA</div>
+        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
+      </div>
+      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
+          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
+          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
+          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
+          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
+          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
+          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
+          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</Base>

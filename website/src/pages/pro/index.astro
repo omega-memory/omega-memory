@@ -1,0 +1,148 @@
+---
+import Base from "../../layouts/Base.astro";
+---
+
+<Base title="OMEGA Pro" description="Cloud sync, team workspaces, and advanced features for professional teams.">
+  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
+    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
+      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
+        <span>&Omega;</span>
+        <span>OMEGA</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
+        <a href="/docs" class="hover:text-[var(--ink-primary)] transition-colors">Docs</a>
+        <a href="/pricing" class="hover:text-[var(--ink-primary)] transition-colors">Pricing</a>
+        <a href="/blog" class="hover:text-[var(--ink-primary)] transition-colors">Blog</a>
+        <a href="/benchmarks" class="hover:text-[var(--ink-primary)] transition-colors">Benchmarks</a>
+        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
+        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pt-32 pb-20 px-6">
+    <!-- Hero -->
+    <div class="max-w-4xl mx-auto text-center mb-20">
+      <div class="inline-block px-3 py-1 rounded-full text-xs font-medium mb-6" style="color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent);">
+        OMEGA Pro
+      </div>
+      <h1 class="text-5xl md:text-6xl font-bold mb-6 animate-fade-in" style="line-height: 1.1;">
+        Memory that scales<br/>with your team
+      </h1>
+      <p class="text-xl text-[var(--ink-secondary)] mb-8 max-w-2xl mx-auto animate-slide-up">
+        Cloud sync, team workspaces, SSO, and enterprise-grade security.
+        Everything you need for production AI memory.
+      </p>
+      <div class="flex items-center justify-center gap-4">
+        <a href="/pricing" class="px-6 py-3 rounded-lg font-medium text-[var(--canvas)]" style="background: var(--accent);">
+          View Pricing
+        </a>
+        <a href="/docs/cloud-sync" class="px-6 py-3 rounded-lg font-medium border border-[var(--border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--border-hover)] transition-all">
+          Cloud Sync Docs
+        </a>
+      </div>
+    </div>
+
+    <!-- Feature highlights -->
+    <div class="max-w-6xl mx-auto mb-20">
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg mb-4" style="background: color-mix(in srgb, var(--decision) 15%, transparent); color: var(--decision);">&#9729;&#65039;</div>
+          <h3 class="font-semibold mb-2">Cloud Sync</h3>
+          <p class="text-sm text-[var(--ink-secondary)]">Sync your local memory store to PostgreSQL, Supabase, or Cloudflare D1. Access memories from anywhere.</p>
+        </div>
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg mb-4" style="background: color-mix(in srgb, var(--lesson) 15%, transparent); color: var(--lesson);">&#128101;</div>
+          <h3 class="font-semibold mb-2">Team Workspaces</h3>
+          <p class="text-sm text-[var(--ink-secondary)]">Multi-tenant workspaces with role-based access. Share context and memories across your engineering team.</p>
+        </div>
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg mb-4" style="background: color-mix(in srgb, var(--preference) 15%, transparent); color: var(--preference);">&#128273;</div>
+          <h3 class="font-semibold mb-2">SSO / OIDC</h3>
+          <p class="text-sm text-[var(--ink-secondary)]">Enterprise single sign-on with any OIDC provider. Google, Okta, Auth0, and more.</p>
+        </div>
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg mb-4" style="background: color-mix(in srgb, var(--error) 15%, transparent); color: var(--error);">&#128274;</div>
+          <h3 class="font-semibold mb-2">mTLS Security</h3>
+          <p class="text-sm text-[var(--ink-secondary)]">Built-in certificate authority for mutual TLS. Zero-trust networking between your agents and the memory server.</p>
+        </div>
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg mb-4" style="background: color-mix(in srgb, var(--reminder) 15%, transparent); color: var(--reminder);">&#128202;</div>
+          <h3 class="font-semibold mb-2">Analytics Dashboard</h3>
+          <p class="text-sm text-[var(--ink-secondary)]">See how your agents use memory. Track retrieval patterns, memory growth, and agent coordination metrics.</p>
+        </div>
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg mb-4" style="background: color-mix(in srgb, var(--task) 15%, transparent); color: var(--task);">&#129504;</div>
+          <h3 class="font-semibold mb-2">Custom Embeddings</h3>
+          <p class="text-sm text-[var(--ink-secondary)]">Bring your own embedding model. Optimize retrieval for your specific domain and codebase.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pricing summary -->
+    <div class="max-w-2xl mx-auto mb-20">
+      <div class="text-center mb-8">
+        <h2 class="text-3xl font-bold mb-2">Simple, transparent pricing</h2>
+        <p class="text-[var(--ink-secondary)]">One plan. Everything included.</p>
+      </div>
+      <div class="rounded-2xl border-2 p-8 text-center" style="background: var(--surface-1); border-color: var(--accent);">
+        <div class="text-5xl font-bold mb-1">$19<span class="text-lg font-normal text-[var(--ink-faint)]">/mo</span></div>
+        <p class="text-sm text-[var(--ink-faint)] mb-6">or $190/year (save 17%)</p>
+        <a href="/pricing" class="inline-block px-8 py-3 rounded-lg font-medium text-[var(--canvas)] transition-opacity hover:opacity-90" style="background: var(--accent);">
+          Get Started
+        </a>
+      </div>
+    </div>
+
+    <!-- License key login -->
+    <div class="max-w-md mx-auto">
+      <h2 class="text-2xl font-bold text-center mb-6">Already have a license?</h2>
+      <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+        <form action="/pro/dashboard" method="GET">
+          <label class="block text-sm text-[var(--ink-secondary)] mb-2" for="license-key">License Key</label>
+          <input
+            type="text"
+            id="license-key"
+            name="key"
+            placeholder="OMEGA-PRO-XXXX-XXXX-XXXX"
+            class="w-full px-4 py-3 rounded-lg text-sm border border-[var(--border)] focus:border-[var(--accent)] focus:outline-none transition-colors mb-4"
+            style="background: var(--surface-0); color: var(--ink-primary);"
+          />
+          <button type="submit" class="w-full px-6 py-3 rounded-lg font-medium text-[var(--canvas)] transition-opacity hover:opacity-90 cursor-pointer" style="background: var(--accent);">
+            Access Dashboard
+          </button>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <footer class="border-t border-[var(--border)] py-12 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
+      <div>
+        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&Omega; OMEGA</div>
+        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
+      </div>
+      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
+          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
+          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
+          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
+          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
+          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
+          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
+          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</Base>

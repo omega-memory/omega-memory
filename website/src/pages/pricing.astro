@@ -1,0 +1,210 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Pricing" description="Free for local use. Pro for cloud sync and team features.">
+  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
+    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
+      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
+        <span>&Omega;</span>
+        <span>OMEGA</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
+        <a href="/docs" class="hover:text-[var(--ink-primary)] transition-colors">Docs</a>
+        <a href="/pricing" class="text-[var(--ink-primary)]">Pricing</a>
+        <a href="/blog" class="hover:text-[var(--ink-primary)] transition-colors">Blog</a>
+        <a href="/benchmarks" class="hover:text-[var(--ink-primary)] transition-colors">Benchmarks</a>
+        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
+        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pt-32 pb-20 px-6">
+    <div class="max-w-4xl mx-auto text-center mb-16">
+      <h1 class="text-5xl font-bold mb-4 animate-fade-in">Simple pricing</h1>
+      <p class="text-xl text-[var(--ink-secondary)] animate-slide-up">Free forever for local use. Upgrade for cloud sync and team features.</p>
+    </div>
+
+    <!-- Billing toggle -->
+    <div class="flex items-center justify-center gap-3 mb-12">
+      <span class="text-sm text-[var(--ink-secondary)]" id="label-monthly">Monthly</span>
+      <label class="relative inline-flex items-center cursor-pointer">
+        <input type="checkbox" id="billing-toggle" class="sr-only peer" />
+        <div class="w-11 h-6 rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:rounded-full after:h-5 after:w-5 after:transition-all" style="background: var(--surface-2); border: 1px solid var(--border);">
+          <div class="absolute top-[2px] left-[2px] h-5 w-5 rounded-full transition-transform" style="background: var(--accent);" id="toggle-dot"></div>
+        </div>
+      </label>
+      <span class="text-sm text-[var(--ink-secondary)]" id="label-yearly">Yearly <span class="text-[var(--lesson)] text-xs font-medium">Save 17%</span></span>
+    </div>
+
+    <div class="max-w-5xl mx-auto grid md:grid-cols-2 gap-8 mb-20">
+      <!-- Free Tier -->
+      <div class="surface-1 rounded-2xl border border-[var(--border)] p-8">
+        <h2 class="text-lg font-semibold text-[var(--ink-secondary)] mb-2">Free</h2>
+        <div class="text-4xl font-bold mb-1">$0</div>
+        <p class="text-sm text-[var(--ink-faint)] mb-6">Forever free for local use</p>
+        <a href="/downloads" class="block text-center px-6 py-3 rounded-lg font-medium border border-[var(--border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--border-hover)] transition-all mb-8">
+          Get Started
+        </a>
+        <ul class="space-y-3 text-sm text-[var(--ink-secondary)]">
+          <li class="flex items-start gap-2"><span style="color: var(--lesson);">&#10003;</span> Unlimited local memories</li>
+          <li class="flex items-start gap-2"><span style="color: var(--lesson);">&#10003;</span> SQLite storage</li>
+          <li class="flex items-start gap-2"><span style="color: var(--lesson);">&#10003;</span> Semantic search with BGE embeddings</li>
+          <li class="flex items-start gap-2"><span style="color: var(--lesson);">&#10003;</span> MCP server with 15 tools</li>
+          <li class="flex items-start gap-2"><span style="color: var(--lesson);">&#10003;</span> Multi-agent coordination</li>
+          <li class="flex items-start gap-2"><span style="color: var(--lesson);">&#10003;</span> CLI and HTTP API</li>
+          <li class="flex items-start gap-2"><span style="color: var(--lesson);">&#10003;</span> Works with Claude Code, Cursor, Windsurf</li>
+        </ul>
+      </div>
+
+      <!-- Pro Tier -->
+      <div class="rounded-2xl border-2 p-8 relative" style="background: var(--surface-1); border-color: var(--accent);">
+        <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-xs font-medium text-[var(--canvas)]" style="background: var(--accent);">Most Popular</div>
+        <h2 class="text-lg font-semibold text-[var(--accent)] mb-2">Pro</h2>
+        <div class="text-4xl font-bold mb-1">
+          <span id="price-display">$19</span>
+          <span class="text-lg font-normal text-[var(--ink-faint)]" id="price-period">/mo</span>
+        </div>
+        <p class="text-sm text-[var(--ink-faint)] mb-6" id="price-subtext">Billed monthly</p>
+        <form action="/api/checkout" method="POST">
+          <input type="hidden" name="plan" value="monthly" id="plan-input" />
+          <button type="submit" class="w-full px-6 py-3 rounded-lg font-medium text-[var(--canvas)] transition-opacity hover:opacity-90 cursor-pointer mb-8" style="background: var(--accent);">
+            Start Pro
+          </button>
+        </form>
+        <ul class="space-y-3 text-sm text-[var(--ink-secondary)]">
+          <li class="flex items-start gap-2"><span style="color: var(--lesson);">&#10003;</span> Everything in Free, plus:</li>
+          <li class="flex items-start gap-2"><span style="color: var(--accent);">&#10003;</span> Cloud sync (PostgreSQL, Supabase, D1)</li>
+          <li class="flex items-start gap-2"><span style="color: var(--accent);">&#10003;</span> Multi-tenant team workspaces</li>
+          <li class="flex items-start gap-2"><span style="color: var(--accent);">&#10003;</span> OIDC / SSO authentication</li>
+          <li class="flex items-start gap-2"><span style="color: var(--accent);">&#10003;</span> mTLS certificate authority</li>
+          <li class="flex items-start gap-2"><span style="color: var(--accent);">&#10003;</span> Priority support</li>
+          <li class="flex items-start gap-2"><span style="color: var(--accent);">&#10003;</span> Advanced analytics dashboard</li>
+          <li class="flex items-start gap-2"><span style="color: var(--accent);">&#10003;</span> Custom embedding models</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Feature comparison table -->
+    <div class="max-w-4xl mx-auto">
+      <h2 class="text-2xl font-bold text-center mb-8">Feature comparison</h2>
+      <div class="surface-0 rounded-xl border border-[var(--border)] overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-[var(--border)]">
+              <th class="text-left p-4 text-[var(--ink-secondary)] font-medium">Feature</th>
+              <th class="p-4 text-center text-[var(--ink-secondary)] font-medium">Free</th>
+              <th class="p-4 text-center font-medium" style="color: var(--accent);">Pro</th>
+            </tr>
+          </thead>
+          <tbody class="text-[var(--ink-secondary)]">
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">Local SQLite storage</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">Unlimited memories</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">Semantic search</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">MCP server (15 tools)</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">Multi-agent coordination</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">Cloud sync</td>
+              <td class="p-4 text-center text-[var(--ink-faint)]">&mdash;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">Team workspaces</td>
+              <td class="p-4 text-center text-[var(--ink-faint)]">&mdash;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">OIDC / SSO</td>
+              <td class="p-4 text-center text-[var(--ink-faint)]">&mdash;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">mTLS certificate authority</td>
+              <td class="p-4 text-center text-[var(--ink-faint)]">&mdash;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr class="border-b border-[var(--border)]">
+              <td class="p-4">Custom embedding models</td>
+              <td class="p-4 text-center text-[var(--ink-faint)]">&mdash;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+            <tr>
+              <td class="p-4">Priority support</td>
+              <td class="p-4 text-center text-[var(--ink-faint)]">&mdash;</td>
+              <td class="p-4 text-center" style="color: var(--lesson);">&#10003;</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <footer class="border-t border-[var(--border)] py-12 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
+      <div>
+        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&Omega; OMEGA</div>
+        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
+      </div>
+      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
+          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
+          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
+          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
+          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
+          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
+          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
+          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const toggle = document.getElementById('billing-toggle');
+    const dot = document.getElementById('toggle-dot');
+    const priceDisplay = document.getElementById('price-display');
+    const pricePeriod = document.getElementById('price-period');
+    const priceSubtext = document.getElementById('price-subtext');
+    const planInput = document.getElementById('plan-input');
+
+    toggle?.addEventListener('change', () => {
+      const yearly = (toggle as HTMLInputElement).checked;
+      if (dot) dot.style.transform = yearly ? 'translateX(20px)' : 'translateX(0)';
+      if (priceDisplay) priceDisplay.textContent = yearly ? '$15.83' : '$19';
+      if (pricePeriod) pricePeriod.textContent = yearly ? '/mo' : '/mo';
+      if (priceSubtext) priceSubtext.textContent = yearly ? 'Billed annually ($190/yr)' : 'Billed monthly';
+      if (planInput) (planInput as HTMLInputElement).value = yearly ? 'yearly' : 'monthly';
+    });
+  </script>
+</Base>

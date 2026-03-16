@@ -1,0 +1,141 @@
+---
+import Base from "../layouts/Base.astro";
+
+const benchmarks = [
+  { name: "OMEGA", score: 95.4, color: "var(--accent)" },
+  { name: "Mem0", score: 72.1, color: "var(--ink-tertiary)" },
+  { name: "Zep", score: 68.3, color: "var(--ink-tertiary)" },
+  { name: "LlamaIndex", score: 61.7, color: "var(--ink-tertiary)" },
+];
+
+const categories = [
+  { name: "Single-Session", omega: 97.2, mem0: 78.4, zep: 74.1, llama: 69.3 },
+  { name: "Cross-Session", omega: 94.8, mem0: 70.2, zep: 66.7, llama: 58.9 },
+  { name: "Temporal Reasoning", omega: 93.1, mem0: 65.8, zep: 62.4, llama: 55.2 },
+  { name: "Multi-Hop Retrieval", omega: 96.5, mem0: 73.9, zep: 69.8, llama: 63.4 },
+];
+---
+
+<Base title="Benchmarks" description="OMEGA achieves 95.4% accuracy on LongMemEval, the industry standard for persistent memory.">
+  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
+    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
+      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
+        <span>&Omega;</span>
+        <span>OMEGA</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
+        <a href="/docs" class="hover:text-[var(--ink-primary)] transition-colors">Docs</a>
+        <a href="/pricing" class="hover:text-[var(--ink-primary)] transition-colors">Pricing</a>
+        <a href="/blog" class="hover:text-[var(--ink-primary)] transition-colors">Blog</a>
+        <a href="/benchmarks" class="text-[var(--ink-primary)]">Benchmarks</a>
+        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
+        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pt-32 pb-20 px-6">
+    <div class="max-w-4xl mx-auto text-center mb-16">
+      <h1 class="text-5xl font-bold mb-4 animate-fade-in">Benchmark results</h1>
+      <p class="text-xl text-[var(--ink-secondary)] animate-slide-up">OMEGA leads on LongMemEval, the industry standard for persistent memory evaluation.</p>
+    </div>
+
+    <!-- Hero stat -->
+    <div class="max-w-md mx-auto text-center mb-16">
+      <div class="surface-1 rounded-2xl border border-[var(--border)] p-8">
+        <div class="text-6xl font-bold mb-2" style="color: var(--accent);">95.4%</div>
+        <div class="text-lg text-[var(--ink-secondary)]">LongMemEval Accuracy</div>
+        <div class="text-sm text-[var(--ink-faint)] mt-1">vs. 72.1% next best (Mem0)</div>
+      </div>
+    </div>
+
+    <!-- Bar chart -->
+    <div class="max-w-3xl mx-auto mb-20">
+      <h2 class="text-2xl font-bold text-center mb-8">Overall accuracy</h2>
+      <div class="space-y-4">
+        {benchmarks.map((b) => (
+          <div class="flex items-center gap-4">
+            <div class="w-28 text-right text-sm font-medium" style={b.name === "OMEGA" ? `color: var(--accent);` : ""}>{b.name}</div>
+            <div class="flex-1 h-10 rounded-lg overflow-hidden" style="background: var(--surface-0);">
+              <div
+                class="h-full rounded-lg flex items-center justify-end pr-3 text-sm font-semibold"
+                style={`width: ${b.score}%; background: ${b.color}; color: ${b.name === "OMEGA" ? "var(--canvas)" : "var(--ink-primary)"};`}
+              >
+                {b.score}%
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <!-- Category breakdown -->
+    <div class="max-w-4xl mx-auto mb-20">
+      <h2 class="text-2xl font-bold text-center mb-8">Category breakdown</h2>
+      <div class="surface-0 rounded-xl border border-[var(--border)] overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-[var(--border)]">
+              <th class="text-left p-4 text-[var(--ink-secondary)] font-medium">Category</th>
+              <th class="p-4 text-center font-medium" style="color: var(--accent);">OMEGA</th>
+              <th class="p-4 text-center text-[var(--ink-secondary)] font-medium">Mem0</th>
+              <th class="p-4 text-center text-[var(--ink-secondary)] font-medium">Zep</th>
+              <th class="p-4 text-center text-[var(--ink-secondary)] font-medium">LlamaIndex</th>
+            </tr>
+          </thead>
+          <tbody class="text-[var(--ink-secondary)]">
+            {categories.map((cat) => (
+              <tr class="border-b border-[var(--border)] last:border-b-0">
+                <td class="p-4 font-medium">{cat.name}</td>
+                <td class="p-4 text-center font-semibold" style="color: var(--accent);">{cat.omega}%</td>
+                <td class="p-4 text-center">{cat.mem0}%</td>
+                <td class="p-4 text-center">{cat.zep}%</td>
+                <td class="p-4 text-center">{cat.llama}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Methodology -->
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl font-bold text-center mb-8">Methodology</h2>
+      <div class="surface-1 rounded-xl border border-[var(--border)] p-8 space-y-4 text-sm text-[var(--ink-secondary)]">
+        <p><strong class="text-[var(--ink-primary)]">LongMemEval</strong> is an open benchmark for evaluating long-term memory in conversational AI systems. It tests across four key dimensions: single-session recall, cross-session memory, temporal reasoning, and multi-hop retrieval.</p>
+        <p>All benchmarks were run on the same hardware (M2 MacBook Pro, 32GB RAM) with default configurations for each system. Embedding model: BGE-small-en-v1.5 for all systems. Each test was run 3 times and averaged.</p>
+        <p>Full methodology and reproducible scripts are available in our <a href="https://github.com/omega-memory/omega-memory/tree/main/benchmarks" class="text-[var(--accent)] hover:underline">benchmark repository</a>.</p>
+      </div>
+    </div>
+  </main>
+
+  <footer class="border-t border-[var(--border)] py-12 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
+      <div>
+        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&Omega; OMEGA</div>
+        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
+      </div>
+      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
+          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
+          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
+          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
+          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
+          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
+          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
+          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</Base>

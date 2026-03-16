@@ -1,0 +1,126 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Terms of Service" description="Terms and conditions for using OMEGA Memory.">
+  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
+    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
+      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
+        <span>&Omega;</span>
+        <span>OMEGA</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
+        <a href="/docs" class="hover:text-[var(--ink-primary)] transition-colors">Docs</a>
+        <a href="/pricing" class="hover:text-[var(--ink-primary)] transition-colors">Pricing</a>
+        <a href="/blog" class="hover:text-[var(--ink-primary)] transition-colors">Blog</a>
+        <a href="/benchmarks" class="hover:text-[var(--ink-primary)] transition-colors">Benchmarks</a>
+        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
+        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pt-32 pb-20 px-6">
+    <div class="max-w-3xl mx-auto">
+      <h1 class="text-4xl font-bold mb-2 animate-fade-in">Terms of Service</h1>
+      <p class="text-sm text-[var(--ink-faint)] mb-12">Last updated: March 1, 2026</p>
+
+      <div class="space-y-8 text-[var(--ink-secondary)] text-sm leading-relaxed">
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">1. Acceptance of Terms</h2>
+          <p>By accessing or using OMEGA Memory ("the Service"), you agree to be bound by these Terms of Service. If you do not agree, do not use the Service. These terms apply to all users, including free and Pro subscribers.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">2. Description of Service</h2>
+          <p>OMEGA Memory provides a persistent memory system for AI coding agents. The Service includes a local memory server, MCP tools, CLI, HTTP API, and optional cloud sync features available through a paid Pro subscription.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">3. Free and Pro Tiers</h2>
+          <p class="mb-3"><strong class="text-[var(--ink-primary)]">Free Tier:</strong> The local version of OMEGA is provided free of charge with no usage limits. It runs entirely on your device and requires no account.</p>
+          <p><strong class="text-[var(--ink-primary)]">Pro Tier:</strong> Cloud sync, team workspaces, and advanced features require a paid Pro subscription at $19/month or $190/year. Payment is processed through Stripe. You may cancel at any time; access continues through the end of your billing period.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">4. Your Data</h2>
+          <p class="mb-3">You retain full ownership of all data stored in OMEGA, whether locally or in the cloud. We do not claim any rights to your memory data, code, or content.</p>
+          <p>For cloud sync users, you grant us a limited license to store, process, and transmit your data solely for the purpose of providing the sync service.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">5. Acceptable Use</h2>
+          <p class="mb-3">You agree not to:</p>
+          <ul class="list-disc list-inside space-y-1 pl-2">
+            <li>Use the Service for any unlawful purpose</li>
+            <li>Attempt to gain unauthorized access to our systems</li>
+            <li>Reverse-engineer the Pro license verification system</li>
+            <li>Share Pro license keys with unauthorized users</li>
+            <li>Use the Service to store or transmit malware</li>
+            <li>Exceed reasonable usage limits that degrade service for others</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">6. Open Source Components</h2>
+          <p>The core OMEGA Memory engine is open source under the MIT License. Pro features and cloud services are proprietary. Your use of open source components is governed by their respective licenses.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">7. Service Availability</h2>
+          <p>We strive for high availability of cloud services but do not guarantee 100% uptime. The local version operates independently and is not affected by cloud service disruptions. We will provide reasonable notice of planned maintenance.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">8. Limitation of Liability</h2>
+          <p>OMEGA Memory is provided "as is" without warranty of any kind. To the maximum extent permitted by law, we shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of the Service, including data loss, business interruption, or lost profits.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">9. Termination</h2>
+          <p>We may suspend or terminate your access to Pro features for violation of these terms. Upon termination, your cloud data will be available for export for 30 days. Local data is unaffected by account termination.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">10. Changes to Terms</h2>
+          <p>We may update these terms from time to time. Material changes will be communicated to Pro users via email at least 30 days in advance. Continued use of the Service after changes take effect constitutes acceptance.</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-[var(--ink-primary)] mb-3">11. Contact</h2>
+          <p>For questions about these terms, contact us at <a href="mailto:legal@omega-memory.dev" class="text-[var(--accent)] hover:underline">legal@omega-memory.dev</a>.</p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="border-t border-[var(--border)] py-12 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
+      <div>
+        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&Omega; OMEGA</div>
+        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
+      </div>
+      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
+          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
+          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
+          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
+          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
+          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
+          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
+          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</Base>

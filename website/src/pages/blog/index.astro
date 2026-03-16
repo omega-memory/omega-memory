@@ -1,0 +1,127 @@
+---
+import Base from "../../layouts/Base.astro";
+
+const posts = [
+  {
+    slug: "introducing-omega-1-3",
+    title: "Introducing OMEGA 1.3: Multi-Agent Coordination",
+    excerpt: "The latest release brings real-time coordination between concurrent AI agents with file claims, handoffs, and shared context.",
+    date: "2026-03-10",
+    tag: "Release",
+  },
+  {
+    slug: "longmemeval-benchmark",
+    title: "How OMEGA Achieved 95.4% on LongMemEval",
+    excerpt: "A deep dive into our benchmark results and the architecture decisions that made persistent memory reliable at scale.",
+    date: "2026-03-01",
+    tag: "Engineering",
+  },
+  {
+    slug: "local-first-memory",
+    title: "Why Local-First Matters for AI Memory",
+    excerpt: "Data sovereignty, latency, and reliability: the case for keeping agent memory on your machine first.",
+    date: "2026-02-20",
+    tag: "Architecture",
+  },
+  {
+    slug: "thompson-sampling-retrieval",
+    title: "Thompson Sampling for Memory Retrieval",
+    excerpt: "How we use multi-armed bandit algorithms to rank memories by relevance, improving recall accuracy by 23%.",
+    date: "2026-02-10",
+    tag: "Research",
+  },
+  {
+    slug: "cloud-sync-launch",
+    title: "Cloud Sync is Here: PostgreSQL, Supabase, and D1",
+    excerpt: "OMEGA Pro now supports syncing your local memory store to cloud backends for team collaboration.",
+    date: "2026-01-28",
+    tag: "Product",
+  },
+  {
+    slug: "mcp-protocol-deep-dive",
+    title: "Building on MCP: Lessons from 15 Tools",
+    excerpt: "What we learned building a production MCP server with 15 tools for memory management.",
+    date: "2026-01-15",
+    tag: "Engineering",
+  },
+];
+
+const tagColors: Record<string, string> = {
+  Release: "var(--accent)",
+  Engineering: "var(--decision)",
+  Architecture: "var(--preference)",
+  Research: "var(--lesson)",
+  Product: "var(--reminder)",
+};
+---
+
+<Base title="Blog" description="News, engineering deep dives, and product updates from the OMEGA team.">
+  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
+    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
+      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
+        <span>&Omega;</span>
+        <span>OMEGA</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
+        <a href="/docs" class="hover:text-[var(--ink-primary)] transition-colors">Docs</a>
+        <a href="/pricing" class="hover:text-[var(--ink-primary)] transition-colors">Pricing</a>
+        <a href="/blog" class="text-[var(--ink-primary)]">Blog</a>
+        <a href="/benchmarks" class="hover:text-[var(--ink-primary)] transition-colors">Benchmarks</a>
+        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
+        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pt-32 pb-20 px-6">
+    <div class="max-w-4xl mx-auto">
+      <h1 class="text-5xl font-bold mb-4 animate-fade-in">Blog</h1>
+      <p class="text-xl text-[var(--ink-secondary)] mb-12 animate-slide-up">Engineering deep dives, product updates, and research from the OMEGA team.</p>
+
+      <div class="grid md:grid-cols-2 gap-6">
+        {posts.map((post) => (
+          <a href={`/blog/${post.slug}`} class="group surface-1 rounded-xl border border-[var(--border)] p-6 hover:border-[var(--border-hover)] transition-all block">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="text-xs font-medium px-2 py-0.5 rounded-full" style={`color: ${tagColors[post.tag] || 'var(--ink-secondary)'}; background: color-mix(in srgb, ${tagColors[post.tag] || 'var(--ink-secondary)'} 15%, transparent);`}>
+                {post.tag}
+              </span>
+              <span class="text-xs text-[var(--ink-faint)]">{post.date}</span>
+            </div>
+            <h2 class="text-lg font-semibold mb-2 group-hover:text-[var(--accent)] transition-colors">{post.title}</h2>
+            <p class="text-sm text-[var(--ink-secondary)] leading-relaxed">{post.excerpt}</p>
+          </a>
+        ))}
+      </div>
+    </div>
+  </main>
+
+  <footer class="border-t border-[var(--border)] py-12 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
+      <div>
+        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&Omega; OMEGA</div>
+        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
+      </div>
+      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
+          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
+          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
+          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
+          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
+          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
+          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
+          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</Base>

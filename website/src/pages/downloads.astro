@@ -1,0 +1,162 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Downloads" description="Install OMEGA Memory and get started in seconds.">
+  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
+    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
+      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
+        <span>&Omega;</span>
+        <span>OMEGA</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
+        <a href="/docs" class="hover:text-[var(--ink-primary)] transition-colors">Docs</a>
+        <a href="/pricing" class="hover:text-[var(--ink-primary)] transition-colors">Pricing</a>
+        <a href="/blog" class="hover:text-[var(--ink-primary)] transition-colors">Blog</a>
+        <a href="/benchmarks" class="hover:text-[var(--ink-primary)] transition-colors">Benchmarks</a>
+        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
+        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pt-32 pb-20 px-6">
+    <div class="max-w-4xl mx-auto text-center mb-16">
+      <h1 class="text-5xl font-bold mb-4 animate-fade-in">Download OMEGA</h1>
+      <p class="text-xl text-[var(--ink-secondary)] animate-slide-up">Install in seconds. No account required.</p>
+    </div>
+
+    <!-- pip install -->
+    <div class="max-w-2xl mx-auto mb-16">
+      <div class="surface-0 rounded-xl border border-[var(--border)] overflow-hidden">
+        <div class="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)]">
+          <div class="w-3 h-3 rounded-full" style="background: #f06060;"></div>
+          <div class="w-3 h-3 rounded-full" style="background: #e8a040;"></div>
+          <div class="w-3 h-3 rounded-full" style="background: #5ec9a0;"></div>
+          <span class="text-xs text-[var(--ink-faint)] ml-2 font-mono">terminal</span>
+        </div>
+        <div class="p-6 font-mono text-sm flex items-center justify-between">
+          <code><span style="color: var(--ink-faint);">$</span> <span style="color: var(--accent);">pip install omega-memory</span></code>
+          <button class="text-[var(--ink-faint)] hover:text-[var(--ink-primary)] transition-colors text-xs px-2 py-1 rounded border border-[var(--border)]" id="copy-btn" data-copy="pip install omega-memory">Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Platform downloads -->
+    <div class="max-w-4xl mx-auto mb-20">
+      <h2 class="text-2xl font-bold text-center mb-8">Platform packages</h2>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-6 text-center">
+          <div class="text-3xl mb-3">&#63743;</div>
+          <h3 class="font-semibold mb-2">macOS</h3>
+          <p class="text-sm text-[var(--ink-secondary)] mb-4">Apple Silicon &amp; Intel<br/>macOS 12+</p>
+          <a href="https://github.com/omega-memory/omega-memory/releases/latest" class="inline-block px-5 py-2.5 rounded-lg text-sm font-medium border border-[var(--border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--border-hover)] transition-all">
+            Download .pkg
+          </a>
+        </div>
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-6 text-center">
+          <div class="text-3xl mb-3">&#128039;</div>
+          <h3 class="font-semibold mb-2">Linux</h3>
+          <p class="text-sm text-[var(--ink-secondary)] mb-4">x86_64 &amp; ARM64<br/>Ubuntu 20.04+, Debian, Fedora</p>
+          <a href="https://github.com/omega-memory/omega-memory/releases/latest" class="inline-block px-5 py-2.5 rounded-lg text-sm font-medium border border-[var(--border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--border-hover)] transition-all">
+            Download .tar.gz
+          </a>
+        </div>
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-6 text-center">
+          <div class="text-3xl mb-3">&#128187;</div>
+          <h3 class="font-semibold mb-2">Windows</h3>
+          <p class="text-sm text-[var(--ink-secondary)] mb-4">x86_64<br/>Windows 10+ / WSL2</p>
+          <a href="https://github.com/omega-memory/omega-memory/releases/latest" class="inline-block px-5 py-2.5 rounded-lg text-sm font-medium border border-[var(--border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--border-hover)] transition-all">
+            Download .msi
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick start -->
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl font-bold text-center mb-8">Quick start</h2>
+      <div class="space-y-6">
+        <div class="flex gap-4">
+          <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold text-[var(--canvas)]" style="background: var(--accent);">1</div>
+          <div class="flex-1">
+            <h3 class="font-semibold mb-2">Install</h3>
+            <pre class="text-sm"><code><span style="color: var(--ink-faint);">$</span> pip install omega-memory</code></pre>
+          </div>
+        </div>
+        <div class="flex gap-4">
+          <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold text-[var(--canvas)]" style="background: var(--accent);">2</div>
+          <div class="flex-1">
+            <h3 class="font-semibold mb-2">Start the server</h3>
+            <pre class="text-sm"><code><span style="color: var(--ink-faint);">$</span> omega serve --daemon
+<span style="color: var(--lesson);">&#10003;</span> MCP server running on http://localhost:8377</code></pre>
+          </div>
+        </div>
+        <div class="flex gap-4">
+          <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold text-[var(--canvas)]" style="background: var(--accent);">3</div>
+          <div class="flex-1">
+            <h3 class="font-semibold mb-2">Add to your IDE</h3>
+            <p class="text-sm text-[var(--ink-secondary)] mb-3">Add the OMEGA MCP server to your editor's config:</p>
+            <pre class="text-sm"><code><span style="color: var(--ink-faint);">// claude_desktop_config.json</span>
+{
+  "mcpServers": {
+    "omega": {
+      "command": "omega",
+      "args": ["serve", "--stdio"]
+    }
+  }
+}</code></pre>
+          </div>
+        </div>
+        <div class="flex gap-4">
+          <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold text-[var(--canvas)]" style="background: var(--accent);">4</div>
+          <div class="flex-1">
+            <h3 class="font-semibold mb-2">Done! Start building with memory.</h3>
+            <p class="text-sm text-[var(--ink-secondary)]">Your AI agents now have persistent memory across sessions. <a href="/docs" class="text-[var(--accent)] hover:underline">Read the docs</a> to learn more.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="border-t border-[var(--border)] py-12 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
+      <div>
+        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&Omega; OMEGA</div>
+        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
+      </div>
+      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
+          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
+          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
+          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
+          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
+          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
+          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
+          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('copy-btn')?.addEventListener('click', (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      const text = btn.dataset.copy || '';
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    });
+  </script>
+</Base>

@@ -1,0 +1,185 @@
+---
+import Base from "../../layouts/Base.astro";
+
+const sections = [
+  {
+    title: "Getting Started",
+    links: [
+      { label: "Installation", href: "/docs/installation" },
+      { label: "Quick Start", href: "/docs/quick-start" },
+      { label: "Configuration", href: "/docs/configuration" },
+    ],
+  },
+  {
+    title: "Core Concepts",
+    links: [
+      { label: "Memory Types", href: "/docs/memory-types" },
+      { label: "Semantic Search", href: "/docs/semantic-search" },
+      { label: "Thompson Sampling", href: "/docs/thompson-sampling" },
+      { label: "Multi-Agent Coordination", href: "/docs/coordination" },
+    ],
+  },
+  {
+    title: "MCP Server",
+    links: [
+      { label: "Tool Reference", href: "/docs/tools" },
+      { label: "HTTP Transport", href: "/docs/http-transport" },
+      { label: "stdio Transport", href: "/docs/stdio-transport" },
+    ],
+  },
+  {
+    title: "Integrations",
+    links: [
+      { label: "Claude Code", href: "/docs/claude-code" },
+      { label: "Cursor", href: "/docs/cursor" },
+      { label: "Windsurf", href: "/docs/windsurf" },
+      { label: "Custom Clients", href: "/docs/custom-clients" },
+    ],
+  },
+  {
+    title: "Cloud & Pro",
+    links: [
+      { label: "Cloud Sync Setup", href: "/docs/cloud-sync" },
+      { label: "PostgreSQL Backend", href: "/docs/postgresql" },
+      { label: "Supabase Backend", href: "/docs/supabase" },
+      { label: "Multi-Tenant Teams", href: "/docs/multi-tenant" },
+      { label: "OIDC Authentication", href: "/docs/oidc" },
+    ],
+  },
+  {
+    title: "API Reference",
+    links: [
+      { label: "Python SDK", href: "/docs/python-sdk" },
+      { label: "HTTP API", href: "/docs/http-api" },
+      { label: "CLI Reference", href: "/docs/cli" },
+    ],
+  },
+];
+---
+
+<Base title="Documentation" description="Learn how to install, configure, and use OMEGA Memory.">
+  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
+    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
+      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
+        <span>&Omega;</span>
+        <span>OMEGA</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
+        <a href="/docs" class="text-[var(--ink-primary)]">Docs</a>
+        <a href="/pricing" class="hover:text-[var(--ink-primary)] transition-colors">Pricing</a>
+        <a href="/blog" class="hover:text-[var(--ink-primary)] transition-colors">Blog</a>
+        <a href="/benchmarks" class="hover:text-[var(--ink-primary)] transition-colors">Benchmarks</a>
+        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
+        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pt-32 pb-20 px-6">
+    <div class="max-w-6xl mx-auto flex gap-12">
+      <!-- Sidebar -->
+      <aside class="hidden lg:block w-64 flex-shrink-0">
+        <div class="sticky top-24 space-y-6">
+          {sections.map((section) => (
+            <div>
+              <h3 class="text-xs uppercase tracking-wider text-[var(--ink-faint)] font-medium mb-2">{section.title}</h3>
+              <ul class="space-y-1">
+                {section.links.map((link) => (
+                  <li>
+                    <a href={link.href} class="block text-sm py-1 text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] transition-colors">
+                      {link.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <!-- Content -->
+      <div class="flex-1 min-w-0">
+        <h1 class="text-5xl font-bold mb-4 animate-fade-in">Documentation</h1>
+        <p class="text-xl text-[var(--ink-secondary)] mb-12 animate-slide-up">Everything you need to give your AI agents persistent memory.</p>
+
+        <!-- Getting started hero -->
+        <div class="surface-1 rounded-xl border border-[var(--border)] p-8 mb-12">
+          <h2 class="text-2xl font-bold mb-4">Getting started</h2>
+          <p class="text-[var(--ink-secondary)] mb-6">Get up and running with OMEGA in under a minute.</p>
+
+          <div class="space-y-4">
+            <div class="surface-0 rounded-xl border border-[var(--border)] overflow-hidden">
+              <div class="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)]">
+                <div class="w-3 h-3 rounded-full" style="background: #f06060;"></div>
+                <div class="w-3 h-3 rounded-full" style="background: #e8a040;"></div>
+                <div class="w-3 h-3 rounded-full" style="background: #5ec9a0;"></div>
+                <span class="text-xs text-[var(--ink-faint)] ml-2 font-mono">terminal</span>
+              </div>
+              <pre class="p-6 text-sm" style="background: transparent; border: none;"><code><span style="color: var(--ink-faint);">$</span> <span style="color: var(--accent);">pip install omega-memory</span>
+<span style="color: var(--ink-faint);">$</span> <span style="color: var(--accent);">omega serve --daemon</span>
+<span style="color: var(--lesson);">&#10003;</span> MCP server running on http://localhost:8377</code></pre>
+            </div>
+          </div>
+
+          <div class="mt-6 flex gap-4">
+            <a href="/docs/quick-start" class="px-5 py-2.5 rounded-lg font-medium text-sm text-[var(--canvas)]" style="background: var(--accent);">
+              Quick Start Guide
+            </a>
+            <a href="/docs/configuration" class="px-5 py-2.5 rounded-lg text-sm font-medium border border-[var(--border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--border-hover)] transition-all">
+              Configuration
+            </a>
+          </div>
+        </div>
+
+        <!-- Section cards -->
+        <div class="grid md:grid-cols-2 gap-6">
+          {sections.map((section) => (
+            <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+              <h3 class="font-semibold mb-3">{section.title}</h3>
+              <ul class="space-y-2">
+                {section.links.map((link) => (
+                  <li>
+                    <a href={link.href} class="text-sm text-[var(--ink-secondary)] hover:text-[var(--accent)] transition-colors flex items-center gap-2">
+                      <span style="color: var(--ink-faint);">&rsaquo;</span>
+                      {link.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="border-t border-[var(--border)] py-12 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
+      <div>
+        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&Omega; OMEGA</div>
+        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
+      </div>
+      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
+          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
+          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
+          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
+          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
+          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
+          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
+          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</Base>
