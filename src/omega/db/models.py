@@ -36,7 +36,7 @@ class Memory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     node_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata: Mapped[str | None] = mapped_column(Text)
+    meta_: Mapped[str | None] = mapped_column("metadata", Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     last_accessed: Mapped[str | None] = mapped_column(Text)
     access_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -72,7 +72,7 @@ class Edge(Base):
     target_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     edge_type: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     weight: Mapped[float] = mapped_column(Float, default=1.0)
-    metadata: Mapped[str | None] = mapped_column(Text)
+    meta_: Mapped[str | None] = mapped_column("metadata", Text)
     created_at: Mapped[str] = mapped_column(Text, server_default="(datetime('now'))")
 
 
@@ -85,7 +85,7 @@ class ForgettingLog(Base):
     event_type: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     deleted_at: Mapped[str] = mapped_column(Text, nullable=False, index=True)
-    metadata: Mapped[str | None] = mapped_column(Text)
+    meta_: Mapped[str | None] = mapped_column("metadata", Text)
 
 
 class CloudDeleteQueue(Base):
@@ -107,7 +107,7 @@ class EntityIndex(Base):
     follow_through_rate: Mapped[float] = mapped_column(Float, default=0.0)
     first_seen: Mapped[str] = mapped_column(Text, nullable=False)
     last_updated: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata: Mapped[str | None] = mapped_column(Text)
+    meta_: Mapped[str | None] = mapped_column("metadata", Text)
 
 
 class MemoryCluster(Base):
@@ -303,7 +303,7 @@ class SecureProfile(Base):
     category: Mapped[str] = mapped_column(Text, nullable=False)
     field_name: Mapped[str] = mapped_column(Text, nullable=False)
     field_value_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata: Mapped[str | None] = mapped_column(Text)
+    meta_: Mapped[str | None] = mapped_column("metadata", Text)
     user_id: Mapped[str | None] = mapped_column(Text, ForeignKey("users.id"))
     created_at: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[str | None] = mapped_column(Text)
