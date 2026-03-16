@@ -1,7 +1,6 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import react from "@astrojs/react";
-import tailwind from "@astrojs/tailwind";
 
 // Select adapter based on ASTRO_ADAPTER env var:
 // - "cloudflare" (default for CF Workers deployment)
@@ -20,13 +19,23 @@ if (adapterName === "node") {
 export default defineConfig({
   output: "server",
   adapter,
+  security: {
+    checkOrigin: false, // Handled by Caddy reverse proxy
+  },
   integrations: [
     react(),
-    tailwind({ applyBaseStyles: false }),
   ],
   vite: {
+    css: {
+      postcss: "./postcss.config.mjs",
+    },
     ssr: {
-      external: ["pg", "postgres"],
+      external: ["pg", "postgres", "drizzle-orm", "drizzle-orm/d1", "drizzle-orm/postgres-js", "drizzle-orm/better-sqlite3", "better-sqlite3", "react-force-graph-3d", "3d-force-graph", "three"],
+    },
+    build: {
+      rollupOptions: {
+        external: ["better-sqlite3"],
+      },
     },
   },
 });

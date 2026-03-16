@@ -9,7 +9,7 @@ export const GET: APIRoute = async (context) => {
   let dbVersion: number | null = null;
 
   try {
-    const db = getDb(context);
+    const db = await getDb(context);
     const [row] = await db.select().from(schemaVersion).limit(1);
     dbVersion = row?.version ?? null;
     dbStatus = "ok";

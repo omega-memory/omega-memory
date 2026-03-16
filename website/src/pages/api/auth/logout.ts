@@ -12,7 +12,7 @@ export const POST: APIRoute = async (context) => {
 
   if (token) {
     try {
-      const db = getDb(context);
+      const db = await getDb(context);
       const secret =
         (context.locals.runtime as any)?.env?.AUTH_SECRET ??
         process.env.AUTH_SECRET ??
@@ -51,7 +51,7 @@ export const GET: APIRoute = async (context) => {
 
   if (token) {
     try {
-      const db = getDb(context);
+      const db = await getDb(context);
       const secret =
         (context.locals.runtime as any)?.env?.AUTH_SECRET ??
         process.env.AUTH_SECRET ??

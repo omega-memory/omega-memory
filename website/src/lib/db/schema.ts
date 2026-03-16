@@ -138,6 +138,7 @@ export const users = sqliteTable("users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash"),
   displayName: text("display_name"),
+  role: text("role").default("user"), // user | admin | superadmin
   createdAt: text("created_at"),
   updatedAt: text("updated_at"),
   isActive: integer("is_active").default(1),

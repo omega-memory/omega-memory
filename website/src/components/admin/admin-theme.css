@@ -1,0 +1,51 @@
+/* Midnight Gold — admin theme override
+   Edit this file to retheme the entire admin dashboard.
+   All values are scoped under .admin-scope so the public site is unaffected. */
+
+.admin-scope {
+  /* ─── Accent (gold, matching public site) ─── */
+  /* No gold overrides needed — inherits from :root */
+
+  /* ─── Themeable RGB for rgba() usage ─── */
+  --admin-accent-rgb: 212, 168, 67;
+
+  /* ─── Surfaces (deeper/darker) ─── */
+  --color-canvas: #09090b;
+  --color-surface: #101014;
+  --color-surface-elevated: #18181c;
+  --color-surface-hover: #1e1e24;
+
+  /* ─── Additional surface tokens ─── */
+  --color-obsidian: #131317;
+  --color-charcoal: #1e1e24;
+
+  /* ─── Shadows (gold tint) ─── */
+  --shadow-card-important: 0 2px 8px rgba(0,0,0,0.5), 0 0 0 1px rgba(212,168,67,0.12);
+
+  /* ─── Scrollbar + selection (gold scoped) ─── */
+  ::selection {
+    background: rgba(212, 168, 67, 0.25);
+    color: #e8e8f0;
+  }
+}
+
+/* ─── Typography Scale ─────────────────────────────────────────
+   Named sizes for consistent text hierarchy across admin views.
+   Use these instead of hardcoded text-[Npx] classes.
+   Only imported by admin page.tsx which wraps content in .admin-scope. */
+
+.admin-text-title   { font-size: 22px; font-weight: 300; letter-spacing: -0.01em; }
+.admin-text-body    { font-size: 16px; }
+.admin-text-caption { font-size: 14px; }
+.admin-text-micro   { font-size: 12px; }
+.admin-text-nano    { font-size: 11px; }
+.admin-text-metric  { font-size: 22px; font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.admin-text-delta   { font-size: 12px; font-family: var(--font-mono); font-weight: 700; }
+
+.admin-scope ::-webkit-scrollbar-thumb {
+  background: rgba(212, 168, 67, 0.20);
+}
+
+.admin-scope ::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 168, 67, 0.35);
+}

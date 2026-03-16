@@ -9,7 +9,7 @@ async function requireAuth(context: Parameters<APIRoute>[0]) {
   const token = getSessionFromCookie(cookie);
   if (!token) return null;
 
-  const db = getDb(context);
+  const db = await getDb(context);
   const secret =
     (context.locals.runtime as any)?.env?.AUTH_SECRET ??
     process.env.AUTH_SECRET ??
@@ -27,7 +27,7 @@ export const GET: APIRoute = async (context) => {
     });
   }
 
-  const db = getDb(context);
+  const db = await getDb(context);
   const url = context.url;
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1"));
   const perPage = Math.min(100, Math.max(1, parseInt(url.searchParams.get("per_page") ?? "50")));
@@ -75,7 +75,7 @@ export const PATCH: APIRoute = async (context) => {
     });
   }
 
-  const db = getDb(context);
+  const db = await getDb(context);
   const body = await context.request.json();
   const { id, ...updates } = body;
 

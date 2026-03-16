@@ -3,7 +3,7 @@ import { getDb } from "../../../lib/db";
 import { AuthEngine, setSessionCookie } from "../../../lib/auth";
 
 export const POST: APIRoute = async (context) => {
-  const db = getDb(context);
+  const db = await getDb(context);
   const secret =
     (context.locals.runtime as any)?.env?.AUTH_SECRET ??
     process.env.AUTH_SECRET ??

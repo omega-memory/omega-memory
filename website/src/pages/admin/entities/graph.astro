@@ -1,0 +1,7 @@
+---
+import Admin from "../../../layouts/Admin.astro";
+import EntitiesGraphPage from "../../../components/admin/entities/graph/page";
+---
+<Admin title="Entities Graph">
+  <EntitiesGraphPage client:only="react" />
+</Admin>

@@ -5,11 +5,17 @@ const next = Astro.url.searchParams.get("next") ?? "/admin";
 const error = Astro.url.searchParams.get("error");
 ---
 
-<Base title="Login">
+<Base title="Login" hideNav={true} hideFooter={true}>
   <div class="login-container">
     <div class="login-card animate-fade-in">
       <div class="login-header">
-        <span class="logo">Ω</span>
+        <div class="logo">
+          <svg width="40" height="40" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="32" height="32" rx="6" fill="#0a0a0a"/>
+            <rect x="9" y="5" width="14" height="22" rx="7" stroke="#e8e6e3" stroke-width="2.4" fill="none"/>
+            <circle cx="16" cy="16" r="2.5" fill="#e8e6e3"/>
+          </svg>
+        </div>
         <h1>OMEGA Admin</h1>
         <p class="text-[var(--ink-faint)] text-sm">Sign in to continue</p>
       </div>
@@ -73,10 +79,9 @@ const error = Astro.url.searchParams.get("error");
       margin-bottom: 1.5rem;
     }
     .logo {
-      display: inline-block;
-      font-size: 2rem;
-      color: var(--accent);
-      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: center;
+      margin-bottom: 0.75rem;
     }
     .login-header h1 {
       font-size: 1.25rem;

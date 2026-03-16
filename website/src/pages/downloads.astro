@@ -100,15 +100,15 @@ import Base from "../layouts/Base.astro";
           <div class="flex-1">
             <h3 class="font-semibold mb-2">Add to your IDE</h3>
             <p class="text-sm text-[var(--ink-secondary)] mb-3">Add the OMEGA MCP server to your editor's config:</p>
-            <pre class="text-sm"><code><span style="color: var(--ink-faint);">// claude_desktop_config.json</span>
-{
+            <pre class="text-sm"><code><span style="color: var(--ink-faint);">{"// claude_desktop_config.json"}</span>
+{`{
   "mcpServers": {
     "omega": {
       "command": "omega",
       "args": ["serve", "--stdio"]
     }
   }
-}</code></pre>
+}`}</code></pre>
           </div>
         </div>
         <div class="flex gap-4">

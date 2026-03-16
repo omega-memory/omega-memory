@@ -315,12 +315,20 @@ export class AuthEngine {
 // Cookie helpers
 // ===================================================================
 
+const isProduction = typeof process !== "undefined" && process.env?.NODE_ENV === "production"
+  && !process.env?.OMEGA_DEV_HTTP;
+
+function secureSuffix(): string {
+  // Only add Secure flag when not explicitly in HTTP dev mode
+  return isProduction ? "; Secure" : "";
+}
+
 export function setSessionCookie(token: string): string {
-  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}; Secure`;
+  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}${secureSuffix()}`;
 }
 
 export function setProSessionCookie(token: string): string {
-  return `${PRO_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${PRO_SESSION_TTL_MS / 1000}; Secure`;
+  return `${PRO_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${PRO_SESSION_TTL_MS / 1000}${secureSuffix()}`;
 }
 
 export function clearSessionCookie(): string {

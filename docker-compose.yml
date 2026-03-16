@@ -32,6 +32,16 @@ services:
       postgres:
         condition: service_healthy
 
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    depends_on:
+      - dashboard
+      - omega
+
   dashboard:
     build:
       context: ./website
@@ -44,6 +54,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      OMEGA_URL: http://omega:8000
+      OMEGA_DEV_HTTP: "1"
       NODE_ENV: production
       HOST: "0.0.0.0"
       PORT: "3000"

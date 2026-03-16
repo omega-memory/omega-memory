@@ -1,0 +1,13 @@
+{
+    auto_https off
+}
+
+http://omega.local {
+    handle /api/omega/* {
+        uri strip_prefix /api/omega
+        reverse_proxy omega:8000
+    }
+    handle {
+        reverse_proxy dashboard:3000
+    }
+}

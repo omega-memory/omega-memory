@@ -13,7 +13,8 @@
     "db:studio": "drizzle-kit studio",
     "cf:dev": "wrangler dev",
     "cf:deploy": "astro build && wrangler deploy",
-    "astro": "astro"
+    "astro": "astro",
+    "admin:create": "node scripts/create-admin.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
@@ -21,6 +22,7 @@
     "@astrojs/cloudflare": "^13.1.1",
     "@astrojs/node": "^10.0.1",
     "@astrojs/react": "^4.2.1",
+    "@dagrejs/dagre": "^2.0.4",
     "@simplewebauthn/browser": "^13.0.0",
     "@simplewebauthn/server": "^13.0.0",
     "@xyflow/react": "^12.0.0",
@@ -29,9 +31,11 @@
     "drizzle-orm": "^0.39.0",
     "framer-motion": "^12.0.0",
     "gray-matter": "^4.0.0",
+    "mermaid": "^11.13.0",
     "postgres": "^3.4.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-force-graph-3d": "^1.25.0",
     "react-markdown": "^10.0.0",
     "recharts": "^2.15.0",
     "rehype-raw": "^7.0.0",

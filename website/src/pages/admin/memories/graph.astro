@@ -1,0 +1,7 @@
+---
+import Admin from "../../../layouts/Admin.astro";
+import MemoryGraphPage from "../../../components/admin/memories/graph/page";
+---
+<Admin title="Memory Graph">
+  <MemoryGraphPage client:only="react" />
+</Admin>
