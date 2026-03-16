@@ -50,3 +50,4 @@ CLAUDE.md
 # Installer packages
 *.pkg
 docs/submissions/
+uv.lock
