@@ -1,0 +1,225 @@
+---
+import Admin from "../../layouts/Admin.astro";
+import { getDb } from "../../lib/db";
+import { memories, coordSessions, syncState, adminAlerts } from "../../lib/db/schema";
+import { count, desc, eq, sql } from "drizzle-orm";
+
+const db = getDb(Astro);
+
+// Fetch overview metrics
+const [memoryCount] = await db.select({ value: count() }).from(memories);
+const [activeSessionCount] = await db
+  .select({ value: count() })
+  .from(coordSessions)
+  .where(eq(coordSessions.status, "active"));
+
+const [latestSync] = await db
+  .select()
+  .from(syncState)
+  .orderBy(desc(syncState.lastSyncAt))
+  .limit(1);
+
+const activeAlerts = await db
+  .select()
+  .from(adminAlerts)
+  .where(eq(adminAlerts.status, "active"))
+  .orderBy(desc(adminAlerts.createdAt))
+  .limit(5);
+
+const recentMemories = await db
+  .select({
+    id: memories.id,
+    nodeId: memories.nodeId,
+    content: memories.content,
+    eventType: memories.eventType,
+    project: memories.project,
+    createdAt: memories.createdAt,
+    status: memories.status,
+  })
+  .from(memories)
+  .orderBy(desc(memories.createdAt))
+  .limit(20);
+
+const syncOk = latestSync?.lastSyncAt
+  ? Date.now() - new Date(latestSync.lastSyncAt).getTime() < 5 * 60 * 1000
+  : false;
+---
+
+<Admin title="Dashboard">
+  <div class="p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-semibold">Dashboard</h1>
+      <span class="text-xs text-[var(--ink-faint)] font-mono">
+        {new Date().toISOString().slice(0, 19)}Z
+      </span>
+    </header>
+
+    <!-- Overview Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="card">
+        <div class="card-label">Total Memories</div>
+        <div class="card-value">{memoryCount.value.toLocaleString()}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Active Sessions</div>
+        <div class="card-value">{activeSessionCount.value}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Sync Status</div>
+        <div class="card-value flex items-center gap-2">
+          <span class:list={["health-dot", syncOk ? "dot-ok" : "dot-warn"]}></span>
+          {syncOk ? "Synced" : "Stale"}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-label">Active Alerts</div>
+        <div class="card-value">{activeAlerts.length}</div>
+      </div>
+    </div>
+
+    <!-- Alerts -->
+    {activeAlerts.length > 0 && (
+      <section>
+        <h2 class="section-title">Alerts</h2>
+        <div class="space-y-2">
+          {activeAlerts.map((alert) => (
+            <div class:list={["alert-row", `alert-${alert.severity}`]}>
+              <span class="font-mono text-xs uppercase">{alert.severity}</span>
+              <span class="flex-1">{alert.message}</span>
+              <span class="text-xs text-[var(--ink-faint)]">{alert.createdAt?.slice(0, 16)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+
+    <!-- Recent Memories -->
+    <section>
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="section-title mb-0">Recent Memories</h2>
+        <a href="/admin/memories" class="text-sm text-[var(--accent)] hover:underline">View all</a>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Node ID</th>
+              <th>Type</th>
+              <th>Project</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Content</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recentMemories.map((m) => (
+              <tr>
+                <td class="font-mono text-xs">{m.nodeId.slice(0, 12)}...</td>
+                <td>
+                  <span class:list={["event-badge", `badge-${m.eventType ?? "unknown"}`]}>
+                    {m.eventType ?? "—"}
+                  </span>
+                </td>
+                <td class="text-[var(--ink-secondary)]">{m.project ?? "—"}</td>
+                <td>
+                  <span class:list={["health-dot", m.status === "active" ? "dot-ok" : "dot-warn"]}></span>
+                </td>
+                <td class="text-xs text-[var(--ink-faint)] whitespace-nowrap">{m.createdAt?.slice(0, 16)}</td>
+                <td class="max-w-xs truncate text-sm">{m.content.slice(0, 80)}</td>
+              </tr>
+            ))}
+            {recentMemories.length === 0 && (
+              <tr>
+                <td colspan="6" class="text-center text-[var(--ink-faint)] py-8">No memories yet</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .card {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+    .card-label {
+      font-size: 0.75rem;
+      color: var(--ink-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.25rem;
+    }
+    .card-value {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+    .section-title {
+      font-size: 1rem;
+      font-weight: 500;
+      color: var(--ink-secondary);
+      margin-bottom: 0.75rem;
+    }
+    .health-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .dot-ok { background: var(--lesson); }
+    .dot-warn { background: var(--reminder); }
+    .dot-error { background: var(--error); }
+
+    .alert-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      border: 1px solid var(--border);
+    }
+    .alert-warning { background: rgba(232, 160, 64, 0.08); border-color: rgba(232, 160, 64, 0.2); }
+    .alert-error { background: rgba(240, 96, 96, 0.08); border-color: rgba(240, 96, 96, 0.2); }
+    .alert-info { background: rgba(107, 159, 255, 0.08); border-color: rgba(107, 159, 255, 0.2); }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .data-table th {
+      text-align: left;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--ink-faint);
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .data-table td {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--ink-primary);
+    }
+    .data-table tr:hover td {
+      background: var(--surface-1);
+    }
+    .event-badge {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 500;
+      background: var(--surface-2);
+      color: var(--ink-secondary);
+    }
+    .badge-decision { color: var(--decision); background: rgba(107, 159, 255, 0.1); }
+    .badge-lesson { color: var(--lesson); background: rgba(94, 201, 160, 0.1); }
+    .badge-reminder { color: var(--reminder); background: rgba(232, 160, 64, 0.1); }
+    .badge-preference { color: var(--preference); background: rgba(176, 136, 232, 0.1); }
+    .badge-task { color: var(--task); background: rgba(64, 200, 200, 0.1); }
+  </style>
+</Admin>

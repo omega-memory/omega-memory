@@ -1,0 +1,145 @@
+---
+import Base from "../../layouts/Base.astro";
+
+const next = Astro.url.searchParams.get("next") ?? "/admin";
+const error = Astro.url.searchParams.get("error");
+---
+
+<Base title="Login">
+  <div class="login-container">
+    <div class="login-card animate-fade-in">
+      <div class="login-header">
+        <span class="logo">Ω</span>
+        <h1>OMEGA Admin</h1>
+        <p class="text-[var(--ink-faint)] text-sm">Sign in to continue</p>
+      </div>
+
+      {error && (
+        <div class="error-banner">
+          {error === "invalid" ? "Invalid email or password." : "Something went wrong. Please try again."}
+        </div>
+      )}
+
+      <form method="POST" action="/api/auth/login" class="login-form">
+        <input type="hidden" name="next" value={next} />
+
+        <div class="field">
+          <label for="email">Email</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            required
+            autocomplete="email"
+            placeholder="admin@example.com"
+          />
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            required
+            autocomplete="current-password"
+            placeholder="••••••••"
+          />
+        </div>
+
+        <button type="submit" class="submit-btn">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <style>
+    .login-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+    }
+    .login-header {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .logo {
+      display: inline-block;
+      font-size: 2rem;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+    .login-header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+    .error-banner {
+      background: rgba(240, 96, 96, 0.1);
+      border: 1px solid rgba(240, 96, 96, 0.25);
+      color: var(--error);
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+    .login-form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .field label {
+      font-size: 0.75rem;
+      color: var(--ink-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .field input {
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.6rem 0.75rem;
+      color: var(--ink-primary);
+      font-size: 0.9rem;
+      font-family: var(--font-sans);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .field input:focus {
+      border-color: var(--accent-dim);
+    }
+    .field input::placeholder {
+      color: var(--ink-faint);
+    }
+    .submit-btn {
+      margin-top: 0.5rem;
+      background: var(--accent);
+      color: var(--canvas);
+      border: none;
+      border-radius: 6px;
+      padding: 0.65rem 1rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .submit-btn:hover {
+      background: var(--accent-bright);
+    }
+  </style>
+</Base>
