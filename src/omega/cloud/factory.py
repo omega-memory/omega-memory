@@ -27,8 +27,16 @@ def create_backend(config_path: Optional[Path] = None) -> CloudBackend:
         return PostgresBackend(config["postgres_dsn"])
     elif "supabase_url" in config and "supabase_key" in config:
         return SupabaseBackend(config["supabase_url"], config["supabase_key"])
+    elif "d1_database_id" in config:
+        from .d1_backend import D1Backend
+        return D1Backend(
+            account_id=config["cloudflare_account_id"],
+            api_token=config["cloudflare_api_token"],
+            database_id=config["d1_database_id"],
+        )
     else:
         raise ValueError(
-            "Invalid configuration. Must contain 'postgres_dsn' or "
-            "'supabase_url' and 'supabase_key'."
+            "Invalid configuration. Must contain 'postgres_dsn', "
+            "'supabase_url'+'supabase_key', or 'd1_database_id'+"
+            "'cloudflare_account_id'+'cloudflare_api_token'."
         )

@@ -1,0 +1,77 @@
+---
+import Base from "./Base.astro";
+import { getDb } from "../lib/db";
+import { AuthEngine, getSessionFromCookie } from "../lib/auth";
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+
+// Auth check — redirect to login if not authenticated
+const cookie = Astro.request.headers.get("cookie");
+const token = getSessionFromCookie(cookie);
+
+if (!token) {
+  return Astro.redirect(`/admin/login?next=${encodeURIComponent(Astro.url.pathname)}`);
+}
+
+const db = getDb(Astro);
+const secret = (Astro.locals.runtime as any)?.env?.AUTH_SECRET ?? process.env.AUTH_SECRET ?? "dev-secret";
+const auth = new AuthEngine(db, secret);
+const user = await auth.validateSession(token);
+
+if (!user) {
+  return Astro.redirect("/admin/login");
+}
+
+// Make user available to page
+Astro.locals.user = user;
+---
+
+<Base title={title}>
+  <div class="flex h-screen overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-60 flex-shrink-0 surface-0 border-r border-[var(--border)] flex flex-col">
+      <div class="p-4 border-b border-[var(--border)]">
+        <a href="/admin" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-lg">
+          <span>Ω</span>
+          <span>OMEGA</span>
+        </a>
+      </div>
+      <nav class="flex-1 overflow-y-auto py-2">
+        <a href="/admin" class="sidebar-link">Dashboard</a>
+        <a href="/admin/memories" class="sidebar-link">Memories</a>
+        <a href="/admin/coordination" class="sidebar-link">Coordination</a>
+        <a href="/admin/entities" class="sidebar-link">Entities</a>
+        <a href="/admin/docs" class="sidebar-link">Docs</a>
+        <a href="/admin/jobs" class="sidebar-link">Jobs</a>
+        <a href="/admin/settings" class="sidebar-link">Settings</a>
+      </nav>
+      <div class="p-4 border-t border-[var(--border)] text-xs text-[var(--ink-faint)]">
+        {user.email}
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="flex-1 overflow-y-auto">
+      <slot />
+    </main>
+  </div>
+
+  <style>
+    .sidebar-link {
+      display: block;
+      padding: 0.5rem 1rem;
+      color: var(--ink-secondary);
+      text-decoration: none;
+      font-size: 0.875rem;
+      transition: color 0.2s, background 0.2s;
+    }
+    .sidebar-link:hover {
+      color: var(--ink-primary);
+      background: var(--surface-1);
+    }
+  </style>
+</Base>

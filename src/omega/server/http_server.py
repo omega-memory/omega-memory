@@ -10,6 +10,8 @@ Dependencies (starlette, uvicorn) are already transitive deps of mcp>=1.0.0.
 """
 
 import contextlib
+import logging
+import os
 import secrets
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -21,6 +23,8 @@ from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+logger = logging.getLogger("omega.server.http")
 
 API_KEY_PATH = Path.home() / ".omega" / "api_key"
 
@@ -34,6 +38,22 @@ def get_or_create_api_key() -> str:
     API_KEY_PATH.write_text(key + "\n")
     API_KEY_PATH.chmod(0o600)
     return key
+
+
+def _init_auth_engine():
+    """Initialize AuthEngine if DATABASE_URL is configured."""
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        return None
+    try:
+        from omega.db import get_engine, get_session_factory
+        from omega.auth.engine import AuthEngine
+        engine = get_engine(db_url)
+        session_factory = get_session_factory(engine)
+        return AuthEngine(session_factory)
+    except Exception as exc:
+        logger.warning("Could not initialize AuthEngine: %s", exc)
+        return None
 
 
 def create_http_app(server, api_key: str | None = None) -> Starlette:
@@ -107,7 +127,27 @@ async def run_http(host: str, port: int, api_key: str | None) -> None:
     await start_hook_server()
     _wire_plugin_retrieval()
 
+    # Run migrations if DATABASE_URL is set
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        try:
+            from omega.db.migrate import migrate
+            logger.info("Running database migrations...")
+            migrate(db_url)
+            logger.info("Migrations complete.")
+        except Exception as exc:
+            logger.error("Migration failed: %s", exc)
+
     app = create_http_app(server, api_key=api_key)
+
+    # Wrap with AuthMiddleware if auth is configured
+    auth_engine = _init_auth_engine()
+    if auth_engine or api_key or os.environ.get("AUTH0_DOMAIN"):
+        from omega.server.auth_middleware import AuthMiddleware
+        app = AuthMiddleware(app, auth_engine=auth_engine, api_key=api_key)
+        logger.info("Auth middleware enabled (engine=%s, api_key=%s, auth0=%s)",
+                     bool(auth_engine), bool(api_key), bool(os.environ.get("AUTH0_DOMAIN")))
+
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     srv = uvicorn.Server(config)
     await srv.serve()

@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+/* ===================================================================
+ * OMEGA Design System — ported from Next.js globals.css
+ * =================================================================== */
+
+:root {
+  /* Canvas */
+  --canvas: #08090f;
+  --surface-0: #0f1019;
+  --surface-1: #141520;
+  --surface-2: #1c1d2a;
+  --surface-3: #242536;
+
+  /* Ink hierarchy */
+  --ink-primary: #e8e8f0;
+  --ink-secondary: #9898b0;
+  --ink-tertiary: #7a7a94;
+  --ink-faint: #505068;
+
+  /* Accent */
+  --accent: #d4a843;
+  --accent-bright: #FFB000;
+  --accent-dim: #a88530;
+
+  /* Semantic */
+  --decision: #6b9fff;
+  --lesson: #5ec9a0;
+  --reminder: #e8a040;
+  --error: #f06060;
+  --preference: #b088e8;
+  --task: #40c8c8;
+
+  /* Borders */
+  --border: #1c1d2a;
+  --border-hover: #2a2b3d;
+
+  /* Typography */
+  --font-sans: "Outfit", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--canvas);
+  color: var(--ink-primary);
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--canvas);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ink-faint);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-tertiary);
+}
+
+/* Animations */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Surface utilities */
+.surface-0 { background: var(--surface-0); }
+.surface-1 { background: var(--surface-1); }
+.surface-2 { background: var(--surface-2); }
+.surface-3 { background: var(--surface-3); }
+
+/* Code blocks */
+pre, code {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+
+pre {
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-x: auto;
+}

@@ -1,0 +1,141 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="OMEGA Memory — Persistent Memory for AI Agents">
+  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
+    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
+      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
+        <span>Ω</span>
+        <span>OMEGA</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
+        <a href="/docs" class="hover:text-[var(--ink-primary)] transition-colors">Docs</a>
+        <a href="/pricing" class="hover:text-[var(--ink-primary)] transition-colors">Pricing</a>
+        <a href="/blog" class="hover:text-[var(--ink-primary)] transition-colors">Blog</a>
+        <a href="/benchmarks" class="hover:text-[var(--ink-primary)] transition-colors">Benchmarks</a>
+        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
+        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <section class="pt-32 pb-20 px-6">
+      <div class="max-w-4xl mx-auto text-center">
+        <h1 class="text-5xl md:text-6xl font-bold mb-6 animate-fade-in" style="line-height: 1.1;">
+          Persistent memory<br/>for AI agents
+        </h1>
+        <p class="text-xl text-[var(--ink-secondary)] mb-8 max-w-2xl mx-auto animate-slide-up">
+          Local-first intelligence layer. Your agents remember across sessions,
+          learn from outcomes, and coordinate in real-time.
+        </p>
+        <div class="flex items-center justify-center gap-4 animate-slide-up" style="animation-delay: 0.1s;">
+          <a href="/downloads" class="px-6 py-3 rounded-lg font-medium text-[var(--canvas)]" style="background: var(--accent);">
+            Download Free
+          </a>
+          <a href="/docs" class="px-6 py-3 rounded-lg font-medium border border-[var(--border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--border-hover)] transition-all">
+            Read Docs
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="pb-20 px-6">
+      <div class="max-w-3xl mx-auto">
+        <div class="surface-0 rounded-xl border border-[var(--border)] overflow-hidden">
+          <div class="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)]">
+            <div class="w-3 h-3 rounded-full" style="background: #f06060;"></div>
+            <div class="w-3 h-3 rounded-full" style="background: #e8a040;"></div>
+            <div class="w-3 h-3 rounded-full" style="background: #5ec9a0;"></div>
+            <span class="text-xs text-[var(--ink-faint)] ml-2 font-mono">omega</span>
+          </div>
+          <pre class="p-6 text-sm" style="background: transparent; border: none;"><code><span style="color: var(--ink-faint);">$</span> <span style="color: var(--accent);">pip install omega-memory</span>
+<span style="color: var(--lesson);">&#10003;</span> Installed omega-memory 1.3.0
+
+<span style="color: var(--ink-faint);">$</span> <span style="color: var(--accent);">omega serve --daemon</span>
+<span style="color: var(--lesson);">&#10003;</span> MCP server running on http://localhost:8377
+<span style="color: var(--ink-faint);">  15 tools loaded | HTTP transport | 61 MB RSS</span></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="pb-20 px-6">
+      <div class="max-w-6xl mx-auto">
+        <h2 class="text-3xl font-bold text-center mb-12">Why OMEGA?</h2>
+        <div class="grid md:grid-cols-3 gap-6">
+          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+            <div class="text-2xl mb-3">&#129504;</div>
+            <h3 class="font-semibold mb-2">Persistent Memory</h3>
+            <p class="text-sm text-[var(--ink-secondary)]">Memories survive restarts. Your agents build knowledge over weeks and months.</p>
+          </div>
+          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+            <div class="text-2xl mb-3">&#128274;</div>
+            <h3 class="font-semibold mb-2">Local-First</h3>
+            <p class="text-sm text-[var(--ink-secondary)]">Data stays on your machine. SQLite by default, sync to cloud when you choose.</p>
+          </div>
+          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+            <div class="text-2xl mb-3">&#129309;</div>
+            <h3 class="font-semibold mb-2">Multi-Agent Coordination</h3>
+            <p class="text-sm text-[var(--ink-secondary)]">File claims, handoffs, and shared context between concurrent agents.</p>
+          </div>
+          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+            <div class="text-2xl mb-3">&#128202;</div>
+            <h3 class="font-semibold mb-2">Intelligent Retrieval</h3>
+            <p class="text-sm text-[var(--ink-secondary)]">Semantic search with BGE embeddings. Thompson sampling for relevance ranking.</p>
+          </div>
+          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+            <div class="text-2xl mb-3">&#9729;&#65039;</div>
+            <h3 class="font-semibold mb-2">Cloud Sync</h3>
+            <p class="text-sm text-[var(--ink-secondary)]">Optional sync to PostgreSQL, Supabase, or Cloudflare D1. Multi-tenant by design.</p>
+          </div>
+          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
+            <div class="text-2xl mb-3">&#9889;</div>
+            <h3 class="font-semibold mb-2">Zero Config</h3>
+            <p class="text-sm text-[var(--ink-secondary)]">pip install, serve, done. Works with Claude Code, Cursor, Windsurf out of the box.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="py-20 px-6 border-t border-[var(--border)]">
+      <div class="max-w-2xl mx-auto text-center">
+        <h2 class="text-3xl font-bold mb-4">Ready to give your agents memory?</h2>
+        <p class="text-[var(--ink-secondary)] mb-8">Free forever for local use. Pro for cloud sync and team features.</p>
+        <a href="/pricing" class="inline-block px-8 py-4 rounded-lg font-medium text-lg text-[var(--canvas)]" style="background: var(--accent);">
+          View Pricing
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-[var(--border)] py-12 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
+      <div>
+        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&#937; OMEGA</div>
+        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
+      </div>
+      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
+          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
+          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
+          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
+          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
+          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
+          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
+          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</Base>

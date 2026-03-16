@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: omega
+      POSTGRES_USER: omega
+      POSTGRES_PASSWORD: omega_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omega"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  omega:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://omega:omega_dev_password@postgres:5432/omega
+      OMEGA_HOME: /data/omega
+      OMEGA_TRANSPORT: http
+      OMEGA_HTTP_HOST: "0.0.0.0"
+      OMEGA_HTTP_PORT: "8000"
+      OMEGA_API_KEY: ${OMEGA_API_KEY:-}
+    volumes:
+      - omega_data:/data/omega
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: ./website
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://omega:omega_dev_password@postgres:5432/omega
+      AUTH_SECRET: ${AUTH_SECRET:-omega-dev-secret-change-in-production}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      NODE_ENV: production
+      HOST: "0.0.0.0"
+      PORT: "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  omega_data:
