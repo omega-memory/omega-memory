@@ -2,140 +2,537 @@
 import Base from "../layouts/Base.astro";
 ---
 
-<Base title="OMEGA Memory — Persistent Memory for AI Agents">
-  <nav class="fixed top-0 w-full z-50 border-b border-[var(--border)]" style="background: rgba(8,9,15,0.85); backdrop-filter: blur(12px);">
-    <div class="max-w-6xl mx-auto flex items-center justify-between h-16 px-6">
-      <a href="/" class="flex items-center gap-2 text-[var(--accent)] font-semibold text-xl">
-        <span>Ω</span>
-        <span>OMEGA</span>
-      </a>
-      <div class="hidden md:flex items-center gap-8 text-sm text-[var(--ink-secondary)]">
-        <a href="/docs" class="hover:text-[var(--ink-primary)] transition-colors">Docs</a>
-        <a href="/pricing" class="hover:text-[var(--ink-primary)] transition-colors">Pricing</a>
-        <a href="/blog" class="hover:text-[var(--ink-primary)] transition-colors">Blog</a>
-        <a href="/benchmarks" class="hover:text-[var(--ink-primary)] transition-colors">Benchmarks</a>
-        <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)] transition-colors">GitHub</a>
-      </div>
-      <div class="flex items-center gap-4">
-        <a href="/admin/login" class="text-sm text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]">Login</a>
-        <a href="/pro" class="text-sm px-4 py-2 rounded-lg text-[var(--canvas)]" style="background: var(--accent);">Get Pro</a>
-      </div>
-    </div>
-  </nav>
+<Base title="OMEGA — Local-First Intelligence Layer for AI Agents">
+  <!-- Full-page starfield canvas — fixed behind everything, matches production -->
+  <canvas class="fixed inset-0 pointer-events-none" id="starfield" style="z-index: 0;"></canvas>
 
-  <main>
-    <section class="pt-32 pb-20 px-6">
-      <div class="max-w-4xl mx-auto text-center">
-        <h1 class="text-5xl md:text-6xl font-bold mb-6 animate-fade-in" style="line-height: 1.1;">
-          Persistent memory<br/>for AI agents
-        </h1>
-        <p class="text-xl text-[var(--ink-secondary)] mb-8 max-w-2xl mx-auto animate-slide-up">
-          Local-first intelligence layer. Your agents remember across sessions,
-          learn from outcomes, and coordinate in real-time.
+  <main style="position: relative; z-index: 1;">
+    <h1 class="sr-only">OMEGA — Local-First Intelligence Layer for AI Agents</h1>
+
+    <!-- ============================================================
+         HERO — Left-aligned text + Three.js 3D force graph
+         ============================================================ -->
+    <section class="relative h-screen overflow-hidden">
+      <!-- Three.js 3D graph + orbs container (full bleed, behind overlays) -->
+      <div class="absolute inset-0" id="hero-graph" style="z-index: 5;"></div>
+
+      <!-- Gradient overlays matching production — protect text readability -->
+      <div class="absolute inset-0 pointer-events-none" style="z-index: 10; background: linear-gradient(90deg, rgba(8,9,15,0.92) 0%, rgba(8,9,15,0.75) 35%, rgba(8,9,15,0.2) 60%, transparent 80%);"></div>
+      <div class="absolute inset-0 pointer-events-none" style="z-index: 10; background: linear-gradient(transparent 70%, rgb(8,9,15) 100%);"></div>
+      <div class="absolute inset-0 pointer-events-none" style="z-index: 10; background: linear-gradient(rgba(8,9,15,0.4) 0%, transparent 12%);"></div>
+
+      <!-- Hero text content — left aligned, above overlays -->
+      <div class="absolute inset-0 flex items-center pointer-events-none" style="z-index: 15;">
+        <div class="max-w-6xl mx-auto px-6 w-full">
+          <div class="max-w-xl pt-24 pointer-events-auto">
+            <p class="font-mono tracking-[0.2em] uppercase mb-8" style="font-size: 12px; color: var(--accent); opacity: 0.7;">Local-First Agent Intelligence</p>
+
+            <h2 class="font-light mb-6" style="font-family: var(--font-sans); font-size: clamp(2.8rem, 5.5vw, 4.2rem); line-height: 1.12; letter-spacing: -0.02em; color: rgba(255,255,255,0.95);">
+              Sovereign<br/>Intelligence<br/>
+              <span style="color: var(--accent); text-shadow: 0 0 60px rgba(212,168,67,0.4), 0 0 120px rgba(212,168,67,0.15);">for AI Agents.</span>
+            </h2>
+
+            <p class="mb-8" style="font-size: 16px; color: rgba(255,255,255,0.4); line-height: 1.7; max-width: 400px;">
+              The LLM is rented. The intelligence is owned. OMEGA runs entirely on your machine.
+            </p>
+
+            <!-- Install command -->
+            <div class="mb-6 px-5 py-3 rounded-md font-mono inline-block" style="font-size: 13px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); color: rgba(255,255,255,0.5);">
+              <span style="color: var(--accent);">$</span> pip install omega-memory && omega setup
+            </div>
+
+            <!-- CTA buttons — matching production -->
+            <div class="flex flex-wrap items-center gap-3 mb-8">
+              <a href="/downloads" class="cta-gold font-mono uppercase tracking-wider !text-xs !py-3 !px-6" style="border-radius: 6px;">
+                Install Free — No Cloud Required
+              </a>
+              <a href="https://github.com/omega-memory/omega-memory" class="cta-outline font-mono uppercase tracking-wider !text-xs !py-3 !px-6" style="border-radius: 6px; color: rgba(255,255,255,0.4); border-color: rgba(255,255,255,0.1);">
+                <span style="color: var(--accent);">&#9733;</span>&nbsp; Star on GitHub
+              </a>
+            </div>
+
+            <!-- Works with -->
+            <div class="flex flex-wrap items-center gap-4 mb-3">
+              <span class="font-mono uppercase tracking-wider" style="font-size: 10px; color: rgba(255,255,255,0.2);">Works with</span>
+              <a href="/downloads" class="flex items-center gap-1.5 font-mono hover:text-white transition-colors" style="font-size: 12px; color: rgba(255,255,255,0.35);">
+                <span style="color: var(--accent);">&gt;_</span> Claude Code
+              </a>
+              <a href="/downloads" class="flex items-center gap-1.5 font-mono hover:text-white transition-colors" style="font-size: 12px; color: rgba(255,255,255,0.35);">
+                <span style="color: var(--accent);">&#9654;</span> Cursor
+              </a>
+              <a href="/downloads" class="flex items-center gap-1.5 font-mono hover:text-white transition-colors" style="font-size: 12px; color: rgba(255,255,255,0.35);">
+                <span style="color: var(--accent);">&#9096;</span> Windsurf
+              </a>
+              <a href="/downloads" class="flex items-center gap-1.5 font-mono hover:text-white transition-colors" style="font-size: 12px; color: rgba(255,255,255,0.35);">
+                <span style="color: var(--accent);">&#10059;</span> OpenClaw
+              </a>
+              <a href="/downloads" class="flex items-center gap-1.5 font-mono hover:text-white transition-colors" style="font-size: 12px; color: rgba(255,255,255,0.35);">
+                <span style="color: var(--accent);">&#9881;</span> Obsidian
+              </a>
+              <a href="/downloads" class="flex items-center gap-1.5 font-mono hover:text-white transition-colors" style="font-size: 12px; color: rgba(255,255,255,0.35);">
+                <span style="color: var(--accent);">&#9650;</span> Antigravity
+              </a>
+              <a href="/downloads" class="flex items-center gap-1.5 font-mono hover:text-white transition-colors" style="font-size: 12px; color: rgba(255,255,255,0.35);">
+                <span style="color: var(--accent);">&#10070;</span> Codex
+              </a>
+            </div>
+
+            <p class="font-mono" style="font-size: 11px; color: rgba(255,255,255,0.15);">
+              APACHE-2.0 &middot; LOCAL-FIRST &middot; PYTHON 3.11+
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ============================================================
+         THE PROBLEM
+         ============================================================ -->
+    <section class="relative z-10 py-16 sm:py-32 px-6">
+      <div class="absolute inset-x-0 top-0 h-px" style="background: linear-gradient(90deg, transparent 10%, rgba(212,168,67,0.15) 50%, transparent 90%);"></div>
+      <div class="max-w-4xl mx-auto">
+        <p class="text-center font-mono tracking-[0.2em] uppercase mb-6" style="font-size: 12px; color: rgba(212,168,67,0.5);">The problem</p>
+        <h2 class="text-center font-light mb-10 sm:mb-16" style="font-size: clamp(32px, 5vw, 60px); color: rgba(255,255,255,0.95); letter-spacing: -0.02em; line-height: 1.1;">
+          Your agent forgets everything between <span style="color: var(--accent); text-shadow: 0 0 60px rgba(212,168,67,0.4);">sessions.</span>
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
+          <div class="card-hover rounded-sm p-6 sm:p-8 h-full relative overflow-hidden">
+            <span class="absolute -right-2 -top-4 font-mono font-bold leading-none select-none pointer-events-none" style="font-size: 100px; color: rgba(212,168,67,0.04);">&times;</span>
+            <div class="relative z-10">
+              <h3 class="font-medium mb-2" style="font-size: 16px; color: rgba(255,255,255,0.9);">Context lost</h3>
+              <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">Decisions vanish when the window closes. Static files can&rsquo;t retrieve what your agent needs.</p>
+            </div>
+          </div>
+          <div class="card-hover rounded-sm p-6 sm:p-8 h-full relative overflow-hidden">
+            <span class="absolute -right-2 -top-4 font-mono font-bold leading-none select-none pointer-events-none" style="font-size: 100px; color: rgba(212,168,67,0.04);">&harr;</span>
+            <div class="relative z-10">
+              <h3 class="font-medium mb-2" style="font-size: 16px; color: rgba(255,255,255,0.9);">Agents collide</h3>
+              <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">Two agents edit the same file. One overwrites the other. No awareness, no recovery.</p>
+            </div>
+          </div>
+          <div class="card-hover rounded-sm p-6 sm:p-8 h-full relative overflow-hidden">
+            <span class="absolute -right-2 -top-4 font-mono font-bold leading-none select-none pointer-events-none" style="font-size: 100px; color: rgba(212,168,67,0.04);">&#8635;</span>
+            <div class="relative z-10">
+              <h3 class="font-medium mb-2" style="font-size: 16px; color: rgba(255,255,255,0.9);">Nothing compounds</h3>
+              <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">Same mistakes, same questions, same blank slate. Every session starts from zero.</p>
+            </div>
+          </div>
+          <div class="card-hover rounded-sm p-6 sm:p-8 h-full relative overflow-hidden">
+            <span class="absolute -right-2 -top-4 font-mono font-bold leading-none select-none pointer-events-none" style="font-size: 100px; color: rgba(212,168,67,0.04);">&#9729;</span>
+            <div class="relative z-10">
+              <h3 class="font-medium mb-2" style="font-size: 16px; color: rgba(255,255,255,0.9);">Someone else&rsquo;s server</h3>
+              <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">Cloud memory means your context and decisions live on infrastructure you don&rsquo;t control.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Terminal Demo -->
+        <div class="max-w-3xl mx-auto">
+          <div class="rounded-sm border overflow-hidden" style="background: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.06);">
+            <div class="flex items-center gap-2 px-4 py-3 border-b" style="border-color: rgba(255,255,255,0.06);">
+              <div class="w-2.5 h-2.5 rounded-full" style="background: rgba(255,255,255,0.15);"></div>
+              <div class="w-2.5 h-2.5 rounded-full" style="background: rgba(255,255,255,0.15);"></div>
+              <div class="w-2.5 h-2.5 rounded-full" style="background: rgba(255,255,255,0.15);"></div>
+              <span class="text-xs ml-2 font-mono" style="color: rgba(255,255,255,0.2);">omega</span>
+            </div>
+            <pre class="p-6" style="background: transparent; border: none; font-size: 14px; line-height: 1.8;"><code><span style="color: rgba(255,255,255,0.25);">$</span> <span style="color: rgba(212,168,67,0.7);">pip install omega-memory</span>
+<span style="color: rgba(94,201,160,0.8);">&#10003;</span> <span style="color: rgba(255,255,255,0.5);">Installed omega-memory 1.3.0</span>
+
+<span style="color: rgba(255,255,255,0.25);">$</span> <span style="color: rgba(212,168,67,0.7);">omega serve --daemon</span>
+<span style="color: rgba(94,201,160,0.8);">&#10003;</span> <span style="color: rgba(255,255,255,0.5);">MCP server running on http://localhost:8377</span>
+<span style="color: rgba(255,255,255,0.2);">  15 tools loaded | HTTP transport | 61 MB RSS</span>
+
+<span style="color: rgba(255,255,255,0.25);">$</span> <span style="color: rgba(212,168,67,0.7);">omega_query("that webpack thing that broke prod")</span>
+<span style="color: rgba(255,255,255,0.2);">  Reranking 47 candidates &rarr; top 3</span>
+<span style="color: rgba(107,159,255,0.8);">  [0.94]</span> <span style="color: rgba(255,255,255,0.6);">webpack config changes broke HMR - reverted to v5.88</span>
+<span style="color: rgba(107,159,255,0.8);">  [0.87]</span> <span style="color: rgba(255,255,255,0.6);">production build failing: set NODE_ENV before webpack</span>
+<span style="color: rgba(232,160,64,0.8);">  &#9888; contradiction detected with memory #1204</span></code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Amber horizon divider -->
+    <div class="amber-horizon"></div>
+
+    <!-- ============================================================
+         PIPELINE STAGES
+         ============================================================ -->
+    <section class="relative z-10 py-16 sm:py-32 px-6">
+      <div class="max-w-5xl mx-auto">
+        <div class="text-center mb-12 sm:mb-16">
+          <p class="font-mono tracking-[0.2em] uppercase mb-6" style="font-size: 12px; color: rgba(212,168,67,0.5);">How OMEGA thinks</p>
+          <h2 class="font-light" style="font-size: clamp(32px, 5vw, 60px); color: rgba(255,255,255,0.95); letter-spacing: -0.02em; line-height: 1.1;">
+            Four stages. One <span style="color: var(--accent); text-shadow: 0 0 60px rgba(212,168,67,0.4);">pipeline.</span>
+          </h2>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 max-w-4xl mx-auto">
+          <div class="card-hover rounded-sm p-6 sm:p-8 h-full relative overflow-hidden">
+            <span class="absolute -right-2 -top-4 font-mono font-bold leading-none select-none pointer-events-none" style="font-size: 100px; color: rgba(212,168,67,0.04);">01</span>
+            <div class="relative z-10">
+              <div class="flex items-center gap-3 mb-3">
+                <p class="font-mono tracking-[0.2em] uppercase" style="font-size: 11px; color: rgba(212,168,67,0.5);">Stage 01 — Capture</p>
+                <span class="font-mono px-2 py-0.5 rounded-sm" style="font-size: 10px; color: rgba(255,255,255,0.3); border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.02);">Automatic classification</span>
+              </div>
+              <h3 class="font-light mb-4" style="font-size: 20px; color: rgba(255,255,255,0.9); letter-spacing: -0.01em; line-height: 1.3;">Hooks detect it. You don&rsquo;t lift a finger.</h3>
+              <ul class="space-y-2.5">
+                <li class="flex items-start gap-2.5" style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">
+                  <span class="mt-1.5 flex-shrink-0 w-1 h-1 rounded-full" style="background: rgba(212,168,67,0.5);"></span>
+                  Classifies into decisions, lessons, preferences, tasks, or observations
+                </li>
+                <li class="flex items-start gap-2.5" style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">
+                  <span class="mt-1.5 flex-shrink-0 w-1 h-1 rounded-full" style="background: rgba(212,168,67,0.5);"></span>
+                  Git hooks, shell hooks, and MCP tool calls — all captured automatically
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card-hover rounded-sm p-6 sm:p-8 h-full relative overflow-hidden">
+            <span class="absolute -right-2 -top-4 font-mono font-bold leading-none select-none pointer-events-none" style="font-size: 100px; color: rgba(212,168,67,0.04);">02</span>
+            <div class="relative z-10">
+              <div class="flex items-center gap-3 mb-3">
+                <p class="font-mono tracking-[0.2em] uppercase" style="font-size: 11px; color: rgba(212,168,67,0.5);">Stage 02 — Embed</p>
+                <span class="font-mono px-2 py-0.5 rounded-sm" style="font-size: 10px; color: rgba(255,255,255,0.3); border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.02);">384-dim</span>
+              </div>
+              <h3 class="font-light mb-4" style="font-size: 20px; color: rgba(255,255,255,0.9); letter-spacing: -0.01em; line-height: 1.3;">Meaning, not keywords.</h3>
+              <ul class="space-y-2.5">
+                <li class="flex items-start gap-2.5" style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">
+                  <span class="mt-1.5 flex-shrink-0 w-1 h-1 rounded-full" style="background: rgba(212,168,67,0.5);"></span>
+                  BGE-small embeddings via ONNX runtime — fast, local, private
+                </li>
+                <li class="flex items-start gap-2.5" style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">
+                  <span class="mt-1.5 flex-shrink-0 w-1 h-1 rounded-full" style="background: rgba(212,168,67,0.5);"></span>
+                  Semantic search that understands intent, not just string matching
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card-hover rounded-sm p-6 sm:p-8 h-full relative overflow-hidden">
+            <span class="absolute -right-2 -top-4 font-mono font-bold leading-none select-none pointer-events-none" style="font-size: 100px; color: rgba(212,168,67,0.04);">03</span>
+            <div class="relative z-10">
+              <div class="flex items-center gap-3 mb-3">
+                <p class="font-mono tracking-[0.2em] uppercase" style="font-size: 11px; color: rgba(212,168,67,0.5);">Stage 03 — Store</p>
+                <span class="font-mono px-2 py-0.5 rounded-sm" style="font-size: 10px; color: rgba(255,255,255,0.3); border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.02);">Dedup + evolution</span>
+              </div>
+              <h3 class="font-light mb-4" style="font-size: 20px; color: rgba(255,255,255,0.9); letter-spacing: -0.01em; line-height: 1.3;">Evolve, don&rsquo;t accumulate.</h3>
+              <ul class="space-y-2.5">
+                <li class="flex items-start gap-2.5" style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">
+                  <span class="mt-1.5 flex-shrink-0 w-1 h-1 rounded-full" style="background: rgba(212,168,67,0.5);"></span>
+                  Canonical deduplication prevents bloat — memories merge, not pile up
+                </li>
+                <li class="flex items-start gap-2.5" style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">
+                  <span class="mt-1.5 flex-shrink-0 w-1 h-1 rounded-full" style="background: rgba(212,168,67,0.5);"></span>
+                  Intelligent forgetting keeps context fresh and retrieval precise
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card-hover rounded-sm p-6 sm:p-8 h-full relative overflow-hidden">
+            <span class="absolute -right-2 -top-4 font-mono font-bold leading-none select-none pointer-events-none" style="font-size: 100px; color: rgba(212,168,67,0.04);">04</span>
+            <div class="relative z-10">
+              <div class="flex items-center gap-3 mb-3">
+                <p class="font-mono tracking-[0.2em] uppercase" style="font-size: 11px; color: rgba(212,168,67,0.5);">Stage 04 — Retrieve</p>
+                <span class="font-mono px-2 py-0.5 rounded-sm" style="font-size: 10px; color: rgba(255,255,255,0.3); border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.02);">Hybrid</span>
+              </div>
+              <h3 class="font-light mb-4" style="font-size: 20px; color: rgba(255,255,255,0.9); letter-spacing: -0.01em; line-height: 1.3;">The right memory, every time.</h3>
+              <ul class="space-y-2.5">
+                <li class="flex items-start gap-2.5" style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">
+                  <span class="mt-1.5 flex-shrink-0 w-1 h-1 rounded-full" style="background: rgba(212,168,67,0.5);"></span>
+                  Thompson sampling learns what works — semantic + keyword + temporal
+                </li>
+                <li class="flex items-start gap-2.5" style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">
+                  <span class="mt-1.5 flex-shrink-0 w-1 h-1 rounded-full" style="background: rgba(212,168,67,0.5);"></span>
+                  Contradiction detection flags conflicting memories automatically
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         BENCHMARK
+         ============================================================ -->
+    <section class="relative z-10 py-16 sm:py-32 px-6">
+      <div class="absolute inset-x-0 top-0 h-px" style="background: linear-gradient(90deg, transparent 10%, rgba(212,168,67,0.15) 50%, transparent 90%);"></div>
+      <div class="max-w-3xl mx-auto text-center relative">
+        <p class="font-mono tracking-[0.2em] uppercase mb-6" style="font-size: 12px; color: rgba(212,168,67,0.5);">Benchmark</p>
+        <div class="font-light leading-none mb-2" style="font-size: clamp(80px, 14vw, 160px); color: var(--accent); text-shadow: 0 0 80px rgba(212,168,67,0.35), 0 0 160px rgba(212,168,67,0.12); letter-spacing: -0.04em;">
+          95.4%
+        </div>
+        <p class="font-light mb-2" style="font-size: 20px; color: rgba(255,255,255,0.9);">#1 on LongMemEval — ICLR 2025 — 500 questions</p>
+        <p class="max-w-xl mx-auto mb-10" style="font-size: 15px; color: rgba(255,255,255,0.4); line-height: 1.7;">
+          LongMemEval is the standard benchmark for AI memory systems. 500 questions testing extraction, reasoning, and cross-session retrieval.
         </p>
-        <div class="flex items-center justify-center gap-4 animate-slide-up" style="animation-delay: 0.1s;">
-          <a href="/downloads" class="px-6 py-3 rounded-lg font-medium text-[var(--canvas)]" style="background: var(--accent);">
-            Download Free
-          </a>
-          <a href="/docs" class="px-6 py-3 rounded-lg font-medium border border-[var(--border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--border-hover)] transition-all">
-            Read Docs
-          </a>
-        </div>
-      </div>
-    </section>
-
-    <section class="pb-20 px-6">
-      <div class="max-w-3xl mx-auto">
-        <div class="surface-0 rounded-xl border border-[var(--border)] overflow-hidden">
-          <div class="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)]">
-            <div class="w-3 h-3 rounded-full" style="background: #f06060;"></div>
-            <div class="w-3 h-3 rounded-full" style="background: #e8a040;"></div>
-            <div class="w-3 h-3 rounded-full" style="background: #5ec9a0;"></div>
-            <span class="text-xs text-[var(--ink-faint)] ml-2 font-mono">omega</span>
+        <div class="max-w-md mx-auto space-y-3 text-left">
+          <div>
+            <div class="flex justify-between text-xs mb-1 font-mono"><span style="color: rgba(255,255,255,0.5);">OMEGA</span><span style="color: var(--accent);">95.4%</span></div>
+            <div class="h-1.5 rounded-full overflow-hidden" style="background: rgba(255,255,255,0.04);"><div class="h-full rounded-full" style="width: 95.4%; background: var(--accent); box-shadow: 0 0 12px rgba(212,168,67,0.4);"></div></div>
           </div>
-          <pre class="p-6 text-sm" style="background: transparent; border: none;"><code><span style="color: var(--ink-faint);">$</span> <span style="color: var(--accent);">pip install omega-memory</span>
-<span style="color: var(--lesson);">&#10003;</span> Installed omega-memory 1.3.0
-
-<span style="color: var(--ink-faint);">$</span> <span style="color: var(--accent);">omega serve --daemon</span>
-<span style="color: var(--lesson);">&#10003;</span> MCP server running on http://localhost:8377
-<span style="color: var(--ink-faint);">  15 tools loaded | HTTP transport | 61 MB RSS</span></code></pre>
+          <div>
+            <div class="flex justify-between text-xs mb-1 font-mono"><span style="color: rgba(255,255,255,0.3);">Mastra OM</span><span style="color: rgba(255,255,255,0.25);">94.87%</span></div>
+            <div class="h-1.5 rounded-full overflow-hidden" style="background: rgba(255,255,255,0.04);"><div class="h-full rounded-full" style="width: 94.87%; background: rgba(255,255,255,0.12);"></div></div>
+          </div>
+          <div>
+            <div class="flex justify-between text-xs mb-1 font-mono"><span style="color: rgba(255,255,255,0.3);">Zep / Graphiti</span><span style="color: rgba(255,255,255,0.25);">71.2%</span></div>
+            <div class="h-1.5 rounded-full overflow-hidden" style="background: rgba(255,255,255,0.04);"><div class="h-full rounded-full" style="width: 71.2%; background: rgba(255,255,255,0.12);"></div></div>
+          </div>
+          <div>
+            <div class="flex justify-between text-xs mb-1 font-mono"><span style="color: rgba(255,255,255,0.3);">No Memory</span><span style="color: rgba(255,255,255,0.25);">49.6%</span></div>
+            <div class="h-1.5 rounded-full overflow-hidden" style="background: rgba(255,255,255,0.04);"><div class="h-full rounded-full" style="width: 49.6%; background: rgba(255,255,255,0.12);"></div></div>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="pb-20 px-6">
-      <div class="max-w-6xl mx-auto">
-        <h2 class="text-3xl font-bold text-center mb-12">Why OMEGA?</h2>
+    <!-- Amber horizon divider -->
+    <div class="amber-horizon"></div>
+
+    <!-- ============================================================
+         FEATURES GRID
+         ============================================================ -->
+    <section class="relative z-10 py-16 sm:py-32 px-6">
+      <div class="max-w-5xl mx-auto">
+        <div class="text-center mb-12 sm:mb-16">
+          <p class="font-mono tracking-[0.2em] uppercase mb-6" style="font-size: 12px; color: rgba(212,168,67,0.5);">Capabilities</p>
+          <h2 class="font-light" style="font-size: clamp(32px, 5vw, 60px); color: rgba(255,255,255,0.95); letter-spacing: -0.02em; line-height: 1.1;">
+            Everything agents need to <span style="color: var(--accent); text-shadow: 0 0 60px rgba(212,168,67,0.4);">remember</span>
+          </h2>
+        </div>
         <div class="grid md:grid-cols-3 gap-6">
-          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
-            <div class="text-2xl mb-3">&#129504;</div>
-            <h3 class="font-semibold mb-2">Persistent Memory</h3>
-            <p class="text-sm text-[var(--ink-secondary)]">Memories survive restarts. Your agents build knowledge over weeks and months.</p>
+          <div class="card-hover rounded-sm p-6 sm:p-8">
+            <div class="mb-4 font-mono" style="font-size: 11px; color: rgba(212,168,67,0.5); letter-spacing: 0.1em;">PERSISTENT</div>
+            <h3 class="font-light mb-3" style="font-size: 18px; color: rgba(255,255,255,0.9);">Persistent Memory</h3>
+            <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">Memories survive restarts. Your agents build knowledge over weeks and months, not just one session.</p>
           </div>
-          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
-            <div class="text-2xl mb-3">&#128274;</div>
-            <h3 class="font-semibold mb-2">Local-First</h3>
-            <p class="text-sm text-[var(--ink-secondary)]">Data stays on your machine. SQLite by default, sync to cloud when you choose.</p>
+          <div class="card-hover rounded-sm p-6 sm:p-8">
+            <div class="mb-4 font-mono" style="font-size: 11px; color: rgba(212,168,67,0.5); letter-spacing: 0.1em;">SOVEREIGN</div>
+            <h3 class="font-light mb-3" style="font-size: 18px; color: rgba(255,255,255,0.9);">Local-First</h3>
+            <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">Data stays on your machine. SQLite by default, optional sync to PostgreSQL, Supabase, or Cloudflare D1.</p>
           </div>
-          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
-            <div class="text-2xl mb-3">&#129309;</div>
-            <h3 class="font-semibold mb-2">Multi-Agent Coordination</h3>
-            <p class="text-sm text-[var(--ink-secondary)]">File claims, handoffs, and shared context between concurrent agents.</p>
+          <div class="card-hover rounded-sm p-6 sm:p-8">
+            <div class="mb-4 font-mono" style="font-size: 11px; color: rgba(212,168,67,0.5); letter-spacing: 0.1em;">MULTI-AGENT</div>
+            <h3 class="font-light mb-3" style="font-size: 18px; color: rgba(255,255,255,0.9);">Coordination</h3>
+            <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">File claims, session handoffs, and shared context between concurrent agents. No conflicts.</p>
           </div>
-          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
-            <div class="text-2xl mb-3">&#128202;</div>
-            <h3 class="font-semibold mb-2">Intelligent Retrieval</h3>
-            <p class="text-sm text-[var(--ink-secondary)]">Semantic search with BGE embeddings. Thompson sampling for relevance ranking.</p>
+          <div class="card-hover rounded-sm p-6 sm:p-8">
+            <div class="mb-4 font-mono" style="font-size: 11px; color: rgba(212,168,67,0.5); letter-spacing: 0.1em;">HYBRID SEARCH</div>
+            <h3 class="font-light mb-3" style="font-size: 18px; color: rgba(255,255,255,0.9);">Intelligent Retrieval</h3>
+            <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">Semantic vectors + keyword matching + temporal decay. Thompson sampling learns what works.</p>
           </div>
-          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
-            <div class="text-2xl mb-3">&#9729;&#65039;</div>
-            <h3 class="font-semibold mb-2">Cloud Sync</h3>
-            <p class="text-sm text-[var(--ink-secondary)]">Optional sync to PostgreSQL, Supabase, or Cloudflare D1. Multi-tenant by design.</p>
+          <div class="card-hover rounded-sm p-6 sm:p-8">
+            <div class="mb-4 font-mono" style="font-size: 11px; color: rgba(212,168,67,0.5); letter-spacing: 0.1em;">SYNC</div>
+            <h3 class="font-light mb-3" style="font-size: 18px; color: rgba(255,255,255,0.9);">Cloud Sync</h3>
+            <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">Optional sync to PostgreSQL, Supabase, or Cloudflare D1. Multi-tenant by design. Your data, your rules.</p>
           </div>
-          <div class="surface-1 rounded-xl border border-[var(--border)] p-6">
-            <div class="text-2xl mb-3">&#9889;</div>
-            <h3 class="font-semibold mb-2">Zero Config</h3>
-            <p class="text-sm text-[var(--ink-secondary)]">pip install, serve, done. Works with Claude Code, Cursor, Windsurf out of the box.</p>
+          <div class="card-hover rounded-sm p-6 sm:p-8">
+            <div class="mb-4 font-mono" style="font-size: 11px; color: rgba(212,168,67,0.5); letter-spacing: 0.1em;">ZERO CONFIG</div>
+            <h3 class="font-light mb-3" style="font-size: 18px; color: rgba(255,255,255,0.9);">Just Works</h3>
+            <p style="font-size: 14px; color: rgba(255,255,255,0.4); line-height: 1.6;">pip install, serve, done. Works with Claude Code, Cursor, and Windsurf out of the box. MCP native.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="py-20 px-6 border-t border-[var(--border)]">
-      <div class="max-w-2xl mx-auto text-center">
-        <h2 class="text-3xl font-bold mb-4">Ready to give your agents memory?</h2>
-        <p class="text-[var(--ink-secondary)] mb-8">Free forever for local use. Pro for cloud sync and team features.</p>
-        <a href="/pricing" class="inline-block px-8 py-4 rounded-lg font-medium text-lg text-[var(--canvas)]" style="background: var(--accent);">
-          View Pricing
-        </a>
+    <!-- ============================================================
+         CTA
+         ============================================================ -->
+    <section class="relative z-10 py-16 sm:py-32 px-6">
+      <div class="absolute inset-x-0 top-0 h-px" style="background: linear-gradient(90deg, transparent 10%, rgba(212,168,67,0.15) 50%, transparent 90%);"></div>
+      <div class="max-w-3xl mx-auto text-center relative">
+        <div style="position: absolute; bottom: -100px; left: 50%; transform: translateX(-50%); width: 500px; height: 300px; background: radial-gradient(ellipse, rgba(212,168,67,0.05), transparent 70%); pointer-events: none;"></div>
+
+        <p class="font-mono tracking-[0.2em] uppercase mb-6" style="font-size: 12px; color: rgba(212,168,67,0.5);">Ready?</p>
+        <h2 class="font-light mb-6 relative" style="font-size: clamp(36px, 6vw, 72px); color: rgba(255,255,255,0.95); letter-spacing: -0.02em; line-height: 1.1;">
+          Give your agent a brain it <span style="color: var(--accent); text-shadow: 0 0 60px rgba(212,168,67,0.4), 0 0 120px rgba(212,168,67,0.15);">owns.</span>
+        </h2>
+        <p class="max-w-lg mx-auto mb-8 relative" style="font-size: 16px; color: rgba(255,255,255,0.4); line-height: 1.7;">Two commands. No cloud. No API keys. Your agent starts learning in under a minute.</p>
+
+        <div class="max-w-md mx-auto mb-10 px-6 py-4 rounded-sm font-mono relative" style="font-size: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); color: rgba(255,255,255,0.6);">
+          $ pip install omega-memory && omega setup
+        </div>
+
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4 relative">
+          <a href="/downloads" class="cta-gold font-mono uppercase tracking-wider" style="border-radius: 6px; font-size: 0.75rem; padding: 0.75rem 1.5rem;">Install Free — No Cloud Required</a>
+          <a href="https://github.com/omega-memory/omega-memory" class="cta-outline font-mono uppercase tracking-wider" style="border-radius: 6px; font-size: 0.75rem; padding: 0.75rem 1.5rem;">View on GitHub</a>
+        </div>
       </div>
     </section>
   </main>
 
-  <footer class="border-t border-[var(--border)] py-12 px-6">
-    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
-      <div>
-        <div class="text-[var(--accent)] font-semibold text-lg mb-2">&#937; OMEGA</div>
-        <p class="text-sm text-[var(--ink-faint)]">Persistent memory for AI agents</p>
-      </div>
-      <div class="flex gap-12 text-sm text-[var(--ink-secondary)]">
-        <div class="flex flex-col gap-2">
-          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Product</span>
-          <a href="/docs" class="hover:text-[var(--ink-primary)]">Docs</a>
-          <a href="/pricing" class="hover:text-[var(--ink-primary)]">Pricing</a>
-          <a href="/downloads" class="hover:text-[var(--ink-primary)]">Downloads</a>
-        </div>
-        <div class="flex flex-col gap-2">
-          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Community</span>
-          <a href="https://github.com/omega-memory/omega-memory" class="hover:text-[var(--ink-primary)]">GitHub</a>
-          <a href="/blog" class="hover:text-[var(--ink-primary)]">Blog</a>
-        </div>
-        <div class="flex flex-col gap-2">
-          <span class="text-[var(--ink-faint)] text-xs uppercase tracking-wider mb-1">Legal</span>
-          <a href="/privacy" class="hover:text-[var(--ink-primary)]">Privacy</a>
-          <a href="/terms" class="hover:text-[var(--ink-primary)]">Terms</a>
-        </div>
-      </div>
-    </div>
-  </footer>
+  <!-- Full-page starfield canvas animation — matches production (fixed, covers all sections) -->
+  <script is:inline>
+    (function() {
+      var c = document.getElementById('starfield');
+      if (!c || !c.getContext) return;
+      var ctx = c.getContext('2d');
+      var stars = [];
+      var count = 200;
+      function resize() {
+        c.width = window.innerWidth;
+        c.height = document.documentElement.scrollHeight;
+        stars = [];
+        for (var i = 0; i < count; i++) {
+          stars.push({
+            x: Math.random() * c.width,
+            y: Math.random() * c.height,
+            r: 1.2 * Math.random() + 0.3,
+            a: 0.5 * Math.random() + 0.15,
+            speed: 0.0008 * Math.random() + 0.0002
+          });
+        }
+      }
+      resize();
+      window.addEventListener('resize', resize);
+      function draw(t) {
+        ctx.clearRect(0, 0, c.width, c.height);
+        for (var i = 0; i < stars.length; i++) {
+          var s = stars[i];
+          var flicker = 0.2 * Math.sin(t * s.speed + s.x) + 0.8;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, s.r, 0, 2 * Math.PI);
+          ctx.fillStyle = 'rgba(255, 220, 160, ' + (s.a * flicker) + ')';
+          ctx.fill();
+        }
+        requestAnimationFrame(draw);
+      }
+      requestAnimationFrame(draw);
+    })();
+  </script>
+
+  <!-- Three.js 3D Force Graph + Bokeh Orbs — matches production HeroGraph3D -->
+  <script>
+    import ForceGraph3D from '3d-force-graph';
+    import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+    import * as THREE from 'three';
+
+    const container = document.getElementById('hero-graph');
+    if (container) {
+      // Node colors matching production type system
+      const typeColors: Record<string, string> = {
+        decision: '#6b9fff',
+        lesson: '#5ec9a0',
+        error: '#f06060',
+        preference: '#d4a843',
+        task: '#40c8c8',
+        observation: '#b088e8',
+        constraint: '#d4a843',
+      };
+
+      // Generate graph data
+      const types = Object.keys(typeColors);
+      const N = 22;
+      const nodes = Array.from({ length: N }, (_, i) => ({
+        id: i,
+        type: types[Math.floor(Math.random() * types.length)],
+        val: Math.random() * 8 + 2,
+      }));
+      const links: { source: number; target: number }[] = [];
+      for (let i = 1; i < N; i++) {
+        links.push({ source: i, target: Math.floor(Math.random() * i) });
+        if (Math.random() > 0.6) {
+          links.push({ source: i, target: Math.floor(Math.random() * N) });
+        }
+      }
+
+      const graph = ForceGraph3D()(container)
+        .graphData({ nodes, links })
+        .backgroundColor('#00000000')
+        .showNavInfo(false)
+        .nodeRelSize(3)
+        .nodeVal((n: any) => n.val)
+        .nodeColor((n: any) => typeColors[n.type] || '#d4a843')
+        .nodeOpacity(0.85)
+        .linkWidth(0.3)
+        .linkOpacity(0.12)
+        .linkColor(() => 'rgba(255,255,255,0.3)')
+        .linkDirectionalParticles(1)
+        .linkDirectionalParticleWidth(0.6)
+        .linkDirectionalParticleSpeed(0.002)
+        .enableNodeDrag(false)
+        .enableNavigationControls(false)
+        .width(container.clientWidth)
+        .height(container.clientHeight);
+
+      // Force transparent background on the WebGL renderer
+      const renderer = graph.renderer();
+      renderer.setClearColor(0x000000, 0);
+      renderer.domElement.style.background = 'transparent';
+
+      // === Add large bokeh orbs to the Three.js scene (matches production) ===
+      const scene = graph.scene();
+
+      // Orb definitions: large translucent spheres with glow
+      const orbDefs = [
+        { pos: [250, -20, -80], radius: 80, color: '#d4a843', opacity: 0.35 },
+        { pos: [350, 70, -140], radius: 120, color: '#d4a843', opacity: 0.25 },
+        { pos: [200, 100, 60], radius: 50, color: '#ff8866', opacity: 0.3 },
+        { pos: [150, -80, -120], radius: 55, color: '#d4a843', opacity: 0.2 },
+        { pos: [320, -110, 100], radius: 90, color: '#f0a050', opacity: 0.2 },
+        { pos: [180, 50, -50], radius: 40, color: '#b088e8', opacity: 0.18 },
+        { pos: [400, 40, -30], radius: 140, color: '#d4a843', opacity: 0.18 },
+        { pos: [220, -140, -90], radius: 35, color: '#40c8c8', opacity: 0.25 },
+      ];
+
+      const orbs: THREE.Mesh[] = [];
+      orbDefs.forEach((def) => {
+        const geo = new THREE.SphereGeometry(def.radius, 32, 32);
+        const mat = new THREE.MeshBasicMaterial({
+          color: new THREE.Color(def.color),
+          transparent: true,
+          opacity: def.opacity,
+          depthWrite: false,
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(def.pos[0], def.pos[1], def.pos[2]);
+        scene.add(mesh);
+        orbs.push(mesh);
+      });
+
+      // Add bloom post-processing
+      const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(container.clientWidth, container.clientHeight),
+        1.5,  // strength (slightly higher for orb glow)
+        0.6,  // radius
+        0.1   // threshold
+      );
+      graph.postProcessingComposer().addPass(bloomPass);
+
+      // Auto-rotate camera
+      graph.cameraPosition({ x: 350, y: 80, z: 350 });
+      let angle = 0;
+      function rotate() {
+        angle += 0.0008;
+        graph.cameraPosition({
+          x: 380 * Math.sin(angle),
+          y: 40 + 30 * Math.sin(angle * 0.5),
+          z: 380 * Math.cos(angle),
+        });
+
+        // Gentle drift for orbs
+        const t = Date.now() * 0.001;
+        orbs.forEach((orb, i) => {
+          const speed = 0.15 + i * 0.05;
+          const amp = 3 + i * 1.5;
+          orb.position.x += Math.sin(t * speed + i) * 0.15;
+          orb.position.y += Math.cos(t * speed * 0.7 + i * 2) * 0.1;
+        });
+
+        requestAnimationFrame(rotate);
+      }
+      rotate();
+
+      // Resize handler
+      window.addEventListener('resize', () => {
+        graph.width(container.clientWidth).height(container.clientHeight);
+      });
+    }
+  </script>
 </Base>

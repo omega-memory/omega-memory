@@ -1,0 +1,88 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="404 — Page Not Found">
+  <main class="relative z-10 min-h-screen flex items-center justify-center px-6" style="background: var(--canvas);">
+    <!-- Starfield canvas -->
+    <canvas class="absolute inset-0 w-full h-full" id="starfield-404" style="opacity: 0.4; z-index: 1;"></canvas>
+
+    <div class="relative z-10 text-center max-w-lg">
+      <!-- Big 404 number with gold glow -->
+      <div class="font-light leading-none mb-6" style="font-size: clamp(100px, 20vw, 200px); color: var(--accent); text-shadow: 0 0 80px rgba(212,168,67,0.35), 0 0 160px rgba(212,168,67,0.12); letter-spacing: -0.04em; opacity: 0.9;">
+        404
+      </div>
+
+      <!-- Omega symbol -->
+      <div class="mb-6" style="opacity: 0.15;">
+        <svg width="48" height="48" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" class="mx-auto">
+          <rect x="9" y="5" width="14" height="22" rx="7" stroke="currentColor" stroke-width="2" fill="none"/>
+          <circle cx="16" cy="16" r="2.5" fill="currentColor"/>
+        </svg>
+      </div>
+
+      <h1 class="font-light mb-4" style="font-size: 24px; color: rgba(255,255,255,0.9); letter-spacing: -0.01em;">
+        Memory not found.
+      </h1>
+
+      <p class="mb-8" style="font-size: 15px; color: rgba(255,255,255,0.35); line-height: 1.7;">
+        This page doesn't exist in any memory bank. It may have been moved, forgotten, or never created.
+      </p>
+
+      <!-- Terminal-style hint -->
+      <div class="mb-8 px-5 py-3 rounded-md font-mono inline-block text-left" style="font-size: 13px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="color: rgba(255,255,255,0.25);"><span style="color: var(--accent);">$</span> omega_query("this page")</div>
+        <div style="color: rgba(240,96,96,0.7);">&nbsp; 0 results &mdash; no matching memories</div>
+      </div>
+
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <a href="/" class="cta-gold font-mono uppercase tracking-wider" style="border-radius: 6px; font-size: 0.75rem; padding: 0.75rem 1.5rem;">
+          Back to Home
+        </a>
+        <a href="/downloads" class="cta-outline font-mono uppercase tracking-wider" style="border-radius: 6px; font-size: 0.75rem; padding: 0.75rem 1.5rem;">
+          Downloads
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <!-- Starfield animation -->
+  <script is:inline>
+    (function() {
+      var c = document.getElementById('starfield-404');
+      if (!c || !c.getContext) return;
+      var ctx = c.getContext('2d');
+      var stars = [];
+      var count = 120;
+      function resize() {
+        c.width = window.innerWidth;
+        c.height = window.innerHeight;
+        stars = [];
+        for (var i = 0; i < count; i++) {
+          stars.push({
+            x: Math.random() * c.width,
+            y: Math.random() * c.height,
+            r: 1.2 * Math.random() + 0.3,
+            a: 0.5 * Math.random() + 0.15,
+            speed: 0.0008 * Math.random() + 0.0002
+          });
+        }
+      }
+      resize();
+      window.addEventListener('resize', resize);
+      function draw(t) {
+        ctx.clearRect(0, 0, c.width, c.height);
+        for (var i = 0; i < stars.length; i++) {
+          var s = stars[i];
+          var flicker = 0.2 * Math.sin(t * s.speed + s.x) + 0.8;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, s.r, 0, 2 * Math.PI);
+          ctx.fillStyle = 'rgba(255, 220, 160, ' + (s.a * flicker) + ')';
+          ctx.fill();
+        }
+        requestAnimationFrame(draw);
+      }
+      requestAnimationFrame(draw);
+    })();
+  </script>
+</Base>

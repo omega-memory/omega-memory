@@ -1,12 +1,16 @@
 ---
 import "../styles/global.css";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
 
 interface Props {
   title: string;
   description?: string;
+  hideNav?: boolean;
+  hideFooter?: boolean;
 }
 
-const { title, description = "Persistent memory for AI coding agents" } = Astro.props;
+const { title, description = "Persistent memory for AI coding agents", hideNav = false, hideFooter = false } = Astro.props;
 ---
 
 <!doctype html>
@@ -22,6 +26,8 @@ const { title, description = "Persistent memory for AI coding agents" } = Astro.
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body>
+    {!hideNav && <Nav />}
     <slot />
+    {!hideFooter && <Footer />}
   </body>
 </html>

@@ -1,88 +1,121 @@
 @import "tailwindcss";
 
 /* ===================================================================
- * OMEGA Design System — ported from Next.js globals.css
+ * OMEGA Design System — matched to omegamax.co production
+ * All base styles inside @layer base so Tailwind utilities can override
  * =================================================================== */
 
-:root {
-  /* Canvas */
-  --canvas: #08090f;
-  --surface-0: #0f1019;
-  --surface-1: #141520;
-  --surface-2: #1c1d2a;
-  --surface-3: #242536;
+@layer base {
+  :root {
+    /* Canvas */
+    --canvas: #08090f;
+    --surface-0: #0f1019;
+    --surface-1: #141520;
+    --surface-2: #1c1d2a;
+    --surface-3: #242536;
 
-  /* Ink hierarchy */
-  --ink-primary: #e8e8f0;
-  --ink-secondary: #9898b0;
-  --ink-tertiary: #7a7a94;
-  --ink-faint: #505068;
+    /* Ink hierarchy */
+    --ink-primary: rgba(255, 255, 255, 0.95);
+    --ink-secondary: rgba(255, 255, 255, 0.55);
+    --ink-tertiary: rgba(255, 255, 255, 0.35);
+    --ink-faint: rgba(255, 255, 255, 0.2);
 
-  /* Accent */
-  --accent: #d4a843;
-  --accent-bright: #FFB000;
-  --accent-dim: #a88530;
+    /* Accent — matches omegamax.co production #d4a843 */
+    --accent: #d4a843;
+    --accent-bright: #d4a843;
+    --accent-dim: #a88530;
+    --accent-glow: rgba(212, 168, 67, 0.4);
 
-  /* Semantic */
-  --decision: #6b9fff;
-  --lesson: #5ec9a0;
-  --reminder: #e8a040;
-  --error: #f06060;
-  --preference: #b088e8;
-  --task: #40c8c8;
+    /* Semantic */
+    --decision: #6b9fff;
+    --lesson: #5ec9a0;
+    --reminder: #e8a040;
+    --error: #f06060;
+    --preference: #b088e8;
+    --task: #40c8c8;
 
-  /* Borders */
-  --border: #1c1d2a;
-  --border-hover: #2a2b3d;
+    /* Borders */
+    --border: rgba(255, 255, 255, 0.06);
+    --border-hover: rgba(255, 255, 255, 0.12);
 
-  /* Typography */
-  --font-sans: "Outfit", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+    /* Typography */
+    --font-sans: "Outfit", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--canvas);
+    color: var(--ink-primary);
+    min-height: 100vh;
+    position: relative;
+  }
+
+  /* Canvas grain texture — matches omegamax.co */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 256px 256px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--canvas);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--ink-faint);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-tertiary);
+  }
+
+  /* Code blocks */
+  pre, code {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+  }
+
+  pre {
+    background: var(--surface-0);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-x: auto;
+  }
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-html {
-  font-size: 17px;
-  line-height: 1.65;
-  -webkit-font-smoothing: antialiased;
-}
-
-body {
-  font-family: var(--font-sans);
-  background: var(--canvas);
-  color: var(--ink-primary);
-  min-height: 100vh;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: var(--canvas);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--ink-faint);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--ink-tertiary);
-}
-
-/* Animations */
+/* Animations — outside layers so they work everywhere */
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(20px); }
+  from { opacity: 0; transform: translateY(24px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -91,30 +124,190 @@ body {
   50% { opacity: 0; }
 }
 
-.animate-fade-in {
-  animation: fade-in 0.5s ease-out forwards;
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.8; }
 }
 
-.animate-slide-up {
-  animation: slide-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+@keyframes twinkle {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.8; }
 }
 
-/* Surface utilities */
-.surface-0 { background: var(--surface-0); }
-.surface-1 { background: var(--surface-1); }
-.surface-2 { background: var(--surface-2); }
-.surface-3 { background: var(--surface-3); }
-
-/* Code blocks */
-pre, code {
-  font-family: var(--font-mono);
-  font-size: 0.875rem;
+@keyframes orb-drift-1 {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-8px, 12px); }
+  50% { transform: translate(5px, -6px); }
+  75% { transform: translate(-3px, -10px); }
 }
 
-pre {
-  background: var(--surface-0);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem;
-  overflow-x: auto;
+@keyframes orb-drift-2 {
+  0%, 100% { transform: translate(0, 0); }
+  33% { transform: translate(10px, -8px); }
+  66% { transform: translate(-6px, 14px); }
+}
+
+@keyframes orb-drift-3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(6px, -10px) scale(1.05); }
+}
+
+@keyframes orb-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+/* ===================================================================
+ * Component styles — inside @layer components so utilities can override
+ * =================================================================== */
+@layer components {
+  .animate-fade-in {
+    animation: fade-in 0.6s ease-out forwards;
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  /* Surface utilities */
+  .surface-0 { background: var(--surface-0); }
+  .surface-1 { background: var(--surface-1); }
+  .surface-2 { background: var(--surface-2); }
+  .surface-3 { background: var(--surface-3); }
+
+  /* ===================================================================
+   * Amber horizon divider — signature omegamax.co element
+   * =================================================================== */
+  .amber-horizon {
+    position: relative;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    margin: 0 auto;
+    max-width: 80%;
+  }
+
+  .amber-horizon::after {
+    content: "";
+    position: absolute;
+    inset: -12px 10% 0 10%;
+    height: 24px;
+    background: radial-gradient(ellipse at center, var(--accent-glow), transparent 70%);
+    filter: blur(8px);
+    pointer-events: none;
+  }
+
+  /* ===================================================================
+   * Card hover effect — matches omegamax.co card-hover class
+   * =================================================================== */
+  .card-hover {
+    position: relative;
+    background: linear-gradient(135deg, rgba(255,255,255,0.02), transparent);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: all 0.4s ease;
+  }
+
+  .card-hover:hover {
+    border-color: var(--border-hover);
+    background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,176,0,0.02));
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 176, 0, 0.05);
+    transform: translateY(-2px);
+  }
+
+  /* ===================================================================
+   * CTA Buttons — gold and outline styles
+   * =================================================================== */
+  .cta-gold {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.75rem;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.95rem;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.3s ease;
+    box-shadow: 0 0 20px rgba(212, 168, 67, 0.2);
+  }
+
+  .cta-gold:hover {
+    box-shadow: 0 0 30px rgba(255, 176, 0, 0.35), 0 4px 16px rgba(0,0,0,0.3);
+    transform: translateY(-1px);
+  }
+
+  .cta-outline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.75rem;
+    border: 1px solid var(--border-hover);
+    color: var(--ink-secondary);
+    font-weight: 500;
+    font-size: 0.95rem;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.3s ease;
+  }
+
+  .cta-outline:hover {
+    color: var(--ink-primary);
+    border-color: rgba(255, 255, 255, 0.25);
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.05);
+  }
+
+  /* ===================================================================
+   * Gold accent text with glow
+   * =================================================================== */
+  .text-gold {
+    color: var(--accent);
+    text-shadow: 0 0 60px var(--accent-glow);
+  }
+
+  /* Monospace label badge */
+  .mono-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    opacity: 0.7;
+  }
+
+  /* ===================================================================
+   * Hero orb animations — CSS approximation of omegamax.co WebGL scene
+   * =================================================================== */
+  .orb {
+    animation: orb-pulse 4s ease-in-out infinite;
+  }
+
+  .orb-main {
+    animation: orb-drift-1 12s ease-in-out infinite, orb-pulse 5s ease-in-out infinite;
+  }
+
+  .orb-float-1 {
+    animation: orb-drift-2 10s ease-in-out infinite, orb-pulse 4s ease-in-out 0.5s infinite;
+  }
+
+  .orb-float-2 {
+    animation: orb-drift-3 8s ease-in-out infinite, orb-pulse 3.5s ease-in-out 1s infinite;
+  }
+
+  .orb-float-3 {
+    animation: orb-drift-1 9s ease-in-out 0.3s infinite, orb-pulse 3s ease-in-out 0.8s infinite;
+  }
+
+  .orb-float-4 {
+    animation: orb-drift-2 7s ease-in-out 0.5s infinite, orb-pulse 4.5s ease-in-out 0.3s infinite;
+  }
+
+  .orb-float-5 {
+    animation: orb-drift-3 11s ease-in-out 1s infinite, orb-pulse 3.2s ease-in-out 1.5s infinite;
+  }
+
+  .orb-float-6 {
+    animation: orb-drift-1 14s ease-in-out 0.7s infinite, orb-pulse 6s ease-in-out 0.4s infinite;
+  }
 }
