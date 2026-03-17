@@ -475,7 +475,7 @@ def test_hooks_json_fast_hook_entries():
             else:
                 direct_count += 1
 
-    assert fast_count == 19
+    assert fast_count == 20
     assert direct_count == 0
 
 

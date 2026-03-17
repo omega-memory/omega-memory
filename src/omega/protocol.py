@@ -31,8 +31,10 @@ SECTIONS: Dict[str, Dict[str, str]] = {
 - **Load user profile**: Call `omega_profile()` at session start (after welcome/protocol) to load working style preferences. Update via `omega_profile(action="update", update={"key": "value"})` when you learn new preferences.
 - `[OMEGA MEMORY]` blocks from hooks = ground truth, use immediately
 - ALWAYS call `omega_query()` before non-trivial tasks — check for prior context, decisions, gotchas
+- **Before suggesting**: Before recommending any action, URL, tool, or "next step", query OMEGA for prior decisions on that topic. If you don't, you WILL repeat rejected ideas and fabricate details.
+- **Reconcile at session start**: When `[CONTEXT]` blocks from hooks contradict MEMORY.md, newest-timestamped OMEGA source wins. Reconcile BEFORE starting work.
 - **After** completing tasks: `omega_store(content, "decision"|"lesson_learned")` for key outcomes
-- Sessions with 0 `omega_store` calls trigger an auto-safety-net at session end — manual stores produce higher-quality captures.
+- Sessions with 0 `omega_store` calls trigger an auto-safety-net at session end — manual stores produce higher-quality captures. Aim for minimum 1 manual store per session with meaningful work.
 - **On errors**: check OMEGA for prior solutions before debugging from scratch
 - **User says "remember"**: `omega_store(text, "user_preference")`
 - When asked about preferences/history: query OMEGA FIRST, don't say "I don't know"
@@ -259,7 +261,11 @@ Before applying a reasoning model, check:
 | "I'll update tests after" | Stage tests WITH the code change. |
 | "The approach is obvious" | State it explicitly. Obvious approaches cause 35% of rework. |
 | "I'll add .gitignore after" | Adjacent concerns BEFORE push. Scan for secrets, add .gitignore, LICENSE. |
-| "Just creating the repo" | `omega_checkpoint()` BEFORE `gh repo create`. State your recovery plan. |""",
+| "Just creating the repo" | `omega_checkpoint()` BEFORE `gh repo create`. State your recovery plan. |
+| "I remember the URL" | No you don't. Read it from a file or verify it exists. LLMs fabricate URLs. |
+| "The subagent will figure it out" | Subagents can't call OMEGA. Inject context into the prompt. |
+| "User asked this before" | `omega_query` to verify — your recall of past conversations is unreliable. |
+| "I already suggested this and it worked" | Check if user rejected it in a later session you don't have context for. |""",
     },
     "git": {
         "title": "Git Rules",
@@ -404,9 +410,12 @@ This feedback loop is automatic and requires no action from you.""",
 - **Context budget warning**: Before plans with 5+ phases or 50+ edits, warn user and create checkpoints
 - **Persist at boundaries**: `omega_store` after every significant milestone. Minimum 1 store per completed phase.
 - **Scope sub-agent briefs tightly**: Always include (1) specific file paths, (2) 2-4 specific questions, (3) what NOT to explore. No vague "be thorough".
+- **Inject memory into sub-agents**: Sub-agents CANNOT call OMEGA tools. Before spawning any agent that will make decisions, suggest actions, or generate content: (1) `omega_query()` for task-relevant decisions/preferences/constraints, (2) include key results in the agent prompt, (3) add explicit instruction: "Do NOT fabricate URLs, tool names, or project details not in this prompt." This is the #1 source of memory failures.
 - **Checkpoint before irreversible**: Before `gh repo create`, `vercel deploy`, `rm -rf`, `npm publish`, or any hard-to-undo action: (1) `omega_checkpoint()`, (2) state recovery plan if it fails, (3) proceed.
 - **Adjacent awareness scan**: After completing the literal task, ask: "What did I NOT do that a careful human would?" Check for: .gitignore, LICENSE, secrets scan, repo description, branch protection. Surface findings even if not acting.
-- **Store after external actions**: After any external action (repo create, deploy, collaborator invite, email, tweet): immediately `omega_store()` the outcome. No exceptions.""",
+- **Store after external actions**: After any external action (repo create, deploy, collaborator invite, email, tweet): immediately `omega_store()` the outcome. No exceptions.
+- **Minimum 1 store per session**: Every session with meaningful work (decisions, corrections, completions) MUST call `omega_store()` at least once. Sessions with 0 stores lose institutional knowledge and degrade future sessions.
+- **No fabricated URLs/links**: NEVER generate a URL from memory or inference. Read from a file, query OMEGA, or verify via web fetch. Fabricated URLs are the top user complaint.""",
     },
     "consultation": {
         "title": "GPT Consultation",

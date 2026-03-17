@@ -26,6 +26,7 @@ from .guards import (
     handle_pre_alignment_gate,
     handle_pre_protocol_gate,
     handle_pre_irreversible_advisor,
+    handle_pre_agent_memory,
 )
 from .insights import handle_pre_insight_surface
 from .coordination import handle_coord_session_start, handle_coord_session_stop
@@ -66,6 +67,7 @@ _COMMERCIAL_HOOK_HANDLERS = {
     "pre_protocol_gate": handle_pre_protocol_gate,
     "pre_insight_surface": handle_pre_insight_surface,
     "pre_irreversible_advisor": handle_pre_irreversible_advisor,
+    "pre_agent_memory": handle_pre_agent_memory,
     "trace_capture": handle_trace_capture,
 }
 

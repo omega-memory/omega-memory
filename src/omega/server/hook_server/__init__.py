@@ -342,6 +342,7 @@ from .guards import (  # noqa: E402
     handle_pre_alignment_gate,
     handle_pre_protocol_gate,
     handle_pre_irreversible_advisor,
+    handle_pre_agent_memory,
 )
 
 from .core import (  # noqa: E402, F401
@@ -432,6 +433,7 @@ __all__ = [
     "handle_pre_file_guard",
     "handle_pre_insight_surface",
     "handle_pre_irreversible_advisor",
+    "handle_pre_agent_memory",
     "handle_pre_protocol_gate",
     "handle_pre_push_guard",
     "handle_pre_task_guard",

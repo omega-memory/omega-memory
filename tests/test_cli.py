@@ -45,17 +45,19 @@ class TestResolvePythonPath:
         # The result should be some valid python path string
         assert "python" in result.lower() or Path(result).exists()
 
-    def test_skips_venv_executable(self, monkeypatch):
-        """If sys.executable contains 'venv', it should be skipped."""
+    def test_uses_venv_executable_when_omega_importable(self, monkeypatch):
+        """Venv executable should be used if omega is importable there."""
         monkeypatch.setattr(sys, "executable", "/tmp/my_venv/bin/python3")
-        # Should fall through to shutil.which or fallback
-        result = _resolve_python_path()
-        assert "my_venv" not in result
+        with patch("omega.cli._python_has_omega", return_value=True), \
+             patch("pathlib.Path.exists", return_value=True):
+            result = _resolve_python_path()
+            assert result == "/tmp/my_venv/bin/python3"
 
     def test_falls_back_to_which_python3(self, monkeypatch):
         """When sys.executable is empty, should try shutil.which('python3')."""
         monkeypatch.setattr(sys, "executable", "")
-        with patch("omega.cli.shutil.which", return_value="/usr/bin/python3"):
+        with patch("omega.cli._python_has_omega", return_value=True), \
+             patch("omega.cli.shutil.which", return_value="/usr/bin/python3"):
             result = _resolve_python_path()
         assert result == "/usr/bin/python3"
 

@@ -1,16 +1,11 @@
 # OMEGA
 
-<!-- mcp-name: io.github.omega-memory/omega-memory -->
-
-**#1 on LongMemEval (95.4%)** · 25 MCP tools · Zero cloud dependencies
-
-AI agents that remember, coordinate, and learn. All on your machine. Your agent's brain shouldn't live on someone else's server.
+**AI agents that remember, coordinate, and learn. All on your machine.** Your agent's brain shouldn't live on someone else's server.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/omega-memory.svg)](https://pypi.org/project/omega-memory/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-2198%20passing-brightgreen.svg)]()
-[![LongMemEval](https://img.shields.io/badge/LongMemEval-95.4%25_%231-gold.svg)](https://omegamax.co/benchmarks)
+[![Tests](https://img.shields.io/badge/tests-1123%20passing-brightgreen.svg)]()
 
 ---
 
@@ -24,9 +19,7 @@ AI coding agents are stateless. Every new session starts from zero. And the "sol
 
 OMEGA solves this. Memory, coordination, and learning that runs entirely on your machine. No cloud. No API keys. No vendor lock-in.
 
-<p align="center">
-  <img src="assets/demo.gif" alt="OMEGA — multi-agent coordination and persistent memory" width="700">
-</p>
+<!-- TODO: terminal GIF showing memory recall across sessions -->
 
 ## Quick Install
 

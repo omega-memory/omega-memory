@@ -1816,3 +1816,46 @@ def handle_pre_deploy_guard(payload: dict) -> dict:
         _log_hook_error("handle_pre_deploy_guard", e)
 
     return {"output": "\n".join(lines), "exit_code": 2, "error": None}
+
+
+# ---------------------------------------------------------------------------
+# Pre-Agent memory injection reminder
+# ---------------------------------------------------------------------------
+
+# Debounce: only remind once per session (not per agent spawn)
+_agent_memory_reminded: set[str] = set()
+_MAX_AGENT_REMINDED = 100
+
+
+def handle_pre_agent_memory(payload: dict) -> dict:
+    """Remind the primary agent to inject OMEGA context before spawning subagents.
+
+    Non-blocking (exit 0). Fires once per session on Agent tool use.
+    Subagents cannot call OMEGA MCP tools, so the primary agent must
+    query OMEGA and include results in the agent prompt.
+    """
+    try:
+        session_id = payload.get("session_id", "")
+        if not session_id:
+            return {"output": "", "error": None}
+
+        # Only remind once per session
+        if session_id in _agent_memory_reminded:
+            return {"output": "", "error": None}
+
+        _agent_memory_reminded.add(session_id)
+        if len(_agent_memory_reminded) > _MAX_AGENT_REMINDED:
+            oldest = next(iter(_agent_memory_reminded))
+            _agent_memory_reminded.discard(oldest)
+
+        return {
+            "output": (
+                "[AGENT-MEMORY] Subagents cannot call OMEGA tools. Before spawning:\n"
+                "1. omega_query() for task-relevant decisions/preferences/constraints\n"
+                "2. Include key results in the agent prompt\n"
+                "3. Tell the agent: 'Do NOT fabricate URLs or project details not in this prompt'"
+            ),
+            "error": None,
+        }
+    except Exception:
+        return {"output": "", "error": None}

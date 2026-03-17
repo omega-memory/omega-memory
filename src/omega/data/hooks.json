@@ -26,6 +26,7 @@
     {"script": "fast_hook.py pre_task_guard", "timeout": 5000, "matcher": "Edit|Write|NotebookEdit"},
     {"script": "fast_hook.py pre_insight_surface", "timeout": 3000, "matcher": "Edit|Write|NotebookEdit"},
     {"script": "fast_hook.py pre_alignment_gate", "timeout": 3000, "matcher": "Edit|Write|NotebookEdit|Bash"},
-    {"script": "fast_hook.py pre_protocol_gate", "timeout": 3000, "matcher": "Edit|Write|NotebookEdit|Bash"}
+    {"script": "fast_hook.py pre_protocol_gate", "timeout": 3000, "matcher": "Edit|Write|NotebookEdit|Bash"},
+    {"script": "fast_hook.py pre_agent_memory", "timeout": 2000, "matcher": "Agent"}
   ]
 }
