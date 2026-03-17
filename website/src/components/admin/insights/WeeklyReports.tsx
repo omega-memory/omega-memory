@@ -171,11 +171,13 @@ export default function WeeklyReports({ account: rawAccount }: WeeklyReportsProp
                         </span>
                       )}
                     </div>
+                    {report.metrics?.overall && (
                     <div className="flex items-center gap-3 mt-1 text-[12px] text-ink-tertiary font-mono">
                       <span>{report.metrics.overall.totalTracked} tweets</span>
                       <span>{report.metrics.overall.avgEngagementRate}% eng</span>
                       <span>{trendIcon(report.metrics.overall.recentTrend)}</span>
                     </div>
+                    )}
                   </div>
                   <svg
                     className={`w-4 h-4 text-ink-tertiary transition-transform ${expanded === report.id ? "rotate-180" : ""}`}
