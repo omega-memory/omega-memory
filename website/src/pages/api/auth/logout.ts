@@ -16,7 +16,7 @@ export const POST: APIRoute = async (context) => {
       const secret =
         (context.locals.runtime as any)?.env?.AUTH_SECRET ??
         process.env.AUTH_SECRET ??
-        "dev-secret";
+        "omega-dev-secret-change-in-production";
       const auth = new AuthEngine(db, secret);
       await auth.revokeSession(token);
     } catch {
@@ -55,7 +55,7 @@ export const GET: APIRoute = async (context) => {
       const secret =
         (context.locals.runtime as any)?.env?.AUTH_SECRET ??
         process.env.AUTH_SECRET ??
-        "dev-secret";
+        "omega-dev-secret-change-in-production";
       const auth = new AuthEngine(db, secret);
       await auth.revokeSession(token);
     } catch {

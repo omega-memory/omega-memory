@@ -29,6 +29,9 @@ export default defineConfig({
     css: {
       postcss: "./postcss.config.mjs",
     },
+    optimizeDeps: {
+      include: ["react", "react-dom", "react-dom/client"],
+    },
     ssr: {
       external: ["pg", "postgres", "drizzle-orm", "drizzle-orm/d1", "drizzle-orm/postgres-js", "drizzle-orm/better-sqlite3", "better-sqlite3", "react-force-graph-3d", "3d-force-graph", "three"],
     },
