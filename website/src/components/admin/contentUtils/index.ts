@@ -1,8 +1,11 @@
 // Barrel re-export: all consumers can still import from "./contentUtils"
 
-// Types and constants
-export type { ContentCategory, ParsedContent, GrantData, LeaderboardEntry } from "./types";
+// Types and constants — re-export everything from types
 export {
+  type ContentCategory,
+  type ParsedContent,
+  type GrantData,
+  type LeaderboardEntry,
   TYPE_META,
   DEFAULT_META,
   TYPE_VERBS,

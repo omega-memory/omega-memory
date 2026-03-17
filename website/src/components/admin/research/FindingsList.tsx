@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { ResearchFinding, ResearchPlan, ResearchStats, CurationStatus } from "./types";
 import {
   FILTERS,
-  Filter,
+  type Filter,
   FILTER_LABELS,
   PLAN_STATUS_STYLES,
   timeAgo,

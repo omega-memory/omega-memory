@@ -1,10 +1,10 @@
 import React from "react";
 
 import {
-  ParsedContent,
-  ContentCategory,
+  type ParsedContent,
+  type ContentCategory,
   GRANT_STATUS_STYLES,
-  LeaderboardEntry,
+  type LeaderboardEntry,
 } from "./types";
 
 import {
