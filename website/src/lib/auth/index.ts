@@ -11,109 +11,38 @@
 import { eq, and } from "drizzle-orm";
 import { users, userSessions, apiTokens, licenses } from "../db/schema";
 import type { Database } from "../db";
+import { getDb } from "../db";
+import {
+  getSigningKey,
+  hmacSign,
+  hmacVerify,
+  timingSafeEqual,
+  bufToHex,
+  hashPassword,
+  verifyPassword,
+  generateId,
+  generateToken,
+  hashToken,
+} from "./crypto";
+
+// Re-export all crypto helpers for backward compatibility
+export {
+  getSigningKey,
+  hmacSign,
+  hmacVerify,
+  timingSafeEqual,
+  bufToHex,
+  hashPassword,
+  verifyPassword,
+  generateId,
+  generateToken,
+  hashToken,
+} from "./crypto";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const PRO_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const COOKIE_NAME = "omega_session";
 const PRO_COOKIE_NAME = "omega_pro_session";
-
-// ===================================================================
-// Crypto helpers (Web Crypto API — works on CF Workers + Node 22+)
-// ===================================================================
-
-async function getSigningKey(secret: string): Promise<CryptoKey> {
-  const enc = new TextEncoder();
-  return crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"]
-  );
-}
-
-async function hmacSign(data: string, secret: string): Promise<string> {
-  const key = await getSigningKey(secret);
-  const enc = new TextEncoder();
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(data));
-  return bufToHex(new Uint8Array(sig));
-}
-
-async function hmacVerify(data: string, signature: string, secret: string): Promise<boolean> {
-  const expected = await hmacSign(data, secret);
-  return timingSafeEqual(expected, signature);
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
-
-function bufToHex(buf: Uint8Array): string {
-  return Array.from(buf).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function hashPassword(password: string): Promise<string> {
-  // Use PBKDF2 (available in Web Crypto) since scrypt isn't in Web Crypto
-  const enc = new TextEncoder();
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
-    keyMaterial,
-    256
-  );
-  const hash = bufToHex(new Uint8Array(bits));
-  const saltHex = bufToHex(salt);
-  return `pbkdf2:100000:${saltHex}:${hash}`;
-}
-
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const parts = stored.split(":");
-  if (parts[0] !== "pbkdf2" || parts.length !== 4) return false;
-  const [, iterations, saltHex, expectedHash] = parts;
-  const enc = new TextEncoder();
-  const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: parseInt(iterations), hash: "SHA-256" },
-    keyMaterial,
-    256
-  );
-  const hash = bufToHex(new Uint8Array(bits));
-  return timingSafeEqual(hash, expectedHash);
-}
-
-function generateId(): string {
-  return crypto.randomUUID();
-}
-
-function generateToken(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return bufToHex(bytes);
-}
-
-async function hashToken(token: string): Promise<string> {
-  const enc = new TextEncoder();
-  const digest = await crypto.subtle.digest("SHA-256", enc.encode(token));
-  return bufToHex(new Uint8Array(digest));
-}
 
 // ===================================================================
 // Auth Engine
@@ -309,6 +238,16 @@ export class AuthEngine {
     const licenseKey = atob(payload);
     return this.validateLicense(licenseKey);
   }
+}
+
+// ===================================================================
+// Convenience helper
+// ===================================================================
+
+export function getAuthEngine(context: { locals: App.Locals | Record<string, unknown> }): Promise<AuthEngine> {
+  const env = (context.locals?.runtime as any)?.env;
+  const secret = env?.AUTH_SECRET ?? process.env.AUTH_SECRET ?? "omega-dev-secret-change-in-production";
+  return getDb(context).then(db => new AuthEngine(db, secret));
 }
 
 // ===================================================================

@@ -1,5 +1,5 @@
 import { getSessionFromCookie } from "../auth/index";
-import { AuthEngine } from "../auth/index";
+import { getAuthEngine } from "../auth/index";
 import { getDb } from "../db/index";
 import type { APIContext } from "astro";
 
@@ -24,11 +24,7 @@ export async function requireAdminAuth(context: APIContext) {
   }
 
   const db = await getDb(context);
-  const secret =
-    (context.locals.runtime as any)?.env?.AUTH_SECRET ??
-    process.env.AUTH_SECRET ??
-    "omega-dev-secret-change-in-production";
-  const auth = new AuthEngine(db, secret);
+  const auth = await getAuthEngine(context);
   const user = await auth.validateSession(token);
 
   if (!user) {

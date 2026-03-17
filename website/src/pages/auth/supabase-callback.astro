@@ -1,0 +1,79 @@
+---
+// No server-side logic needed.
+// This page extracts the access_token from the URL hash fragment
+// (Supabase uses implicit grant and puts the token in the fragment)
+// and POSTs it to our server-side callback endpoint.
+---
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Authenticating...</title>
+  <style>
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0a0a0a;
+      color: #e5e5e5;
+    }
+    .spinner {
+      width: 24px;
+      height: 24px;
+      border: 3px solid #333;
+      border-top-color: #e5e5e5;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 12px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .container {
+      display: flex;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="spinner"></div>
+    <span>Completing sign-in...</span>
+  </div>
+  <script>
+    (function() {
+      // Extract token from hash fragment
+      var hash = window.location.hash.substring(1);
+      var params = new URLSearchParams(hash);
+      var accessToken = params.get("access_token");
+
+      if (accessToken) {
+        fetch("/api/auth/supabase/callback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ access_token: accessToken }),
+        }).then(function(r) {
+          if (r.ok) {
+            window.location.href = "/admin";
+          } else {
+            window.location.href = "/admin/login?error=auth_failed";
+          }
+        }).catch(function() {
+          window.location.href = "/admin/login?error=auth_failed";
+        });
+      } else {
+        // Maybe server-side callback with query params — check for access_token in query
+        var queryToken = new URLSearchParams(window.location.search).get("access_token");
+        if (queryToken) {
+          // Redirect to server-side handler
+          window.location.href = "/api/auth/supabase/callback?access_token=" + encodeURIComponent(queryToken);
+        } else {
+          window.location.href = "/admin/login?error=no_token";
+        }
+      }
+    })();
+  </script>
+</body>
+</html>

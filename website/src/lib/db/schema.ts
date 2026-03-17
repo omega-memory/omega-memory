@@ -363,3 +363,53 @@ export const scheduleRuns = sqliteTable("schedule_runs", {
 export const schemaVersion = sqliteTable("schema_version", {
   version: integer("version").notNull(),
 });
+
+// ===================================================================
+// WebAuthn tables
+// ===================================================================
+
+export const webauthnCredentials = sqliteTable("webauthn_credentials", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  credentialId: text("credential_id").notNull(),
+  publicKey: text("public_key").notNull(),
+  counter: integer("counter").notNull().default(0),
+  deviceType: text("device_type"),
+  backedUp: integer("backed_up").default(0),
+  transports: text("transports"),
+  createdAt: text("created_at"),
+  lastUsedAt: text("last_used_at"),
+}, (t) => [
+  index("idx_webauthn_credentials_user_id").on(t.userId),
+  index("idx_webauthn_credentials_credential_id").on(t.credentialId),
+]);
+
+// ===================================================================
+// OAuth tables
+// ===================================================================
+
+export const oauthAccounts = sqliteTable("oauth_accounts", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  provider: text("provider").notNull(),
+  providerAccountId: text("provider_account_id").notNull(),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  expiresAt: text("expires_at"),
+  createdAt: text("created_at"),
+}, (t) => [
+  index("idx_oauth_accounts_user_id").on(t.userId),
+  uniqueIndex("uq_oauth_accounts_provider_account").on(t.provider, t.providerAccountId),
+]);
+
+export const oauthStates = sqliteTable("oauth_states", {
+  id: text("id").primaryKey(),
+  state: text("state").notNull(),
+  codeVerifier: text("code_verifier"),
+  redirectUri: text("redirect_uri"),
+  provider: text("provider").notNull(),
+  createdAt: text("created_at"),
+  expiresAt: text("expires_at").notNull(),
+}, (t) => [
+  index("idx_oauth_states_state").on(t.state),
+]);

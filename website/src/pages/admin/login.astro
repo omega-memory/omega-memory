@@ -16,45 +16,68 @@ const error = Astro.url.searchParams.get("error");
             <circle cx="16" cy="16" r="2.5" fill="#e8e6e3"/>
           </svg>
         </div>
-        <h1>OMEGA Admin</h1>
-        <p class="text-[var(--ink-faint)] text-sm">Sign in to continue</p>
+        <h1>Sign in to OMEGA</h1>
+        <p class="subtitle">Admin Dashboard</p>
       </div>
 
-      {error && (
-        <div class="error-banner">
-          {error === "invalid" ? "Invalid email or password." : "Something went wrong. Please try again."}
+      <div id="error-msg" class="error-banner" style={error ? "" : "display:none"}>
+        {error === "invalid" ? "Invalid email or password." : error ? "Something went wrong. Please try again." : ""}
+      </div>
+
+      <div id="login-methods" class="login-methods">
+        <!-- Password form (shown by default, hidden if provider config says no password) -->
+        <form id="password-form" class="login-form" autocomplete="on">
+          <input type="hidden" name="next" value={next} />
+
+          <div class="field">
+            <label for="email">Email</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              required
+              autocomplete="email"
+              placeholder="admin@example.com"
+            />
+          </div>
+
+          <div class="field">
+            <label for="password">Password</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              required
+              autocomplete="current-password"
+              placeholder="••••••••"
+            />
+          </div>
+
+          <button type="submit" class="submit-btn" id="password-submit-btn">Sign In</button>
+        </form>
+
+        <!-- Divider (shown when multiple methods available) -->
+        <div id="divider" class="divider" style="display:none">
+          <div class="divider-line"></div>
+          <span class="divider-text">or</span>
+          <div class="divider-line"></div>
         </div>
-      )}
 
-      <form method="POST" action="/api/auth/login" class="login-form">
-        <input type="hidden" name="next" value={next} />
+        <!-- OAuth buttons (dynamically populated) -->
+        <div id="oauth-buttons" class="oauth-buttons" style="display:none"></div>
 
-        <div class="field">
-          <label for="email">Email</label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            required
-            autocomplete="email"
-            placeholder="admin@example.com"
-          />
-        </div>
+        <!-- Supabase buttons (dynamically populated) -->
+        <div id="supabase-buttons" class="oauth-buttons" style="display:none"></div>
 
-        <div class="field">
-          <label for="password">Password</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            required
-            autocomplete="current-password"
-            placeholder="••••••••"
-          />
-        </div>
-
-        <button type="submit" class="submit-btn">Sign In</button>
-      </form>
+        <!-- Passkey button -->
+        <button id="passkey-btn" class="passkey-btn" style="display:none">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/>
+            <circle cx="16.5" cy="7.5" r=".5"/>
+          </svg>
+          Sign in with Passkey
+        </button>
+      </div>
     </div>
   </div>
 
@@ -88,6 +111,10 @@ const error = Astro.url.searchParams.get("error");
       font-weight: 600;
       margin-bottom: 0.25rem;
     }
+    .subtitle {
+      color: var(--ink-faint);
+      font-size: 0.875rem;
+    }
     .error-banner {
       background: rgba(240, 96, 96, 0.1);
       border: 1px solid rgba(240, 96, 96, 0.25);
@@ -96,6 +123,11 @@ const error = Astro.url.searchParams.get("error");
       border-radius: 6px;
       font-size: 0.875rem;
       margin-bottom: 1rem;
+    }
+    .login-methods {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
     }
     .login-form {
       display: flex;
@@ -146,5 +178,295 @@ const error = Astro.url.searchParams.get("error");
     .submit-btn:hover {
       background: var(--accent-bright);
     }
+    .submit-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .divider-line {
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+    .divider-text {
+      font-size: 0.75rem;
+      color: var(--ink-faint);
+    }
+    .oauth-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .oauth-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      width: 100%;
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.6rem 1rem;
+      font-size: 0.9rem;
+      font-family: var(--font-sans);
+      color: var(--ink-primary);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .oauth-btn:hover {
+      border-color: var(--accent-dim);
+      background: var(--surface-1);
+    }
+    .passkey-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      width: 100%;
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.65rem 1rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      color: var(--ink-primary);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .passkey-btn:hover {
+      border-color: var(--accent-dim);
+      background: var(--surface-1);
+    }
+    .passkey-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
   </style>
+
+  <script define:vars={{ next }}>
+    const errorEl = document.getElementById("error-msg");
+    const passwordForm = document.getElementById("password-form");
+    const divider = document.getElementById("divider");
+    const oauthButtons = document.getElementById("oauth-buttons");
+    const supabaseButtons = document.getElementById("supabase-buttons");
+    const passkeyBtn = document.getElementById("passkey-btn");
+    const submitBtn = document.getElementById("password-submit-btn");
+
+    function showError(msg) {
+      if (errorEl) {
+        errorEl.textContent = msg;
+        errorEl.style.display = "";
+      }
+    }
+
+    function hideError() {
+      if (errorEl) {
+        errorEl.style.display = "none";
+      }
+    }
+
+    // --- Password form: submit via fetch ---
+    if (passwordForm) {
+      passwordForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        hideError();
+        const email = passwordForm.querySelector("#email").value;
+        const password = passwordForm.querySelector("#password").value;
+        if (!email || !password) {
+          showError("Email and password are required.");
+          return;
+        }
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Signing in...";
+        try {
+          const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password, next }),
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) {
+            window.location.href = next;
+          } else {
+            showError(data.error || "Invalid email or password.");
+          }
+        } catch {
+          showError("Network error. Please try again.");
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Sign In";
+        }
+      });
+    }
+
+    // --- Passkey authentication ---
+    async function handlePasskeyLogin() {
+      hideError();
+      passkeyBtn.disabled = true;
+      passkeyBtn.textContent = "Authenticating...";
+      try {
+        // 1. Get authentication options
+        const optionsRes = await fetch("/api/auth/webauthn/login-options", { method: "POST" });
+        if (!optionsRes.ok) throw new Error("Failed to get authentication options");
+        const options = await optionsRes.json();
+
+        // 2. Call WebAuthn API
+        const credential = await navigator.credentials.get({
+          publicKey: {
+            challenge: base64urlToBuffer(options.challenge),
+            timeout: options.timeout,
+            rpId: options.rpId,
+            allowCredentials: (options.allowCredentials || []).map((c) => ({
+              id: base64urlToBuffer(c.id),
+              type: c.type,
+              transports: c.transports,
+            })),
+            userVerification: options.userVerification,
+          },
+        });
+
+        if (!credential) throw new Error("No credential returned");
+
+        // 3. Build response
+        const authResponse = {
+          id: credential.id,
+          rawId: bufferToBase64url(credential.rawId),
+          type: credential.type,
+          response: {
+            authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+            clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+            signature: bufferToBase64url(credential.response.signature),
+            userHandle: credential.response.userHandle
+              ? bufferToBase64url(credential.response.userHandle)
+              : undefined,
+          },
+          authenticatorAttachment: credential.authenticatorAttachment || undefined,
+          clientExtensionResults: credential.getClientExtensionResults(),
+        };
+
+        // 4. Verify on server
+        const verifyRes = await fetch("/api/auth/webauthn/login-verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            credentialResponse: authResponse,
+            challenge: options.challenge,
+          }),
+        });
+        const verifyData = await verifyRes.json();
+        if (verifyRes.ok && verifyData.ok) {
+          window.location.href = next;
+        } else {
+          showError(verifyData.error || "Passkey authentication failed.");
+        }
+      } catch (err) {
+        if (err.name === "NotAllowedError") {
+          showError("Passkey request was cancelled.");
+        } else {
+          showError(err.message || "Passkey authentication failed.");
+        }
+      } finally {
+        passkeyBtn.disabled = false;
+        passkeyBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5"/></svg> Sign in with Passkey`;
+      }
+    }
+
+    if (passkeyBtn) {
+      passkeyBtn.addEventListener("click", handlePasskeyLogin);
+    }
+
+    // --- Base64url helpers ---
+    function base64urlToBuffer(base64url) {
+      const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+      const pad = base64.length % 4 === 0 ? "" : "=".repeat(4 - (base64.length % 4));
+      const binary = atob(base64 + pad);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes.buffer;
+    }
+
+    function bufferToBase64url(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (const b of bytes) binary += String.fromCharCode(b);
+      return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    }
+
+    // --- Fetch provider config and show appropriate methods ---
+    async function loadProviderConfig() {
+      try {
+        const res = await fetch("/api/auth/provider-config");
+        if (!res.ok) return;
+        const config = await res.json();
+        const methods = config.methods || [];
+
+        let hasPassword = false;
+        let hasOther = false;
+
+        for (const method of methods) {
+          if (method.type === "password") {
+            hasPassword = true;
+          }
+
+          if (method.type === "oauth") {
+            hasOther = true;
+            if (oauthButtons) {
+              oauthButtons.style.display = "";
+              const btn = document.createElement("button");
+              btn.className = "oauth-btn";
+              btn.type = "button";
+              btn.textContent = method.label || `Sign in with ${method.provider}`;
+              btn.addEventListener("click", () => {
+                window.location.href = `/api/auth/oauth/authorize?provider=${encodeURIComponent(method.provider)}`;
+              });
+              oauthButtons.appendChild(btn);
+            }
+          }
+
+          if (method.type === "supabase") {
+            hasOther = true;
+            if (supabaseButtons) {
+              supabaseButtons.style.display = "";
+              for (const provider of method.providers || []) {
+                const btn = document.createElement("button");
+                btn.className = "oauth-btn";
+                btn.type = "button";
+                btn.textContent = `Sign in with ${provider.charAt(0).toUpperCase() + provider.slice(1)}`;
+                btn.addEventListener("click", () => {
+                  window.location.href = `/api/auth/supabase/authorize?provider=${encodeURIComponent(provider)}`;
+                });
+                supabaseButtons.appendChild(btn);
+              }
+            }
+          }
+
+          if (method.type === "webauthn") {
+            hasOther = true;
+            if (passkeyBtn) {
+              passkeyBtn.style.display = "";
+            }
+          }
+        }
+
+        // Hide password form if not in methods
+        if (!hasPassword && passwordForm) {
+          passwordForm.style.display = "none";
+        }
+
+        // Show divider if multiple method types
+        if (hasPassword && hasOther && divider) {
+          divider.style.display = "";
+        }
+      } catch {
+        // If provider config fails, keep default password form visible
+      }
+    }
+
+    loadProviderConfig();
+  </script>
 </Base>

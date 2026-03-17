@@ -11,5 +11,7 @@ export default defineConfig({
         dialect: "postgresql" as const,
         dbCredentials: { url: process.env.DATABASE_URL },
       }
-    : {}),
+    : {
+        dbCredentials: { url: process.env.OMEGA_DB_PATH || "./omega.db" },
+      }),
 });
