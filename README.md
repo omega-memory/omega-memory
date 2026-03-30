@@ -315,3 +315,8 @@ Manually remove OMEGA entries from `~/.claude/settings.json` and the `<!-- OMEGA
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/omega-memory-omega-memory).
+
