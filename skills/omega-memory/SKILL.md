@@ -1,9 +1,10 @@
 ---
 name: omega-memory
-description: "Persistent memory for AI coding agents. Teaches agents how to use OMEGA's MCP tools for storing decisions, querying context, coordinating multi-agent workflows, and resuming tasks across sessions."
+description: "Persistent cross-session memory for AI coding agents via OMEGA's 12 MCP tools. Store decisions and lessons, query past context with semantic search, checkpoint and resume tasks, and manage memory lifecycle. Use when the user mentions OMEGA, persistent memory, remembering decisions, resuming sessions, recalling past context, or MCP memory tools."
 license: Apache-2.0
 compatibility: "Python 3.11+, Claude Code, Cursor, Windsurf, Zed"
 metadata:
+  version: "1.0.0"
   category: memory
   pypi: omega-memory
   github: omega-memory/omega-memory
@@ -11,9 +12,7 @@ metadata:
 
 # OMEGA Memory
 
-Persistent memory for AI coding agents. OMEGA gives your agent a knowledge graph it can query, learn from, and coordinate through across sessions.
-
-This skill teaches you how to use OMEGA's MCP tools effectively.
+Persistent memory for AI coding agents. OMEGA gives your agent a knowledge graph it can query, learn from, and build on across sessions.
 
 ## Setup
 
@@ -24,6 +23,17 @@ omega doctor       # verify everything works
 ```
 
 Works with Claude Code, Cursor, Windsurf, Zed, and any MCP client.
+
+## Session Workflow
+
+Follow this sequence every session:
+
+1. **Start** — Call `omega_welcome()` to load recent context, active reminders, and project state
+2. **Review** — Read the returned briefing; check for active tasks and relevant memories
+3. **Query** — Before non-trivial work, call `omega_query("prior decisions about [area]")` to check existing context
+4. **Work** — Complete the task using surfaced context
+5. **Store** — Save key outcomes: `omega_store("[decision and reasoning]", "decision")`
+6. **Checkpoint** — If the task is incomplete, call `omega_checkpoint()` to save state for next session
 
 ## Core Tools
 
@@ -56,7 +66,7 @@ omega_store("pytest fixtures with db cleanup must use function scope, not sessio
 
 **`omega_query(query, mode?, limit?, entity_id?)`**
 
-Search memories by meaning, not just keywords. Uses hybrid retrieval: vector similarity + full-text search + cross-encoder reranking.
+Search memories by meaning, not just keywords.
 
 | Mode | When to Use |
 |------|------------|
@@ -87,20 +97,6 @@ omega_query(mode="browse", browse_by="type")
 **`omega_reflect()`** — Analyze memory quality: duplicates, contradictions, coverage gaps.
 
 **`omega_maintain(action)`** — Run maintenance operations: consolidation, compaction, health checks.
-
-## Retrieval Architecture
-
-OMEGA's query pipeline runs 7 phases to find the most relevant memories:
-
-1. **Vector similarity** — Embedding search (bge-small-en-v1.5, 384-dim) via sqlite-vec
-2. **Full-text search** — FTS5 with BM25 scoring
-3. **Strong signal short-circuit** — Skip expensive phases when FTS5 finds an exact match
-4. **Score fusion** — Reciprocal Rank Fusion combines vector + text scores
-5. **Contextual boosting** — Boost results matching current file, project, or tags
-6. **Cross-encoder reranking** — ms-marco-MiniLM-L-6-v2 rescores top candidates
-7. **Assembly** — Dedup, normalize, apply minimum relevance threshold
-
-This hybrid approach achieves 95.4% on LongMemEval (500-question benchmark).
 
 ## Best Practices
 
@@ -134,17 +130,6 @@ This hybrid approach achieves 95.4% on LongMemEval (500-question benchmark).
 | Skip `omega_welcome` at session start | Always call it — it loads critical context |
 | Store without `event_type` | Always specify type for proper TTL and dedup |
 | Guess from stale memory | Query OMEGA to verify current state |
-
-## How It Works Under the Hood
-
-- **Storage:** SQLite with WAL mode. Single file at `~/.omega/omega.db`.
-- **Embeddings:** bge-small-en-v1.5 via ONNX Runtime (~90MB RAM). LRU cache (512 entries).
-- **Vector search:** sqlite-vec extension for ANN similarity search.
-- **Text search:** FTS5 with BM25 ranking.
-- **Dedup:** Jaccard similarity with per-type thresholds (0.70-0.90). Content-level and embedding-level.
-- **Memory evolution:** Similar memories merge (Zettelkasten-style) instead of creating duplicates.
-- **TTL:** Automatic expiry based on event type. Permanent for preferences, 7-90 days for others.
-- **Privacy:** Everything stays local. No cloud, no telemetry. Apache-2.0 licensed.
 
 ## Links
 
