@@ -187,7 +187,7 @@ class StoreMixin:
             effective_source_uri = source_uri or meta.get("source_uri")
             effective_status = status or meta.get("status") or "active"
 
-            self._exec(
+            _insert_cur = self._exec(
                 """INSERT INTO memories
                    (node_id, content, metadata, created_at, access_count,
                     ttl_seconds, session_id, event_type, project, content_hash,
@@ -219,8 +219,11 @@ class StoreMixin:
                 ),
             )
 
-            # Get the rowid for the vec table
-            rowid = self._exec("SELECT id FROM memories WHERE node_id = ?", (node_id,)).fetchone()[0]
+            # Get the rowid for the vec table — use cursor.lastrowid to avoid a
+            # SELECT race condition under concurrent writes (WAL mode + Waitress
+            # multi-thread): the follow-up SELECT could return None if another
+            # thread's transaction hasn't been seen yet by this connection.
+            rowid = _insert_cur.lastrowid
 
             # Insert embedding into vec table
             if embedding and self._vec_available:

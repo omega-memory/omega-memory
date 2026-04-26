@@ -838,7 +838,7 @@ class SearchMixin:
 
         matches: List[Tuple[float, MemoryResult]] = []
         for nid, mem in self._hot_memories.items():
-            mem_fp = _trigram_fingerprint(mem.content)
+            mem_fp = _trigram_fingerprint(mem.content or "")
             sim = _trigram_jaccard(query_fp, mem_fp)
             if sim >= _FAST_PATH_MIN_OVERLAP:
                 matches.append((sim, mem))
