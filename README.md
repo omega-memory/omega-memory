@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/omega-memory-omega-memory-badge.png)](https://mseep.ai/app/omega-memory-omega-memory)
+
 # OMEGA
 
 **Cross-model memory for AI agents. Local-first. Works with Claude, GPT, Gemini, Cursor, Claw Code, and any MCP client.** Your agent's brain shouldn't live on someone else's server, or be locked to one provider.
