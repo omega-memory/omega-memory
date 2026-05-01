@@ -127,7 +127,10 @@ class SearchMixin:
 
                 results = []
                 # BM25 rank values are negative (more negative = better match)
-                ranks = [row[7] for row in rows]
+                # Filter out None ranks (FTS5 can return NULL for corrupt index entries)
+                ranks = [row[7] for row in rows if row[7] is not None]
+                if not ranks:
+                    return []
                 best_rank = min(ranks)  # Most negative = best
                 worst_rank = max(ranks)  # Closest to 0 = worst
                 rank_spread = worst_rank != best_rank
@@ -135,6 +138,8 @@ class SearchMixin:
                 for row in rows:
                     result = self._row_to_result(row[:7])
                     bm25_rank = row[7]
+                    if bm25_rank is None:
+                        continue
                     # Normalize BM25: best -> 1.0, worst -> 0.1
                     if rank_spread:
                         bm25_norm = 0.1 + 0.9 * (worst_rank - bm25_rank) / (worst_rank - best_rank)
@@ -193,13 +198,17 @@ class SearchMixin:
                         if not rows:
                             return []
                         results = []
-                        ranks = [row[7] for row in rows]
+                        ranks = [row[7] for row in rows if row[7] is not None]
+                        if not ranks:
+                            return []
                         best_rank = min(ranks)
                         worst_rank = max(ranks)
                         rank_spread = worst_rank != best_rank
                         for row in rows:
                             result = self._row_to_result(row[:7])
                             bm25_rank = row[7]
+                            if bm25_rank is None:
+                                continue
                             if rank_spread:
                                 bm25_norm = 0.1 + 0.9 * (worst_rank - bm25_rank) / (worst_rank - best_rank)
                             else:
@@ -893,7 +902,7 @@ class SearchMixin:
         for nid, mem in self._hot_memories.items():
             if mem.is_expired() or mem.metadata.get("superseded"):
                 continue
-            overlap = self._word_overlap(query_words, mem.content.lower())
+            overlap = self._word_overlap(query_words, (mem.content or "").lower())
             if overlap >= 0.4:
                 matches.append((overlap, mem))
         if not matches:
