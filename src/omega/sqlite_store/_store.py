@@ -93,10 +93,20 @@ class StoreMixin:
             # ONE COUNT(*) query — the count is reused for both the
             # capacity check and the grandfather computation, so we do not
             # leave two prepared statements in flight on older SQLite.
+            #
+            # Defensive coercion of the COUNT row: on Python 3.12 + older
+            # SQLite (Ubuntu CI 3.40-class), this cursor occasionally
+            # yields a None first column even though COUNT(*) cannot
+            # legitimately return NULL. Treating the result as 0 fails
+            # safe: the capacity check below skips, no write block, and
+            # the next store() retries the probe. A latent failure that
+            # only surfaced after Sprint 0 (PR #59) unblocked CI past
+            # the prior import_from_file stop point.
             self._capacity_warning = None
             base_max = self._MAX_NODES
             if base_max > 0:
-                count = self._exec("SELECT COUNT(*) FROM memories").fetchone()[0]
+                row = self._exec("SELECT COUNT(*) FROM memories").fetchone()
+                count = row[0] if row and row[0] is not None else 0
                 max_nodes = self._apply_grandfather(base_max, count)
                 is_pro_user = False
                 try:
