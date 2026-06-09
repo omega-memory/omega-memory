@@ -1,5 +1,6 @@
 """Maintenance, health, graph, entity, and I/O mixin for SQLiteStore."""
 
+import gc
 import logging
 import os
 import time as _time
@@ -1302,55 +1303,54 @@ class MaintenanceMixin:
         data = json.loads(raw_content)
         nodes = data.get("nodes", [])
 
-        if clear_existing:
-            # Atomic clear via executescript. WAL mode + isolation_level
-            # ="IMMEDIATE" on the connection (see _base.py:_connect) give
-            # readers a consistent pre-clear snapshot until the COMMIT
-            # inside the script — the original "BEGIN EXCLUSIVE" intent
-            # is satisfied without taking an exclusive lock.
-            #
-            # Why executescript instead of per-statement execute(): older
-            # SQLite libraries (Ubuntu CI ships 3.40-class, local dev
-            # tends to be 3.52+) are stricter about "SQL statements in
-            # progress" at commit time. Per-execute() returns a Cursor
-            # whose prepared statement may stay in PROGRESS until
-            # garbage collection, and the commit then fails with:
-            #
-            #   sqlite3.OperationalError: cannot commit transaction -
-            #     SQL statements in progress
-            #
-            # (omega-public CI failures 2026-05-19 through 2026-06-09.)
-            # executescript batches through SQLite's sqlite3_exec, which
-            # finalizes each prepared statement before the next runs, so
-            # the BEGIN/COMMIT pair inside the script lands atomically
-            # across every supported SQLite version.
-            script = ["BEGIN;", "DELETE FROM memories;"]
-            if self._vec_available:
-                script.append("DELETE FROM memories_vec;")
-            script.extend(["DELETE FROM edges;", "COMMIT;"])
-            try:
-                self._conn.executescript(" ".join(script))
-            except Exception as e:
-                logger.debug("Import clear failed, rolling back: %s", e)
+        # Serialize against the deferred-startup thread (PRAGMA integrity_check
+        # + WAL checkpoint share this connection). Without the lock, that
+        # thread's cursor can still be mid-statement at the SQLite C-API
+        # level when executescript() below issues its implicit COMMIT,
+        # producing "cannot commit transaction - SQL statements in progress"
+        # on Ubuntu CI 3.40. _lock is an RLock, so self.store() below
+        # re-enters fine.
+        with self._lock:
+            if clear_existing:
+                # Older SQLite (Ubuntu CI 3.40) is strict about open prepared
+                # statements at COMMIT time. Force-finalize any Cursor objects
+                # that may still be unreaped from init (_refresh_hot_cache,
+                # schema migrations) or deferred startup. CPython's refcount
+                # GC usually handles this synchronously, but a brief delay
+                # between cursor scope-out and reclamation is enough to lose
+                # the race. gc.collect() makes it deterministic; on newer
+                # SQLite it's a harmless ~ms no-op.
+                gc.collect()
+                # Atomic clear via executescript: BEGIN/DELETE/COMMIT batched
+                # through sqlite3_exec, which finalizes each prepared statement
+                # before the next runs.
+                script = ["BEGIN;", "DELETE FROM memories;"]
+                if self._vec_available:
+                    script.append("DELETE FROM memories_vec;")
+                script.extend(["DELETE FROM edges;", "COMMIT;"])
                 try:
-                    self._conn.executescript("ROLLBACK;")
-                except Exception:
-                    pass
-                raise
+                    self._conn.executescript(" ".join(script))
+                except Exception as e:
+                    logger.debug("Import clear failed, rolling back: %s", e)
+                    try:
+                        self._conn.executescript("ROLLBACK;")
+                    except Exception:
+                        pass
+                    raise
 
-        imported = 0
-        for node_data in nodes:
-            try:
-                self.store(
-                    content=node_data["content"],
-                    session_id=node_data.get("metadata", {}).get("session_id"),
-                    metadata=node_data.get("metadata"),
-                    ttl_seconds=node_data.get("ttl_seconds"),
-                    skip_inference=True,
-                )
-                imported += 1
-            except Exception as e:
-                logger.debug(f"Import failed for node: {e}")
+            imported = 0
+            for node_data in nodes:
+                try:
+                    self.store(
+                        content=node_data["content"],
+                        session_id=node_data.get("metadata", {}).get("session_id"),
+                        metadata=node_data.get("metadata"),
+                        ttl_seconds=node_data.get("ttl_seconds"),
+                        skip_inference=True,
+                    )
+                    imported += 1
+                except Exception as e:
+                    logger.debug(f"Import failed for node: {e}")
 
         return {
             "filepath": str(filepath),
