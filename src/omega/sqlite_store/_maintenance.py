@@ -1303,9 +1303,16 @@ class MaintenanceMixin:
         nodes = data.get("nodes", [])
 
         if clear_existing:
-            # Atomic clear+import: use EXCLUSIVE transaction to prevent
-            # concurrent queries from seeing empty DB between clear and import
-            self._conn.execute("BEGIN EXCLUSIVE")
+            # Atomic clear+import. Concurrent readers see the pre-clear
+            # snapshot until commit() — WAL mode + isolation_level="IMMEDIATE"
+            # on the connection (see _base.py:_connect) give that snapshot
+            # isolation, so an explicit BEGIN EXCLUSIVE isn't needed.
+            #
+            # Mixing raw `execute("BEGIN")` / `execute("COMMIT")` with the
+            # driver's auto-BEGIN leaves an uncommitted cursor in the
+            # driver's transaction state — on COMMIT SQLite then rejects
+            # with "cannot commit transaction - SQL statements in progress"
+            # (omega-public CI failure 2026-05-19 through 2026-05-25).
             try:
                 self._conn.execute("DELETE FROM memories")
                 if self._vec_available:
@@ -1314,10 +1321,10 @@ class MaintenanceMixin:
                     except Exception as e:
                         logger.debug("Vec table clear during import failed: %s", e)
                 self._conn.execute("DELETE FROM edges")
-                self._conn.execute("COMMIT")
+                self._conn.commit()
             except Exception as e:
                 logger.debug("Import clear failed, rolling back: %s", e)
-                self._conn.execute("ROLLBACK")
+                self._conn.rollback()
                 raise
 
         imported = 0
