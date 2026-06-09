@@ -300,13 +300,23 @@ class SQLiteStoreBase:
             return base  # Pro path — no grandfathering needed
         grand = getattr(self, "_grandfather_max", None)
         if grand is None:
+            # Explicitly close the cursor after the probe. On older SQLite
+            # libraries (Ubuntu CI ships 3.40-class) leaving a prepared
+            # statement open between queries corrupts the next execute()
+            # — the symptom is fetchone() returning None on a fresh
+            # SELECT COUNT(*) that should always have one row. Same bug
+            # class as the import_from_file commit() issue (Sprint 0).
+            count = 0
             try:
-                count = self._conn.execute(
-                    "SELECT COUNT(*) FROM memories"
-                ).fetchone()[0]
+                cur = self._conn.execute("SELECT COUNT(*) FROM memories")
+                try:
+                    row = cur.fetchone()
+                    if row is not None:
+                        count = row[0]
+                finally:
+                    cur.close()
             except Exception as e:
                 logger.debug("Grandfather count probe failed: %s", e)
-                count = 0
             grand = max(base, count)
             self._grandfather_max = grand
         return grand
