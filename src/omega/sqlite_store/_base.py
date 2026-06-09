@@ -24,6 +24,41 @@ from ._types import (
 logger = logging.getLogger("omega.sqlite_store")
 
 
+# Free-tier capacity gates. Module-level so a runtime monkey-patch of a
+# SQLiteStore instance attribute cannot raise the cap; the property on
+# SQLiteStoreBase always re-reads these unless an explicit override field
+# is set (tests only).
+#
+# Pro path: when omega_platform.license.is_pro() returns True the
+# OMEGA_MAX_NODES env var is honored (default 50000). Pro users keep the
+# existing env-tunable behavior.
+#
+# Free path: the env var is IGNORED. The hard write cap is _CORE_HARD_LIMIT
+# (5000). Per-instance grandfathering on the property lifts the ceiling to
+# the current count for installs that already exceed 5K, so existing Free
+# users do not suddenly hit a write wall after upgrading omega-memory.
+_CORE_HARD_LIMIT = 5000
+
+
+def _get_effective_max_nodes() -> int:
+    """Hard write cap for this process.
+
+    Pro: ``OMEGA_MAX_NODES`` env (default 50000). Free: ``_CORE_HARD_LIMIT``;
+    the env var is ignored so a free user cannot set ``OMEGA_MAX_NODES=99999``
+    to bypass the cap.
+    """
+    try:
+        from omega_platform.license import is_pro
+
+        if is_pro():
+            return int(os.environ.get("OMEGA_MAX_NODES", "50000"))
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug("is_pro() check failed in _get_effective_max_nodes: %s", e)
+    return _CORE_HARD_LIMIT
+
+
 class SQLiteStoreBase:
     """SQLite-backed memory store with sqlite-vec for vector search.
 
@@ -233,8 +268,48 @@ class SQLiteStoreBase:
     DEFAULT_JACCARD_DEDUP_THRESHOLD = 0.80
 
     # Input size limits (configurable via env vars)
-    _MAX_NODES = int(os.environ.get("OMEGA_MAX_NODES", "50000"))
     _MAX_CONTENT_SIZE = int(os.environ.get("OMEGA_MAX_CONTENT_SIZE", "1000000"))  # 1MB
+
+    @property
+    def _MAX_NODES(self) -> int:
+        """Effective hard write cap. Re-reads license state per access.
+
+        Pro: ``OMEGA_MAX_NODES`` env (default 50000).
+        Free: ``_CORE_HARD_LIMIT`` (5000); the env var is ignored so a free
+        user cannot set ``OMEGA_MAX_NODES=99999`` to bypass the cap.
+
+        Grandfathering: Free installs that already exceed _CORE_HARD_LIMIT
+        at first access (e.g., users who built up >5K memories on a prior
+        version with no Pro cap) get the cap raised to their current
+        count, cached per-instance. The intent is "new Free installs see
+        the 5K wall; existing >5K installs keep writing but do not get
+        any growth headroom" — pressure without breakage. Upgrading to
+        Pro at runtime restores the env-tunable cap on the next access
+        (the grandfather cache only applies on the Free path).
+
+        Test override: set ``self._max_nodes_override = <int>`` on the
+        instance to force a specific cap value (bypasses the Pro check
+        and the grandfather cache). Production callers should not set
+        this attribute.
+        """
+        override = getattr(self, "_max_nodes_override", None)
+        if override is not None:
+            return override
+        base = _get_effective_max_nodes()
+        if base != _CORE_HARD_LIMIT:
+            return base  # Pro path — no grandfathering needed
+        grand = getattr(self, "_grandfather_max", None)
+        if grand is None:
+            try:
+                count = self._conn.execute(
+                    "SELECT COUNT(*) FROM memories"
+                ).fetchone()[0]
+            except Exception as e:
+                logger.debug("Grandfather count probe failed: %s", e)
+                count = 0
+            grand = max(base, count)
+            self._grandfather_max = grand
+        return grand
 
     def __init__(self, db_path=None, decompose_queries: bool = True):
         omega_home = Path(os.environ.get("OMEGA_HOME", str(Path.home() / ".omega")))

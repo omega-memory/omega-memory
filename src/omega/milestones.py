@@ -17,8 +17,13 @@ logger = logging.getLogger("omega.milestones")
 OMEGA_HOME = Path(os.environ.get("OMEGA_HOME", str(Path.home() / ".omega")))
 MILESTONES_DIR = OMEGA_HOME / "milestones"
 
-# Capture count thresholds that trigger milestones
-CAPTURE_THRESHOLDS = [1, 10, 50, 100, 500, 1000]
+# Capture count thresholds that trigger milestones.
+# Above 100 the cadence tracks the Free-tier cap layout:
+#   500   - one-quarter of the soft cap
+#   1000  - halfway
+#   1500  - approaching the soft cap, retrieval still full quality
+#   2000  - soft cap hit; Free-tier retrieval degradation kicks in
+CAPTURE_THRESHOLDS = [1, 10, 50, 100, 500, 1000, 1500, 2000]
 
 CAPTURE_MESSAGES = {
     1: "First memory captured! Your knowledge graph has begun.",
@@ -27,6 +32,24 @@ CAPTURE_MESSAGES = {
     100: "100 memories! A substantial personal knowledge graph.",
     500: "500 memories! You have a deep knowledge archive.",
     1000: "1,000 memories! Impressive long-term knowledge base.",
+    1500: "1,500 memories — approaching the Free-tier soft cap (2,000).",
+    2000: "2,000 memories — Free-tier soft cap reached.",
+}
+
+# Free-tier upgrade CTA appended after the base message. Suppressed when
+# is_pro_user=True so paid customers see a clean milestone celebration.
+# Wired through `check_capture_milestones(count, is_pro_user=...)`.
+FREE_UPGRADE_CTA = {
+    500: " Pro removes the 2,000 soft cap + adds full retrieval quality: "
+         "https://omegamax.co/pro?ref=milestone-500",
+    1000: " Halfway to the soft cap. Pro removes it: "
+          "https://omegamax.co/pro?ref=milestone-1000",
+    1500: " Past 2,000, retrieval quality drops (no reranker, no LLM "
+          "expansion, top-3 results) until you upgrade: "
+          "https://omegamax.co/pro?ref=milestone-1500",
+    2000: " Retrieval is now reduced; hard write cap at 5,000. Upgrade "
+          "for instant full quality + unlimited memories: "
+          "https://omegamax.co/pro?ref=milestone-2000",
 }
 
 STREAK_THRESHOLDS = [7, 30, 100, 365]
@@ -50,12 +73,17 @@ def _check_milestone(name: str) -> bool:
     return True
 
 
-def check_capture_milestones(count: int) -> Optional[str]:
+def check_capture_milestones(count: int, *, is_pro_user: bool = False) -> Optional[str]:
     """Check if the current capture count crosses a milestone threshold.
 
     Returns a milestone message if a new threshold is reached, None otherwise.
     Iterates descending so the highest crossed threshold fires first.
     Uses >= so thresholds crossed between checks are still caught.
+
+    `is_pro_user` suppresses the Free-tier upgrade CTA suffix. The base
+    celebratory message stays the same so Pro users still see "1,500
+    memories — approaching the Free-tier soft cap" without the upgrade
+    URL. Callers pass `is_pro()` from omega_platform.license.
     """
     for threshold in reversed(CAPTURE_THRESHOLDS):
         if count >= threshold:
@@ -65,7 +93,10 @@ def check_capture_milestones(count: int) -> Optional[str]:
                 for lower in CAPTURE_THRESHOLDS:
                     if lower < threshold:
                         _check_milestone(f"capture-{lower}")
-                return CAPTURE_MESSAGES.get(threshold, f"{threshold} memories captured!")
+                base = CAPTURE_MESSAGES.get(threshold, f"{threshold} memories captured!")
+                if not is_pro_user and threshold in FREE_UPGRADE_CTA:
+                    return base + FREE_UPGRADE_CTA[threshold]
+                return base
     return None
 
 

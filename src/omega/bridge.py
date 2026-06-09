@@ -1408,11 +1408,24 @@ def auto_capture(
             parts.append(f"{flagged} flagged")
         output += f" | conflicts: {', '.join(parts)}"
 
-    # Milestone check (cheap: one node_count query + file existence check)
+    # Milestone check (cheap: one node_count query + file existence check).
+    # is_pro_user gates the Free-tier upgrade CTA suffix — Pro callers get
+    # a clean celebratory message; Free callers get the same message plus
+    # a tracking URL to omegamax.co/pro. is_pro() comes from the Pro-only
+    # omega_platform namespace which is absent in standalone Free installs;
+    # missing import gracefully degrades to Free behavior.
     try:
         from omega.milestones import check_capture_milestones
+        is_pro_user = False
+        try:
+            from omega_platform.license import is_pro
+            is_pro_user = is_pro()
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug("is_pro() check failed in milestone: %s", e)
         count = store.node_count()
-        milestone_msg = check_capture_milestones(count)
+        milestone_msg = check_capture_milestones(count, is_pro_user=is_pro_user)
         if milestone_msg:
             output += f" | {milestone_msg}"
     except Exception as e:

@@ -1161,6 +1161,23 @@ def cmd_status(args):
     use_json = _use_json(args)
     data = {}
 
+    # Resolve Pro vs Free once. is_pro() is TTL-cached so the call is
+    # cheap, and we use the result for both the tier badge and the cap
+    # values. Missing omega_platform (standalone Free install) drops to
+    # Free tier silently.
+    is_pro_user = False
+    try:
+        from omega_platform.license import is_pro
+        is_pro_user = is_pro()
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug("is_pro() check failed in status: %s", e)
+    data["tier"] = "pro" if is_pro_user else "free"
+    if not is_pro_user:
+        data["soft_cap"] = 2000
+        data["hard_cap"] = 5000
+
     # SQLite database (primary backend)
     db_path = OMEGA_DIR / "omega.db"
     if db_path.exists():
