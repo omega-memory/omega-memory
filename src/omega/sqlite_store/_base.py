@@ -278,46 +278,39 @@ class SQLiteStoreBase:
         Free: ``_CORE_HARD_LIMIT`` (5000); the env var is ignored so a free
         user cannot set ``OMEGA_MAX_NODES=99999`` to bypass the cap.
 
-        Grandfathering: Free installs that already exceed _CORE_HARD_LIMIT
-        at first access (e.g., users who built up >5K memories on a prior
-        version with no Pro cap) get the cap raised to their current
-        count, cached per-instance. The intent is "new Free installs see
-        the 5K wall; existing >5K installs keep writing but do not get
-        any growth headroom" — pressure without breakage. Upgrading to
-        Pro at runtime restores the env-tunable cap on the next access
-        (the grandfather cache only applies on the Free path).
+        Grandfathering for Free installs that already exceed the Free cap
+        is applied at the capacity-check site in ``_store.py`` (see
+        ``_apply_grandfather`` and the store() write path). It lives there
+        instead of inside this property so the existing capacity-check
+        COUNT(*) query can be reused — running two sequential COUNT(*)
+        queries inside a single store() call upset older SQLite libraries
+        (Ubuntu CI 3.40-class) by leaving a prepared statement in
+        progress between them.
 
         Test override: set ``self._max_nodes_override = <int>`` on the
-        instance to force a specific cap value (bypasses the Pro check
-        and the grandfather cache). Production callers should not set
-        this attribute.
+        instance to force a specific cap value (bypasses the Pro check).
+        Production callers should not set this attribute.
         """
         override = getattr(self, "_max_nodes_override", None)
         if override is not None:
             return override
-        base = _get_effective_max_nodes()
-        if base != _CORE_HARD_LIMIT:
-            return base  # Pro path — no grandfathering needed
+        return _get_effective_max_nodes()
+
+    def _apply_grandfather(self, base_max: int, count: int) -> int:
+        """Return the effective per-instance cap, raising the Free ceiling
+        for installs that already exceed _CORE_HARD_LIMIT. Caches the
+        result on the instance so subsequent writes don't keep growing
+        the ceiling — the intent is "your existing memories stay
+        writable, but you do not get new growth headroom on Free."
+        Pro callers (base_max != _CORE_HARD_LIMIT) get base_max
+        unchanged. ``count`` is passed in by the caller's already-needed
+        capacity-check query so this method does no I/O.
+        """
+        if base_max != _CORE_HARD_LIMIT:
+            return base_max
         grand = getattr(self, "_grandfather_max", None)
         if grand is None:
-            # Explicitly close the cursor after the probe. On older SQLite
-            # libraries (Ubuntu CI ships 3.40-class) leaving a prepared
-            # statement open between queries corrupts the next execute()
-            # — the symptom is fetchone() returning None on a fresh
-            # SELECT COUNT(*) that should always have one row. Same bug
-            # class as the import_from_file commit() issue (Sprint 0).
-            count = 0
-            try:
-                cur = self._conn.execute("SELECT COUNT(*) FROM memories")
-                try:
-                    row = cur.fetchone()
-                    if row is not None:
-                        count = row[0]
-                finally:
-                    cur.close()
-            except Exception as e:
-                logger.debug("Grandfather count probe failed: %s", e)
-            grand = max(base, count)
+            grand = max(base_max, count)
             self._grandfather_max = grand
         return grand
 

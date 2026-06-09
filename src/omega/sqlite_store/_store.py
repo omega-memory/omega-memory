@@ -89,10 +89,15 @@ class StoreMixin:
             # on SQLiteStoreBase, so a mid-session Pro activation lifts the
             # cap within the is_pro() TTL window. Error/warning copy splits
             # Pro vs Free so the message is actionable on the right path.
+            #
+            # ONE COUNT(*) query — the count is reused for both the
+            # capacity check and the grandfather computation, so we do not
+            # leave two prepared statements in flight on older SQLite.
             self._capacity_warning = None
-            max_nodes = self._MAX_NODES
-            if max_nodes > 0:
+            base_max = self._MAX_NODES
+            if base_max > 0:
                 count = self._exec("SELECT COUNT(*) FROM memories").fetchone()[0]
+                max_nodes = self._apply_grandfather(base_max, count)
                 is_pro_user = False
                 try:
                     from omega_platform.license import is_pro
