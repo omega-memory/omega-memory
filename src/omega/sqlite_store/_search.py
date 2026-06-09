@@ -28,14 +28,23 @@ class SearchMixin:
     """Search, retrieval, and caching methods extracted from SQLiteStore."""
 
     def _vec_query(self, embedding: List[float], limit: int = 10) -> List[tuple]:
-        """Query the sqlite-vec virtual table. Returns [(rowid, distance), ...]."""
+        """Query the sqlite-vec virtual table. Returns [(rowid, distance), ...].
+
+        Holds ``self._lock`` for the duration: sqlite-vec's vec0 virtual table
+        keeps C-level prepared-statement state on the connection, and using
+        ``self._conn`` from a non-main thread without the lock races against
+        concurrent writers to ``memories_vec`` (issue #58: macOS Python
+        3.12/3.14 SIGSEGV in ``_pysqlite_query_execute`` under concurrent
+        ``store()``).
+        """
         if not self._vec_available:
             return []
         try:
-            rows = self._conn.execute(
-                "SELECT rowid, distance FROM memories_vec WHERE embedding MATCH ? AND k = ?",
-                (_serialize_f32(embedding), limit),
-            ).fetchall()
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT rowid, distance FROM memories_vec WHERE embedding MATCH ? AND k = ?",
+                    (_serialize_f32(embedding), limit),
+                ).fetchall()
             return rows
         except Exception as e:
             logger.debug(f"Vec query failed: {e}")
@@ -671,28 +680,34 @@ class SearchMixin:
         """Find semantically similar memories by embedding.
 
         Filters out expired and superseded memories automatically.
+
+        Holds ``self._lock`` for the duration (issue #58): from a background
+        thread (e.g. bridge's auto-relate worker), reading via ``self._conn``
+        without the lock races concurrent writers on ``memories`` /
+        ``memories_vec`` and SIGSEGVs in sqlite-vec C code on macOS.
         """
         if not self._vec_available or not embedding:
             return []
 
-        # Over-fetch to account for filtered results
-        vec_results = self._vec_query(embedding, limit=limit * 2)
-        results = []
-        for rowid, distance in vec_results:
-            row = self._conn.execute(
-                """SELECT node_id, content, metadata, created_at,
-                          access_count, last_accessed, ttl_seconds
-                   FROM memories WHERE id = ?""",
-                (rowid,),
-            ).fetchone()
-            if row:
-                result = self._row_to_result(row)
-                if result.is_expired() or result.metadata.get("superseded"):
-                    continue
-                result.relevance = 1.0 - distance
-                results.append(result)
-                if len(results) >= limit:
-                    break
+        with self._lock:
+            # Over-fetch to account for filtered results
+            vec_results = self._vec_query(embedding, limit=limit * 2)
+            results = []
+            for rowid, distance in vec_results:
+                row = self._conn.execute(
+                    """SELECT node_id, content, metadata, created_at,
+                              access_count, last_accessed, ttl_seconds
+                       FROM memories WHERE id = ?""",
+                    (rowid,),
+                ).fetchone()
+                if row:
+                    result = self._row_to_result(row)
+                    if result.is_expired() or result.metadata.get("superseded"):
+                        continue
+                    result.relevance = 1.0 - distance
+                    results.append(result)
+                    if len(results) >= limit:
+                        break
         return results
 
     def get_timeline(self, days: int = 7, limit_per_day: int = 10) -> Dict[str, List[MemoryResult]]:

@@ -837,10 +837,18 @@ def _auto_relate(store, node_id: str, max_related: int = 3, min_similarity: floa
 def _schedule_auto_relate(store, node_id: str) -> None:
     """Fire _auto_relate in a background daemon thread (non-blocking).
 
+    Set ``OMEGA_AUTO_RELATE=0`` (also ``false``/``off``) to skip enrichment
+    entirely — parity with ``OMEGA_ENTITY_EXTRACTION``. Requested by issue #58
+    reporter as a safety valve for environments where auto-relate's thread
+    behavior is undesirable.
+
     Registers the thread on the store so close() can join it before tearing
     down the sqlite connection (prevents use-after-close segfaults in
     sqlite-vec native code during test teardown).
     """
+    if os.environ.get("OMEGA_AUTO_RELATE", "").lower() in ("0", "false", "off"):
+        return
+
     t_ref: list[threading.Thread] = []
 
     def _run():
