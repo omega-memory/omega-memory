@@ -11,6 +11,7 @@ dirty worktree changes from other agents or prior sessions.
 import json
 import os
 import re
+import shlex
 import time
 import traceback
 from datetime import datetime
@@ -48,13 +49,69 @@ def _log_timing(hook_name, elapsed_ms):
         pass
 
 
+# Options to `git commit` whose following token is a value that may itself
+# contain dashes (messages, paths, authors, dates, refs). Their value token
+# must be skipped so it is never mistaken for a `-a` flag.
+_COMMIT_VALUE_OPTS = {
+    "-m", "--message", "-F", "--file", "-C", "--reuse-message",
+    "-c", "--reedit-message", "-t", "--template",
+    "--author", "--date", "--fixup", "--squash",
+}
+
+
+def _commit_has_all_flag(command):
+    """True if *command* contains a `git commit` carrying an -a/--all flag.
+
+    Tokenizes with shlex so dash-text inside quoted messages or paths
+    (e.g. -m "fix the-hard-way", -F some/path) is never mistaken for a
+    `-a` flag — that false positive is why ordinary commits got blocked.
+    Falls back to a flag-anchored regex if quotes are unbalanced.
+    """
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        # Unbalanced quotes: match -a/--all only as a flag token, never as
+        # arbitrary -...a text embedded inside a word.
+        return bool(re.search(
+            r"\bgit\s+commit\b(?:\s+-(?!-)[a-zA-Z]*a[a-zA-Z]*|\s+--all)(?=\s|$)",
+            command,
+        ))
+
+    i, n = 0, len(tokens)
+    while i < n:
+        if tokens[i] == "git" and i + 1 < n and tokens[i + 1] == "commit":
+            j = i + 2
+            while j < n:
+                tok = tokens[j]
+                if tok in (";", "&", "&&", "|", "||"):
+                    break  # start of a chained command
+                if tok == "--all":
+                    return True
+                if tok == "--":
+                    break  # end of options; remainder are pathspecs
+                if tok.startswith("--"):
+                    if tok.split("=", 1)[0] in _COMMIT_VALUE_OPTS and "=" not in tok:
+                        j += 1  # consume value token
+                elif tok.startswith("-") and len(tok) > 1:
+                    if "a" in tok[1:]:
+                        return True  # -a / -am / -va etc.
+                    if tok in _COMMIT_VALUE_OPTS:
+                        j += 1  # consume value token
+                # else: non-option token (subject / pathspec) — ignore
+                j += 1
+            i = j
+            continue
+        i += 1
+    return False
+
+
 def _is_broad_add(command):
     """Detect git add . / git add -A / git add --all / git commit -a patterns."""
     # git add . or git add -A or git add --all
     if re.search(r"\bgit\s+add\s+(\.\s*$|-A\b|--all\b)", command):
         return True
     # git commit -a / git commit -am
-    if re.search(r"\bgit\s+commit\s+.*-[a-zA-Z]*a", command):
+    if _commit_has_all_flag(command):
         return True
     return False
 
@@ -90,7 +147,7 @@ def main():
 
     # Only trigger on git add or git commit -a
     is_git_add = re.search(r"\bgit\s+add\b", command)
-    is_commit_a = re.search(r"\bgit\s+commit\s+.*-[a-zA-Z]*a", command)
+    is_commit_a = _commit_has_all_flag(command)
     if not is_git_add and not is_commit_a:
         return
 
