@@ -2,12 +2,17 @@
 
 import ast
 
+import pytest
+
 from omega.server.context_handlers import (
     build_context_packet,
     handle_context_packet,
     _estimate_tokens,
     _render_context_packet,
 )
+
+
+pytestmark = pytest.mark.usefixtures("_reset_bridge")
 
 
 def _payload(resp: dict) -> dict:
