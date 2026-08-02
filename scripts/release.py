@@ -25,9 +25,12 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
 import tempfile
 import venv
+import zipfile
 from pathlib import Path
+from pathlib import PurePosixPath
 
 REPO = Path(__file__).resolve().parent.parent
 PYPROJECT = REPO / "pyproject.toml"
@@ -126,6 +129,78 @@ def build() -> tuple[Path, Path]:
     return wheels[0], sdists[0]
 
 
+def _private_archive_members(names: list[str]) -> list[str]:
+    """Return archive members that would expose a private Pro distribution."""
+    offenders = []
+    for name in names:
+        parts = [part.lower() for part in PurePosixPath(name.replace("\\", "/")).parts]
+        filename = parts[-1] if parts else ""
+        if "omega_platform" in parts or "omega_platform.py" in parts:
+            offenders.append(name)
+        elif filename.endswith(".whl"):
+            # A public source archive must never carry a bundled wheel, even if
+            # a future private distribution uses a different filename.
+            offenders.append(name)
+        elif any(filename.startswith(prefix) for prefix in ("omega_memory_pro-", "omega-memory-pro-")):
+            offenders.append(name)
+    return offenders
+
+
+def _private_dependencies(metadata: str) -> list[str]:
+    """Return private distribution requirements from wheel/sdist metadata."""
+    offenders = []
+    for line in metadata.splitlines():
+        if not line.lower().startswith("requires-dist:"):
+            continue
+        requirement = line.split(":", 1)[1].strip()
+        normalized = requirement.lower().replace("_", "-")
+        if normalized.startswith(("omega-platform", "omega-memory-pro")):
+            offenders.append(line)
+    return offenders
+
+
+def verify_public_artifact_boundary(wheel: Path, sdist: Path) -> None:
+    """Fail closed if public artifacts contain or depend on private Pro code."""
+    step("Verifying public/Core artifact boundary")
+    violations = []
+
+    if (REPO / "src" / "omega_platform").exists():
+        violations.append("repository contains src/omega_platform")
+    if not wheel.name.startswith("omega_memory-") or wheel.name.startswith("omega_memory_pro-"):
+        violations.append(f"unexpected public wheel name: {wheel.name}")
+    if not sdist.name.startswith("omega_memory-") or sdist.name.startswith("omega_memory_pro-"):
+        violations.append(f"unexpected public sdist name: {sdist.name}")
+
+    with zipfile.ZipFile(wheel) as archive:
+        wheel_names = archive.namelist()
+        violations.extend(f"wheel member: {name}" for name in _private_archive_members(wheel_names))
+        metadata_names = [name for name in wheel_names if name.endswith(".dist-info/METADATA")]
+        if len(metadata_names) != 1:
+            violations.append(f"wheel contains {len(metadata_names)} METADATA files")
+        else:
+            metadata = archive.read(metadata_names[0]).decode("utf-8", errors="replace")
+            violations.extend(f"wheel dependency: {line}" for line in _private_dependencies(metadata))
+
+    with tarfile.open(sdist, "r:gz") as archive:
+        sdist_names = archive.getnames()
+        violations.extend(f"sdist member: {name}" for name in _private_archive_members(sdist_names))
+        metadata_members = [member for member in archive.getmembers() if member.name.endswith("/PKG-INFO")]
+        if len(metadata_members) != 1:
+            violations.append(f"sdist contains {len(metadata_members)} PKG-INFO files")
+        else:
+            metadata_file = archive.extractfile(metadata_members[0])
+            if metadata_file is None:
+                violations.append("sdist PKG-INFO is unreadable")
+            else:
+                metadata = metadata_file.read().decode("utf-8", errors="replace")
+                violations.extend(f"sdist dependency: {line}" for line in _private_dependencies(metadata))
+
+    if violations:
+        detail = "\n  ".join(violations)
+        sys.exit(f"Public artifact boundary violation:\n  {detail}")
+    print("  OK: Core-only archives; no private namespace, bundled wheel, or Pro dependency")
+
+
 def verify(wheel: Path, expected_version: str) -> None:
     step("Verifying wheel in clean venv")
     with tempfile.TemporaryDirectory(prefix="omega-mem-verify-") as tmp:
@@ -185,6 +260,7 @@ def main() -> int:
     preflight(args.version)
     bump_version(args.version)
     wheel, sdist = build()
+    verify_public_artifact_boundary(wheel, sdist)
     verify(wheel, args.version)
 
     if args.dry_run:
