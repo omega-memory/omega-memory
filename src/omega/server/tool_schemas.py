@@ -55,9 +55,36 @@ TOOL_SCHEMAS = [
                     "enum": ["active", "superseded", "speculative", "archived"],
                     "description": "Memory lifecycle status. Default 'active'. Use 'speculative' for unverified claims, 'archived' for intentionally preserved but inactive.",
                 },
-                "items": {"type": "array", "items": {"type": "object"}, "description": "Batch mode: list of {content, event_type, metadata} dicts. When provided, stores all items. Other top-level params ignored."},
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string", "description": "Memory content"},
+                            "event_type": {"type": "string", "description": "Per-item memory type"},
+                            "metadata": {"type": "object", "description": "Per-item additional metadata"},
+                            "session_id": {"type": "string"},
+                            "project": {"type": "string"},
+                            "priority": {"type": "integer", "minimum": 1, "maximum": 5},
+                            "entity_id": {"type": "string"},
+                            "agent_type": {"type": "string"},
+                            "derived_from": {"type": "string"},
+                            "source_uri": {"type": "string"},
+                            "status": {
+                                "type": "string",
+                                "enum": ["active", "superseded", "speculative", "archived"],
+                            },
+                        },
+                        "required": ["content"],
+                    },
+                    "description": "Batch mode. Each item is stored with its own fields. Other request-level fields are ignored.",
+                },
             },
-            "required": ["content"],
+            "anyOf": [
+                {"required": ["content"]},
+                {"required": ["text"]},
+                {"required": ["items"]},
+            ],
         },
     },
     {
