@@ -879,6 +879,81 @@ class TestCRUDComprehensive:
         results = store.get_by_session("batch-sess")
         assert len(results) == 2
 
+    def test_batch_store_preserves_per_item_fields(self, store):
+        parent_id = store.store(
+            content="parent for batch field parity",
+            metadata={"event_type": "memory"},
+            skip_inference=True,
+        )
+        items = [
+            {
+                "content": "batch decision with explicit fields",
+                "event_type": "decision",
+                "priority": 5,
+                "project": "/tmp/batch-project",
+                "entity_id": "batch-entity",
+                "agent_type": "planner",
+                "derived_from": parent_id,
+                "source_uri": "https://example.test/decision",
+                "status": "speculative",
+                "skip_inference": True,
+                "metadata": {
+                    "event_type": "memory",
+                    "priority": 1,
+                    "entity_id": "metadata-entity",
+                    "custom": "preserved",
+                },
+            },
+            {
+                "content": "batch lesson with explicit type",
+                "event_type": "lesson_learned",
+                "priority": 2,
+                "skip_inference": True,
+            },
+        ]
+
+        decision_id, lesson_id = store.batch_store(items)
+
+        decision = store._conn.execute(
+            """SELECT event_type, priority, project, entity_id, agent_type,
+                      memory_type, derived_from, source_uri, status, metadata
+               FROM memories WHERE node_id = ?""",
+            (decision_id,),
+        ).fetchone()
+        lesson = store._conn.execute(
+            "SELECT event_type, priority, memory_type FROM memories WHERE node_id = ?",
+            (lesson_id,),
+        ).fetchone()
+        edge = store._conn.execute(
+            """SELECT 1 FROM edges
+               WHERE source_id = ? AND target_id = ? AND edge_type = 'derived_from'""",
+            (decision_id, parent_id),
+        ).fetchone()
+
+        assert decision[:9] == (
+            "decision",
+            5,
+            "/tmp/batch-project",
+            "batch-entity",
+            "planner",
+            "semantic",
+            parent_id,
+            "https://example.test/decision",
+            "speculative",
+        )
+        decision_metadata = json.loads(decision[9])
+        assert decision_metadata["event_type"] == "decision"
+        assert decision_metadata["priority"] == 5
+        assert decision_metadata["entity_id"] == "batch-entity"
+        assert decision_metadata["custom"] == "preserved"
+        assert lesson == ("lesson_learned", 2, "procedural")
+        assert edge == (1,)
+
+        # Normalization must not rewrite the caller's metadata mapping.
+        assert items[0]["metadata"]["event_type"] == "memory"
+        assert items[0]["metadata"]["priority"] == 1
+        assert items[0]["metadata"]["entity_id"] == "metadata-entity"
+
 
 class TestDeduplicationComprehensive:
     """Thorough dedup coverage."""

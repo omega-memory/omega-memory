@@ -505,13 +505,41 @@ class StoreMixin:
         # acquisition overhead (RLock allows store() to re-enter).
         with self._lock:
             for item in items:
+                # Batch items expose the same metadata-backed fields as a
+                # direct store() call. Copy before merging so callers do not
+                # see their metadata mappings rewritten in place.
+                metadata = dict(item.get("metadata") or {})
+                for field in (
+                    "event_type",
+                    "type",
+                    "priority",
+                    "project",
+                    "referenced_date",
+                    "entity_id",
+                    "agent_type",
+                    "derived_from",
+                    "source_uri",
+                    "status",
+                    "sensitivity",
+                ):
+                    if field in item and item[field] is not None:
+                        metadata[field] = item[field]
+
                 node_id = self.store(
                     content=item["content"],
                     session_id=item.get("session_id"),
-                    metadata=item.get("metadata"),
+                    metadata=metadata,
                     embedding=item.get("embedding"),
                     dependencies=item.get("dependencies"),
                     ttl_seconds=item.get("ttl_seconds"),
+                    graphs=item.get("graphs"),
+                    skip_inference=item.get("skip_inference", False),
+                    entity_id=item.get("entity_id"),
+                    agent_type=item.get("agent_type"),
+                    derived_from=item.get("derived_from"),
+                    source_uri=item.get("source_uri"),
+                    status=item.get("status"),
+                    sensitivity=item.get("sensitivity"),
                 )
                 ids.append(node_id)
         # Single cache invalidation after all inserts
