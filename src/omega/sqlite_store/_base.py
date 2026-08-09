@@ -262,7 +262,6 @@ class SQLiteStoreBase:
         }
     )
 
-    DEFAULT_EMBEDDING_DEDUP_THRESHOLD = 0.88
     DEFAULT_JACCARD_DEDUP_THRESHOLD = 0.80
 
     # Input size limits (configurable via env vars)
@@ -362,6 +361,12 @@ class SQLiteStoreBase:
 
         # Last contradiction detection results (consume-once, set by store())
         self._last_contradiction_results: list = []
+
+        # Whether the most recent store() collapsed into an existing memory
+        # instead of inserting (consume-once, set by store()). Callers need
+        # this to report "Deduped" rather than claiming a write happened —
+        # store() returns a node ID either way, which is indistinguishable.
+        self._last_store_deduped: bool = False
 
         # Agency Tax: operation latency tracking (arxiv 2602.19320 §4.4)
         self._op_timings: Dict[str, list] = {}

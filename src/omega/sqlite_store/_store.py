@@ -37,6 +37,7 @@ class StoreMixin:
     ) -> str:
         """Store a memory. Returns the node ID."""
         _t0_agency = _time.monotonic()
+        self._last_store_deduped = False
         self._total_write_count += 1
         if not content:
             raise StorageError("content must be a non-empty string")
@@ -72,19 +73,21 @@ class StoreMixin:
         content_hash = hashlib.sha256(content.encode()).hexdigest()
         canonical_hash = hashlib.sha256(_canonicalize(content).encode()).hexdigest()
 
-        # Pre-compute embedding dedup outside lock to reduce contention
-        # (vec_query is the expensive part; the UPDATE+commit stays inside the lock)
-        _vec_dedup_candidate = None
-        if embedding and not skip_inference and self._vec_available:
-            try:
-                similar = self._vec_query(embedding, limit=1)
-                if similar:
-                    top_rowid, distance = similar[0]
-                    similarity = 1.0 - distance
-                    if similarity >= self.DEFAULT_EMBEDDING_DEDUP_THRESHOLD:
-                        _vec_dedup_candidate = (top_rowid, similarity)
-            except Exception as e:
-                logger.debug("Embedding dedup pre-check failed: %s", e)
+        # NOTE: embedding-similarity dedup used to run here. It was removed
+        # after measurement showed it had no true-positive yield: it runs
+        # *after* canonical-hash and content-hash dedup, so everything reaching
+        # it is textually novel by construction. Measured over 3,000 real
+        # memories, the 0.88 threshold discarded 334 writes of which only 2
+        # were byte-identical — and those two content-hash dedup already
+        # catches. Sentence embeddings are near-blind to digits, so records
+        # differing only in their numbers (successive benchmark runs, version
+        # counts, metrics) scored ~0.96 and collapsed into each other. No
+        # threshold separates duplicates from distinct content: the most
+        # similar non-identical pair scored 0.9845. Each false positive
+        # silently discarded a write while store() returned the existing node
+        # ID, which callers reported as a successful save.
+        # Do not reintroduce similarity-based dedup without a mechanism that
+        # preserves the incoming content.
 
         with self._lock:
             # Capacity check (inside lock — queries shared connection).
@@ -159,6 +162,7 @@ class StoreMixin:
                 self._commit()
                 self.stats.setdefault("dedup_canonical", 0)
                 self.stats["dedup_canonical"] += 1
+                self._last_store_deduped = True
                 self._record_timing("write", (_time.monotonic() - _t0_agency) * 1000)
                 return canonical_existing[0]
 
@@ -177,26 +181,9 @@ class StoreMixin:
                 self._commit()
                 self.stats.setdefault("dedup_exact", 0)
                 self.stats["dedup_exact"] += 1
+                self._last_store_deduped = True
                 self._record_timing("write", (_time.monotonic() - _t0_agency) * 1000)
                 return existing[0]
-
-            # Embedding-based dedup (vec_query already done outside lock)
-            if _vec_dedup_candidate:
-                try:
-                    top_rowid, _similarity = _vec_dedup_candidate
-                    row = self._exec(
-                        "SELECT node_id FROM memories WHERE id = ?", (top_rowid,)
-                    ).fetchone()
-                    if row:
-                        self._exec(
-                            "UPDATE memories SET access_count = access_count + 1 WHERE id = ?", (top_rowid,)
-                        )
-                        self._commit()
-                        self.stats["embedding_dedup_skips"] += 1
-                        self._record_timing("write", (_time.monotonic() - _t0_agency) * 1000)
-                        return row[0]
-                except Exception as e:
-                    logger.debug("Embedding dedup check failed: %s", e)
 
             # Generate node ID
             node_id = f"mem-{uuid.uuid4().hex[:12]}"
@@ -316,6 +303,17 @@ class StoreMixin:
         results = self._last_contradiction_results
         self._last_contradiction_results = []
         return results
+
+    def get_last_store_deduped(self) -> bool:
+        """Whether the most recent store() collapsed into an existing memory. Consume-once.
+
+        store() returns a node ID whether it inserted or deduped, so callers
+        that report the outcome to a user must check this to avoid claiming a
+        write that never happened.
+        """
+        deduped = self._last_store_deduped
+        self._last_store_deduped = False
+        return deduped
 
     def get_node(self, node_id: str, track_access: bool = True) -> Optional[MemoryResult]:
         """Get a node by ID.

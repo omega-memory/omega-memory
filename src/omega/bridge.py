@@ -1386,7 +1386,17 @@ def auto_capture(
     )
 
     ttl_str = _human_ttl(ttl)
-    output = f"Stored {node_id} ({event_type}, {ttl_str})"
+    # store() returns a node ID whether it inserted or collapsed into an
+    # existing memory, so report the outcome the store actually took —
+    # "Stored" on a dedup would claim a write that never happened.
+    try:
+        _deduped = store.get_last_store_deduped()
+    except AttributeError:
+        _deduped = False
+    if _deduped:
+        output = f"Deduped → {node_id}"
+    else:
+        output = f"Stored {node_id} ({event_type}, {ttl_str})"
 
     # Surface deep contradiction detection results
     try:
