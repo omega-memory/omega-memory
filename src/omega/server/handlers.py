@@ -188,32 +188,15 @@ _SAFE_EXPORT_DIR = Path.home() / ".omega"
 # Input validation helpers — prevent path traversal and injection
 # ---------------------------------------------------------------------------
 
-import re as _re
-
-_SAFE_ID_RE = _re.compile(r"^[a-zA-Z0-9._-]+$")
-
-
-def _validate_session_id(session_id: str | None) -> str | None:
-    """Validate session_id to prevent path traversal."""
-    if not session_id:
-        return session_id
-    if ".." in session_id or "/" in session_id or "\\" in session_id:
-        logger.warning("Rejected session_id with path traversal: %s", session_id[:50])
-        return None
-    if not _SAFE_ID_RE.match(session_id):
-        logger.warning("Rejected session_id with invalid chars: %s", session_id[:50])
-        return None
-    return session_id
-
-
-def _validate_entity_id(entity_id: str | None) -> str | None:
-    """Validate entity_id format (alphanumeric, hyphens, dots, underscores)."""
-    if not entity_id:
-        return entity_id
-    if not _SAFE_ID_RE.match(entity_id):
-        logger.warning("Rejected entity_id with invalid chars: %s", entity_id[:50])
-        return None
-    return entity_id
+# Defined in omega.server.validation so that any handler needing them -- here
+# or in the Pro package -- imports one implementation rather than keeping a
+# second copy in step by hand. Security logic that exists twice drifts.
+# The private ``_``-prefixed names are kept as aliases so existing call sites
+# in this module read unchanged.
+from omega.server.validation import (  # noqa: E402
+    validate_entity_id as _validate_entity_id,
+    validate_session_id as _validate_session_id,
+)
 
 
 from omega.server.responses import mcp_response, mcp_error  # noqa: E402
