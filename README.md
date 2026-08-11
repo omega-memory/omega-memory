@@ -1,5 +1,7 @@
 # OMEGA
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fomega-memory%2FOmega.svg)](https://mcptoplist.com/server/glama%2Fomega-memory%2FOmega)
+
 **Cross-model memory for AI agents. Local-first. Works with Claude, GPT, Gemini, Cursor, Claw Code, and any MCP client.** Your agent's brain shouldn't live on someone else's server, or be locked to one provider.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
