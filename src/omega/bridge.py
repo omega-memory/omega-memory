@@ -2297,13 +2297,14 @@ def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> 
         return max(0.0, 1.0 / (1.0 + age_hours / 72.0))
 
     import math as _math_mod
+    from omega.sqlite_store._types import coerce_priority
     def _access_boost(n):
         ac = n.access_count or 0
         return min(_math_mod.log2(1 + ac), 5.0)
 
     recent.sort(
         key=lambda n: (
-            (n.metadata or {}).get("priority", 3) * 0.45
+            coerce_priority((n.metadata or {}).get("priority")) * 0.45
             + _recency_score(n) * 5.0 * 0.35
             + _access_boost(n) * 0.20
         ),

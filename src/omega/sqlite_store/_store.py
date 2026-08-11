@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from omega import json_compat as json
 from omega.exceptions import StorageError
-from ._types import MemoryResult, _serialize_f32, _canonicalize
+from ._types import MemoryResult, _serialize_f32, _canonicalize, coerce_priority
 
 logger = logging.getLogger("omega.sqlite_store")
 
@@ -192,8 +192,15 @@ class StoreMixin:
             project = meta.get("project") or os.getcwd()
             now = datetime.now(timezone.utc).isoformat()
 
-            # Determine priority from metadata or event type default
-            priority = meta.get("priority") or self._DEFAULT_PRIORITY.get(event_type, 3)
+            # Determine priority from metadata or event type default. Coerce
+            # untrusted metadata values (agents can pass "high", tuples, etc.)
+            # so the stored value and downstream scoring stay numeric (issue #66).
+            _raw_priority = meta.get("priority")
+            if _raw_priority is not None:
+                priority = coerce_priority(_raw_priority)
+                meta["priority"] = priority  # persist normalized value
+            else:
+                priority = self._DEFAULT_PRIORITY.get(event_type, 3)
             referenced_date = meta.get("referenced_date")
 
             # Wire entity_id from metadata if not passed directly

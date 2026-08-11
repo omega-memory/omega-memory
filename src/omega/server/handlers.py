@@ -380,15 +380,13 @@ async def handle_omega_store(arguments: dict) -> dict:
     entity_id = _validate_entity_id(arguments.get("entity_id"))
     agent_type = arguments.get("agent_type")
 
-    # Wire through priority if provided
+    # Wire through priority if provided. Coerce to a valid 1-5 int; string
+    # labels like "high" are mapped rather than silently dropped (issue #66).
     priority = arguments.get("priority")
     if priority is not None:
-        try:
-            priority = max(1, min(5, int(priority)))
-            metadata = dict(metadata or {})
-            metadata["priority"] = priority
-        except (TypeError, ValueError):
-            pass
+        from omega.sqlite_store import coerce_priority
+        metadata = dict(metadata or {})
+        metadata["priority"] = coerce_priority(priority)
 
     # Context graph fields
     derived_from = arguments.get("derived_from")

@@ -21,6 +21,7 @@ from ._types import (
     _CLAUSE_STARTS,
     _deserialize_f32,
     _cosine_similarity,
+    coerce_priority,
 )
 
 logger = logging.getLogger("omega.sqlite_store")
@@ -648,7 +649,7 @@ class QueryMixin:
                 type_weight *= self._PERSPECTIVE_BOOSTS[perspective].get(event_type, 1.0)
             fb_score = node.metadata.get("feedback_score", 0)
             fb_factor = self._compute_fb_factor(fb_score)
-            priority = node.metadata.get("priority", 3)
+            priority = coerce_priority(node.metadata.get("priority"))
             priority_factor = 0.7 + (priority * 0.08)
             _la = node.last_accessed.isoformat() if node.last_accessed else None
             _ca = node.created_at.isoformat() if node.created_at else None

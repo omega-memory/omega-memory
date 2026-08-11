@@ -1545,3 +1545,75 @@ class TestEdgeCasesComprehensive:
             assert len(results) == 1
         finally:
             s2.close()
+
+
+class TestPriorityCoercion:
+    """Regression tests for issue #66 — a non-numeric metadata['priority']
+    (e.g. an LLM agent storing priority="high") crashed semantic search with
+    'can't multiply sequence by non-int of type 'float'' in the fusion scoring
+    path (`priority * 0.08`)."""
+
+    def test_coerce_priority_normalizes_values(self):
+        from omega.sqlite_store import coerce_priority
+
+        # Numeric values are clamped to [1, 5]
+        assert coerce_priority(3) == 3
+        assert coerce_priority(9) == 5
+        assert coerce_priority(0) == 1
+        assert coerce_priority(4.0) == 4
+        # String labels map to their rank; unknown/junk fall back to default
+        assert coerce_priority("high") == 4
+        assert coerce_priority("LOW") == 2
+        assert coerce_priority("bogus") == 3
+        # Numeric strings are parsed and clamped (an agent may send "4")
+        assert coerce_priority("4") == 4
+        assert coerce_priority("9") == 5
+        # Non-coercible types fall back to default (never raise)
+        assert coerce_priority(None) == 3
+        assert coerce_priority(["high"]) == 3
+        assert coerce_priority(True) == 3
+
+    def test_store_normalizes_string_priority(self, store):
+        """A string priority in metadata is normalized to an int at write time."""
+        nid = store.store(
+            content="Auth uses Supabase row level security policies",
+            metadata={"event_type": "decision", "priority": "high"},
+        )
+        node = store.get_node(nid)
+        assert node.metadata["priority"] == 4
+        assert isinstance(node.metadata["priority"], int)
+
+    def test_semantic_query_survives_legacy_string_priority(self, store, monkeypatch):
+        """A legacy row with a string priority (written before coercion existed)
+        must not crash semantic search. Injected via direct UPDATE to bypass the
+        store-side normalization, then queried through the fusion scoring path."""
+        from omega.sqlite_store import _query as _query_mod
+
+        # Force the fusion path: make the strong-signal FTS short-circuit
+        # unreachable (cosine similarity never exceeds 1.0) so metadata scoring
+        # always runs and the coercion is genuinely exercised.
+        monkeypatch.setattr(_query_mod, "STRONG_SIGNAL_THRESHOLD", 2.0)
+
+        # A few decoys plus the target, so the target is scored via fusion.
+        store.store("Deployment goes through the Vercel CLI only", metadata={"event_type": "note"})
+        store.store("Budget approval for the Q3 marketing spend", metadata={"event_type": "note"})
+        nid = store.store(
+            content="Authentication is handled by Supabase row level security",
+            metadata={"event_type": "decision"},
+        )
+
+        # Poison the row the way a legacy write would: a raw string priority
+        # sitting in the metadata JSON blob.
+        node = store.get_node(nid)
+        meta = node.metadata
+        meta["priority"] = "high"
+        store._conn.execute(
+            "UPDATE memories SET metadata = ? WHERE node_id = ?",
+            (json.dumps(meta), nid),
+        )
+        store._conn.commit()
+
+        # Before the fix this raised TypeError: can't multiply sequence by
+        # non-int of type 'float'. It must now return results cleanly.
+        results = store.query("how is authentication and security handled", limit=10)
+        assert nid in [r.id for r in results]
