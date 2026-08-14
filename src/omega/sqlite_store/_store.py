@@ -476,8 +476,16 @@ class StoreMixin:
         if not items:
             return []
 
+        # Work on shallow copies so embedding generation and field
+        # normalization never rewrite caller-owned item dictionaries.
+        normalized_items = [dict(item) for item in items]
+
         # Batch-generate embeddings for items without them
-        items_needing = [(i, item) for i, item in enumerate(items) if item.get("embedding") is None]
+        items_needing = [
+            (i, item)
+            for i, item in enumerate(normalized_items)
+            if item.get("embedding") is None
+        ]
         if items_needing:
             try:
                 from omega.embedding import generate_embeddings_batch, get_active_backend
@@ -502,7 +510,7 @@ class StoreMixin:
         # Hold the lock for the entire batch to avoid per-item lock
         # acquisition overhead (RLock allows store() to re-enter).
         with self._lock:
-            for item in items:
+            for item in normalized_items:
                 # Batch items expose the same metadata-backed fields as a
                 # direct store() call. Copy before merging so callers do not
                 # see their metadata mappings rewritten in place.
@@ -512,6 +520,7 @@ class StoreMixin:
                     "type",
                     "priority",
                     "project",
+                    "project_id",
                     "referenced_date",
                     "entity_id",
                     "agent_type",

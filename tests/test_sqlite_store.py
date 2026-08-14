@@ -879,6 +879,38 @@ class TestCRUDComprehensive:
         results = store.get_by_session("batch-sess")
         assert len(results) == 2
 
+    def test_batch_store_preserves_scoped_fields_without_mutating_input(self, store):
+        items = [
+            {
+                "content": "public batch scoped field parity",
+                "event_type": "decision",
+                "project": "/tmp/batch-project",
+                "project_id": "batch-project-id",
+                "entity_id": "batch-entity",
+                "sensitivity": "confidential",
+                "skip_inference": True,
+                "metadata": {"event_type": "memory", "custom": "preserved"},
+            }
+        ]
+
+        node_id = store.batch_store(items)[0]
+
+        row = store._conn.execute(
+            """SELECT event_type, project, entity_id, metadata
+               FROM memories WHERE node_id = ?""",
+            (node_id,),
+        ).fetchone()
+        assert row[:3] == (
+            "decision",
+            "/tmp/batch-project",
+            "batch-entity",
+        )
+        metadata = json.loads(row[3])
+        assert metadata["project_id"] == "batch-project-id"
+        assert metadata["sensitivity"] == "confidential"
+        assert metadata["custom"] == "preserved"
+        assert items[0]["metadata"] == {"event_type": "memory", "custom": "preserved"}
+
     def test_batch_store_preserves_per_item_fields(self, store):
         parent_id = store.store(
             content="parent for batch field parity",

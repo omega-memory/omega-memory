@@ -55,6 +55,14 @@ TOOL_SCHEMAS = [
                     "enum": ["active", "superseded", "speculative", "archived"],
                     "description": "Memory lifecycle status. Default 'active'. Use 'speculative' for unverified claims, 'archived' for intentionally preserved but inactive.",
                 },
+                "sensitivity": {
+                    "type": "string",
+                    "enum": ["public", "internal", "confidential", "restricted"],
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "Scope this memory to an entity project.",
+                },
                 "items": {
                     "type": "array",
                     "items": {
@@ -65,6 +73,7 @@ TOOL_SCHEMAS = [
                             "metadata": {"type": "object", "description": "Per-item additional metadata"},
                             "session_id": {"type": "string"},
                             "project": {"type": "string"},
+                            "project_id": {"type": "string"},
                             "priority": {"type": "integer", "minimum": 1, "maximum": 5},
                             "entity_id": {"type": "string"},
                             "agent_type": {"type": "string"},
@@ -74,10 +83,14 @@ TOOL_SCHEMAS = [
                                 "type": "string",
                                 "enum": ["active", "superseded", "speculative", "archived"],
                             },
+                            "sensitivity": {
+                                "type": "string",
+                                "enum": ["public", "internal", "confidential", "restricted"],
+                            },
                         },
                         "required": ["content"],
                     },
-                    "description": "Batch mode. Each item is stored with its own fields. Other request-level fields are ignored.",
+                    "description": "Batch mode. Request-level scope and provenance fields are defaults for items that omit them; explicit per-item values win.",
                 },
             },
             "anyOf": [

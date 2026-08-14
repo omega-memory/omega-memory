@@ -1,6 +1,6 @@
 [project]
 name = "omega-memory"
-version = "1.5.8"
+version = "1.5.9"
 description = "Cross-model memory for AI agents. Local-first, works with Claude, GPT, Gemini, Cursor, Claw Code, and any MCP client"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -50,7 +50,7 @@ dev = ["pytest", "pytest-asyncio", "pytest-cov", "ruff", "commitizen>=4.1", "myp
 omega = "omega.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.28,<1.29"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
