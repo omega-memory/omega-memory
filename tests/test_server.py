@@ -33,6 +33,13 @@ def test_handler_count():
     assert len(TOOL_SCHEMAS) >= 12  # 12 consolidated action-discriminated composites
 
 
+def test_pro_task_release_uses_write_rate_limit_tier():
+    """Pro task release mutates coordination state when loaded by the plugin."""
+    from omega.server.mcp_server import _WRITE_TOOLS
+
+    assert "omega_task_release" in _WRITE_TOOLS
+
+
 # ============================================================================
 # Fixture: reset bridge singleton between tests
 # ============================================================================

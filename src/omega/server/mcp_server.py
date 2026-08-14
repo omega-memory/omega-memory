@@ -268,7 +268,7 @@ _WRITE_TOOLS = frozenset({
     # Coord intents
     "omega_intent_announce",
     # Coord tasks
-    "omega_task_create", "omega_task_claim", "omega_task_complete",
+    "omega_task_create", "omega_task_claim", "omega_task_release", "omega_task_complete",
     "omega_task_fail", "omega_task_cancel", "omega_task_progress",
     "omega_task_deps", "omega_update_task",
     # Coord messaging
