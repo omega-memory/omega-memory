@@ -10,7 +10,7 @@ For full Claude Code integration (MCP tools, auto-capture, coordination),
 install with: ``pip install omega-memory[server]``
 """
 
-__version__ = "1.5.8"
+__version__ = "1.5.9"
 
 from omega.sqlite_store import SQLiteStore
 from omega.bridge import (

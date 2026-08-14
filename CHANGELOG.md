@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.9] - 2026-08-14
+
+### Added
+- `SQLiteStore.get_thread_local_read_conn()` gives Pro analyzers a stable,
+  per-thread read connection with WAL, timeout, foreign-key, and sqlite-vec
+  parity.
+- `OMEGA_DEDUP_THRESHOLDS` accepts a validated JSON object for overriding
+  selected auto-capture dedup thresholds. Restart the MCP process after
+  changing it.
+
+### Fixed
+- Batch `omega_store(items=[...], entity_id=...)` requests now inherit
+  request-level scope and provenance fields for items that omit them, while
+  explicit per-item values take precedence.
+- Batch normalization preserves per-item fields and no longer mutates caller
+  dictionaries while generating embeddings.
+
 ## [1.5.2] - 2026-06-11
 
 ### Fixed
