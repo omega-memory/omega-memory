@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from omega import json_compat as json
+from omega.dedup_config import load_dedup_thresholds
 from omega.exceptions import ValidationError
 from omega.llm import llm_complete  # noqa: F401 — used in distill_trajectory, module-level for test patchability
 from omega.types import TTLCategory, AutoCaptureEventType
@@ -43,21 +44,9 @@ logger = logging.getLogger("omega.bridge")
 
 OMEGA_HOME = Path(os.environ.get("OMEGA_HOME", str(Path.home() / ".omega")))
 
-# Per-event-type dedup thresholds for Jaccard similarity.
-DEDUP_THRESHOLDS: Dict[str, float] = {
-    AutoCaptureEventType.ERROR_PATTERN: 0.70,
-    AutoCaptureEventType.SESSION_SUMMARY: 0.75,
-    AutoCaptureEventType.TASK_COMPLETION: 0.85,
-    AutoCaptureEventType.DECISION: 0.80,
-    AutoCaptureEventType.LESSON_LEARNED: 0.85,
-    AutoCaptureEventType.CHECKPOINT: 0.90,
-    AutoCaptureEventType.CONSTRAINT: 0.90,
-    AutoCaptureEventType.ADVISOR_INSIGHT: 0.75,  # lowered from 0.85 to catch broader restatements
-    AutoCaptureEventType.USER_FACT: 0.80,
-    AutoCaptureEventType.SKILL_TEMPLATE: 0.85,
-    AutoCaptureEventType.PROJECT_STATUS: 0.85,
-    "memory": 0.80,  # Generic fallback type — dedup to prevent accumulation
-}
+# Per-event-type dedup thresholds for Jaccard similarity. Environment
+# overrides are validated once at process import; restart after changing them.
+DEDUP_THRESHOLDS: Dict[str, float] = load_dedup_thresholds()
 
 # Event types that participate in memory evolution (Zettelkasten-style).
 EVOLUTION_TYPES = {

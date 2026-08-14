@@ -59,6 +59,52 @@ async def test_batch_store_persists_per_item_event_types():
 
 
 @pytest.mark.asyncio
+async def test_batch_store_inherits_request_scope_without_mutating_input():
+    """Request-level scope defaults apply unless an item overrides them."""
+    from omega.server.handlers import handle_omega_store
+
+    request = {
+        "entity_id": "fleet",
+        "project_id": "prod",
+        "sensitivity": "confidential",
+        "items": [
+            {"content": "inherits scope"},
+            {"content": "overrides scope", "entity_id": "special"},
+        ],
+    }
+    original_items = [dict(item) for item in request["items"]]
+
+    with patch(
+        "omega.bridge.batch_store",
+        return_value={"ids": ["id1", "id2"], "count": 2},
+    ) as mocked_batch:
+        result = await handle_omega_store(request)
+
+    assert not result.get("isError")
+    prepared = mocked_batch.call_args.args[0]
+    assert prepared[0]["entity_id"] == "fleet"
+    assert prepared[0]["project_id"] == "prod"
+    assert prepared[0]["sensitivity"] == "confidential"
+    assert prepared[1]["entity_id"] == "special"
+    assert prepared[1]["project_id"] == "prod"
+    assert request["items"] == original_items
+
+
+@pytest.mark.asyncio
+async def test_batch_store_rejects_non_object_before_writing():
+    from omega.server.handlers import handle_omega_store
+
+    with patch("omega.bridge.batch_store") as mocked_batch:
+        result = await handle_omega_store(
+            {"items": [{"content": "valid"}, "not an object"]}
+        )
+
+    assert result.get("isError") is True
+    assert "object" in result["content"][0]["text"]
+    mocked_batch.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_batch_store_empty_list():
     """omega_store(items=[]) returns empty result, not error."""
     from omega.server.handlers import handle_omega_store
@@ -98,7 +144,10 @@ def test_omega_store_schema_documents_batch_items():
         "derived_from",
         "source_uri",
         "status",
+        "project_id",
+        "sensitivity",
     } <= item_schema["properties"].keys()
+    assert "request-level scope" in schema["properties"]["items"]["description"].lower()
     assert {tuple(option["required"]) for option in schema["anyOf"]} == {
         ("content",),
         ("text",),

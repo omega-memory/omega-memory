@@ -332,6 +332,34 @@ def _auto_register_decision(
         return None
 
 
+_BATCH_DEFAULT_FIELDS = (
+    "session_id",
+    "project",
+    "project_id",
+    "entity_id",
+    "agent_type",
+    "priority",
+    "sensitivity",
+    "derived_from",
+    "source_uri",
+    "status",
+)
+
+
+def _prepare_batch_items(arguments: dict) -> list[dict]:
+    """Copy batch items and inherit request-level scope/provenance defaults."""
+    prepared = []
+    for raw in arguments["items"]:
+        if not isinstance(raw, dict):
+            raise ValueError("each batch item must be an object")
+        item = dict(raw)
+        for field in _BATCH_DEFAULT_FIELDS:
+            if field not in item and arguments.get(field) is not None:
+                item[field] = arguments[field]
+        prepared.append(item)
+    return prepared
+
+
 async def handle_omega_store(arguments: dict) -> dict:
     """Store a memory with optional type and metadata.
 
@@ -346,8 +374,12 @@ async def handle_omega_store(arguments: dict) -> dict:
         if not items:
             return mcp_response({"ids": [], "count": 0})
         try:
+            prepared_items = _prepare_batch_items(arguments)
+        except ValueError as e:
+            return mcp_error(str(e))
+        try:
             from omega.bridge import batch_store
-            result = batch_store(items)
+            result = batch_store(prepared_items)
             return mcp_response(result)
         except Exception as e:
             logger.error("batch_store failed: %s", e, exc_info=True)

@@ -318,6 +318,7 @@ class SQLiteStoreBase:
 
         self._lock = threading.RLock()
         self._cache_lock = threading.Lock()  # Protects _query_cache and _recent_query_context
+        self._thread_local = threading.local()
         self._vec_available = False
         self._decompose_queries = decompose_queries
         self._cache_generation: int = 0
@@ -525,6 +526,44 @@ class SQLiteStoreBase:
         self._vec_available, self._fts_available = _init_schema_fn(
             self._conn, self._vec_available, EMBEDDING_DIM
         )
+
+    def get_thread_local_read_conn(self) -> sqlite3.Connection:
+        """Return a lazily created per-thread connection for analyzer reads.
+
+        Callers must treat this connection as read-only. Writes continue to use
+        the primary store connection and its existing single-writer path.
+        """
+        conn = getattr(self._thread_local, "conn", None)
+        if conn is not None:
+            return conn
+
+        from omega.crypto import secure_connect
+
+        conn = secure_connect(
+            self.db_path,
+            timeout=30,
+            check_same_thread=False,
+            isolation_level="IMMEDIATE",
+        )
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        is_http = os.environ.get("OMEGA_TRANSPORT", "").lower() == "http"
+        conn.execute(f"PRAGMA cache_size={-4000 if is_http else -16000}")
+        conn.execute(f"PRAGMA mmap_size={0 if is_http else 33554432}")
+        conn.execute(f"PRAGMA busy_timeout={5000 if is_http else 10000}")
+        conn.execute("PRAGMA foreign_keys=ON")
+
+        try:
+            import sqlite_vec
+
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+        except (ImportError, Exception) as exc:
+            logger.debug("thread-local conn: sqlite-vec unavailable: %s", exc)
+
+        self._thread_local.conn = conn
+        return conn
 
     def _emergency_backup(self) -> None:
         """Create an emergency backup of the DB file when integrity check fails."""
@@ -765,6 +804,14 @@ class SQLiteStoreBase:
                 if t.is_alive():
                     t.join(timeout=2.0)
         self._save_stats()
+        thread_conn = getattr(self._thread_local, "conn", None)
+        if thread_conn is not None:
+            try:
+                thread_conn.close()
+            except Exception as e:
+                logger.debug("Thread-local database close failed: %s", e)
+            finally:
+                self._thread_local.conn = None
         try:
             # Flush WAL before closing — helps other processes checkpoint
             self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
