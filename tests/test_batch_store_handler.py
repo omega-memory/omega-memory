@@ -91,6 +91,26 @@ async def test_batch_store_inherits_request_scope_without_mutating_input():
 
 
 @pytest.mark.asyncio
+async def test_single_store_persists_advertised_project_and_sensitivity_scope():
+    """Top-level schema fields must reach the singleton bridge call."""
+    from omega.server.handlers import handle_omega_store
+
+    with patch("omega.bridge.store", return_value="stored") as mocked_store:
+        result = await handle_omega_store(
+            {
+                "content": "singleton scope parity",
+                "project_id": "prod",
+                "sensitivity": "restricted",
+            }
+        )
+
+    assert not result.get("isError")
+    metadata = mocked_store.call_args.kwargs["metadata"]
+    assert metadata["project_id"] == "prod"
+    assert metadata["sensitivity"] == "restricted"
+
+
+@pytest.mark.asyncio
 async def test_batch_store_rejects_non_object_before_writing():
     from omega.server.handlers import handle_omega_store
 

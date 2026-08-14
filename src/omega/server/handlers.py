@@ -412,6 +412,14 @@ async def handle_omega_store(arguments: dict) -> dict:
     entity_id = _validate_entity_id(arguments.get("entity_id"))
     agent_type = arguments.get("agent_type")
 
+    # The public store persists project_id and sensitivity in metadata. These
+    # fields are advertised at the top level of the MCP schema, so singleton
+    # writes must honor them just as batch writes do.
+    for field in ("project_id", "sensitivity"):
+        if arguments.get(field) is not None:
+            metadata = dict(metadata or {})
+            metadata[field] = arguments[field]
+
     # Wire through priority if provided
     priority = arguments.get("priority")
     if priority is not None:

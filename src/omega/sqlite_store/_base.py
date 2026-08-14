@@ -550,7 +550,7 @@ class SQLiteStoreBase:
         is_http = os.environ.get("OMEGA_TRANSPORT", "").lower() == "http"
         conn.execute(f"PRAGMA cache_size={-4000 if is_http else -16000}")
         conn.execute(f"PRAGMA mmap_size={0 if is_http else 33554432}")
-        conn.execute(f"PRAGMA busy_timeout={5000 if is_http else 10000}")
+        conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA foreign_keys=ON")
 
         try:

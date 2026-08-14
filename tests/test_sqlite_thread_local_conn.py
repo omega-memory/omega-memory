@@ -13,7 +13,9 @@ def test_thread_local_read_connection_is_stable_and_configured(store):
     assert conn is store.get_thread_local_read_conn()
     assert conn is not store._conn
     assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
-    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] in {5000, 10000}
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == store._conn.execute(
+        "PRAGMA busy_timeout"
+    ).fetchone()[0]
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
