@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.10] - 2026-08-14
+
+### Fixed
+- Classify the Pro-provided `omega_task_release` operation in Core's write
+  rate-limit tier so task ownership mutations receive the same protection as
+  other coordination writes.
+
 ## [1.5.9] - 2026-08-14
 
 ### Added
