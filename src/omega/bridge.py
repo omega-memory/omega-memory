@@ -4068,7 +4068,9 @@ def discover_connections(
 
         # Find similar memories
         import struct
-        _EMBED_DIM = 384
+
+        from omega.sqlite_store import EMBEDDING_DIM as _EMBED_DIM
+
         expected_size = _EMBED_DIM * 4  # 4 bytes per float
         if len(emb_row[0]) != expected_size:
             continue

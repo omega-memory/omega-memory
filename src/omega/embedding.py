@@ -2,13 +2,16 @@
 OMEGA Embeddings — ONNX-based embedding generation for semantic search.
 
 Provides:
-- generate_embedding(text) → 384-dim normalized vector
+- generate_embedding(text) → normalized vector at the configured dimension
 - generate_embeddings_batch(texts) → list of vectors
 - Async variants for non-blocking operation
 - LRU cache for repeated queries
 - Hash-based fallback when no ML model available
 
-Uses bge-small-en-v1.5 via ONNX Runtime (~90MB RAM, ~170MB with arena disabled).
+Uses bge-small-en-v1.5 by default via ONNX Runtime (~90MB RAM, ~170MB with arena
+disabled). The model, dimension, pooling and pad token are configurable through
+the OMEGA_EMBEDDING_* variables (see omega.embedding_config) so multilingual
+models such as bge-m3 can be selected without patching this module.
 Falls back to all-MiniLM-L6-v2 if bge model not downloaded, or hash-based pseudo-embeddings if ONNX unavailable.
 """
 
@@ -18,6 +21,8 @@ import hashlib
 import logging
 import math
 import os
+
+from omega.embedding_config import DEFAULT_EMBEDDING_MODEL, get_embedding_config
 
 __all__ = [
     "generate_embedding",
@@ -46,8 +51,14 @@ except ImportError:
 _EMBEDDING_MODEL = None
 _EMBEDDING_BACKEND = None  # "onnx" only (sentence-transformers removed to prevent 7.5GB PyTorch blowup)
 _LOAD_ATTEMPTED = False  # Circuit breaker: don't retry after first failure
-_EMBEDDING_MODEL_NAME = "bge-small-en-v1.5"
-_EMBEDDING_MODEL_VERSION = "v1.5"
+_EMBEDDING_CONFIG = get_embedding_config()
+_EMBEDDING_MODEL_NAME = _EMBEDDING_CONFIG.model_name
+# Version tracks the shipped default only. A configured model has its own
+# versioning we cannot infer, and stamping "v1.5" on it would put a false
+# version in the metadata of every memory it embeds.
+_EMBEDDING_MODEL_VERSION = (
+    "v1.5" if _EMBEDDING_MODEL_NAME == DEFAULT_EMBEDDING_MODEL else "configured"
+)
 _EMBEDDING_CACHE: OrderedDict = OrderedDict()
 _CACHE_MAX = int(os.environ.get("OMEGA_EMBEDDING_CACHE_MAX", "512"))
 _EMBEDDING_CACHE_MAX = _CACHE_MAX
@@ -64,9 +75,9 @@ _UNLOAD_CHECK_INTERVAL_S = 60  # check at most once per 60s
 _FIRST_FAILURE_TIME: float = 0.0  # monotonic timestamp of first failure in current window
 _CIRCUIT_BREAKER_COOLDOWN_S = 300  # 5 minutes
 
-# ONNX model paths (bge-small-en-v1.5 primary, all-MiniLM-L6-v2 fallback)
+# ONNX model paths (configured model primary, all-MiniLM-L6-v2 fallback)
 _ONNX_MODEL_DIR = None
-_ONNX_DEFAULT_DIR = "~/.cache/omega/models/bge-small-en-v1.5-onnx"
+_ONNX_DEFAULT_DIR = _EMBEDDING_CONFIG.model_dir
 _ONNX_FALLBACK_DIR = "~/.cache/omega/models/all-MiniLM-L6-v2-onnx"
 
 # Availability checks (cached)
@@ -110,8 +121,10 @@ def reset_embedding_state():
     _EMBEDDING_BACKEND = None
     _LOAD_ATTEMPTED = False
     _ONNX_MODEL_DIR = None
-    _EMBEDDING_MODEL_NAME = "bge-small-en-v1.5"
-    _EMBEDDING_MODEL_VERSION = "v1.5"
+    _EMBEDDING_MODEL_NAME = _EMBEDDING_CONFIG.model_name
+    _EMBEDDING_MODEL_VERSION = (
+        "v1.5" if _EMBEDDING_MODEL_NAME == DEFAULT_EMBEDDING_MODEL else "configured"
+    )
     _FIRST_FAILURE_TIME = 0.0
     _EMBEDDING_CACHE.clear()
     if hasattr(_get_embedding_model, "_attempt_count"):
@@ -181,7 +194,12 @@ def has_onnx_runtime() -> bool:
 def _get_onnx_model_dir() -> Optional[str]:
     """Get the ONNX model directory path, checking if model exists.
 
-    Checks in order: bge-small-en-v1.5 (primary), env override, all-MiniLM-L6-v2 (fallback).
+    Checks in order: env override, configured model dir, all-MiniLM-L6-v2 (fallback).
+
+    The env override is consulted FIRST. It used to come second, after the
+    default cache path — and since ``omega setup --download-model`` installs
+    exactly that path, the override was unreachable on any normal install.
+    An operator who points OMEGA_ONNX_MODEL_DIR at a different model means it.
     """
     global _ONNX_MODEL_DIR, _EMBEDDING_MODEL_NAME, _EMBEDDING_MODEL_VERSION
     if _ONNX_MODEL_DIR is not None:
@@ -190,20 +208,24 @@ def _get_onnx_model_dir() -> Optional[str]:
     import os
     from pathlib import Path
 
-    # Primary: bge-small-en-v1.5
+    # Environment override — wins over the packaged default.
+    env_dir = os.environ.get("OMEGA_ONNX_MODEL_DIR")
+    if env_dir:
+        env_path = Path(os.path.expanduser(env_dir)) / "model.onnx"
+        if env_path.exists():
+            _ONNX_MODEL_DIR = os.path.expanduser(env_dir)
+            return _ONNX_MODEL_DIR
+        logger.warning(
+            "OMEGA_ONNX_MODEL_DIR=%s has no model.onnx; falling back to the configured model",
+            env_dir,
+        )
+
+    # Configured model (OMEGA_EMBEDDING_MODEL / OMEGA_EMBEDDING_MODEL_DIR).
     model_dir = Path(os.path.expanduser(_ONNX_DEFAULT_DIR))
     model_path = model_dir / "model.onnx"
     if model_path.exists():
         _ONNX_MODEL_DIR = str(model_dir)
         return _ONNX_MODEL_DIR
-
-    # Environment override
-    env_dir = os.environ.get("OMEGA_ONNX_MODEL_DIR")
-    if env_dir:
-        env_path = Path(env_dir) / "model.onnx"
-        if env_path.exists():
-            _ONNX_MODEL_DIR = env_dir
-            return _ONNX_MODEL_DIR
 
     # Fallback: all-MiniLM-L6-v2 (existing installs)
     fallback_dir = Path(os.path.expanduser(_ONNX_FALLBACK_DIR))
@@ -277,7 +299,9 @@ def _get_embedding_model():
                 from tokenizers import Tokenizer as FastTokenizer
 
                 tokenizer = FastTokenizer.from_file(f"{onnx_dir}/tokenizer.json")
-                tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
+                tokenizer.enable_padding(
+                    pad_id=_EMBEDDING_CONFIG.pad_id, pad_token=_EMBEDDING_CONFIG.pad_token
+                )
                 tokenizer.enable_truncation(max_length=512)
                 sess_opts = ort.SessionOptions()
                 sess_opts.log_severity_level = 4
@@ -382,7 +406,7 @@ def get_active_backend() -> Optional[str]:
     return _EMBEDDING_BACKEND
 
 
-def _hash_embedding(text: str, dimension: int = 384) -> List[float]:
+def _hash_embedding(text: str, dimension: int = _EMBEDDING_CONFIG.dim) -> List[float]:
     """Fallback: deterministic pseudo-embedding from text hash."""
     hash_digest = hashlib.md5(text.encode()).digest()
     seed = int.from_bytes(hash_digest[:4], byteorder="big")
@@ -415,10 +439,17 @@ def _onnx_encode(tokenizer, session, texts: List[str]) -> "np.ndarray":
     outputs = session.run(None, feed)
     embeddings = outputs[1] if len(outputs) > 1 else outputs[0]
     if embeddings.ndim == 3:
-        mask_expanded = mask[:, :, np.newaxis].astype(np.float32)
-        sum_emb = np.sum(embeddings * mask_expanded, axis=1)
-        sum_mask = np.clip(np.sum(mask_expanded, axis=1), a_min=1e-9, a_max=None)
-        embeddings = sum_emb / sum_mask
+        # Pooling is model-specific: bge-small uses mean over the unmasked
+        # tokens, bge-m3 and other CLS-trained models take the first token.
+        # Pooling the wrong way produces vectors that are numerically valid
+        # and semantically wrong, so it is configuration, not a heuristic.
+        if _EMBEDDING_CONFIG.pooling == "cls":
+            embeddings = embeddings[:, 0, :]
+        else:
+            mask_expanded = mask[:, :, np.newaxis].astype(np.float32)
+            sum_emb = np.sum(embeddings * mask_expanded, axis=1)
+            sum_mask = np.clip(np.sum(mask_expanded, axis=1), a_min=1e-9, a_max=None)
+            embeddings = sum_emb / sum_mask
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     return embeddings / np.clip(norms, a_min=1e-9, a_max=None)
 
@@ -431,8 +462,8 @@ def is_embedding_degraded() -> bool:
     return _embedding_degraded
 
 
-def generate_embedding(text: str, dimension: int = 384) -> List[float]:
-    """Generate semantic embedding from text. Returns 384-dim normalized vector.
+def generate_embedding(text: str, dimension: int = _EMBEDDING_CONFIG.dim) -> List[float]:
+    """Generate semantic embedding from text. Returns a normalized vector.
 
     Priority: daemon > in-process ONNX > hash fallback.
     """
@@ -574,7 +605,7 @@ def get_embedding_info() -> Dict[str, Any]:
         "model_loaded": _EMBEDDING_MODEL is not None,
         "onnx_available": has_onnx,
         "onnx_model_dir": _get_onnx_model_dir() if has_onnx else None,
-        "dimension": 384,
+        "dimension": _EMBEDDING_CONFIG.dim,
         "cache_size": len(_EMBEDDING_CACHE),
         "lazy_loading": True,
     }
@@ -595,7 +626,7 @@ def _get_embedding_executor() -> ThreadPoolExecutor:
     return _EMBEDDING_EXECUTOR
 
 
-async def generate_embedding_async(text: str, dimension: int = 384) -> List[float]:
+async def generate_embedding_async(text: str, dimension: int = _EMBEDDING_CONFIG.dim) -> List[float]:
     """Generate embedding asynchronously (non-blocking)."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_get_embedding_executor(), generate_embedding, text, dimension)
