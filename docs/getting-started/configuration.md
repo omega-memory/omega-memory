@@ -75,6 +75,38 @@ Adds a managed block between `<!-- OMEGA:BEGIN -->` and `<!-- OMEGA:END -->` mar
     source ~/.zshrc
     ```
 
+## Embedding model
+
+The factory model is `bge-small-en-v1.5` — English-only, 384 dimensions. These
+variables are read **once at import**, so restart OMEGA after changing any of
+them.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMEGA_EMBEDDING_MODEL` | `bge-small-en-v1.5` | Model name. Also selects the default model directory |
+| `OMEGA_EMBEDDING_DIM` | `384` | Vector dimension. Must match both the model and the existing vector tables |
+| `OMEGA_EMBEDDING_POOLING` | `mean` | `mean` or `cls`. CLS-trained models such as `bge-m3` need `cls` |
+| `OMEGA_EMBEDDING_MODEL_DIR` | `~/.cache/omega/models/<model>-onnx` | Explicit ONNX model directory |
+| `OMEGA_EMBEDDING_PAD_TOKEN` | `[PAD]` | Tokenizer padding token |
+| `OMEGA_EMBEDDING_PAD_ID` | `0` | Tokenizer padding id |
+
+!!! warning "The dimension must match the existing store"
+
+    `OMEGA_EMBEDDING_DIM` has to agree with the dimension the vector tables were
+    created with. OMEGA verifies this when it opens a store and **refuses to
+    start** on a mismatch, rather than accepting writes it cannot vectorize.
+
+    Changing the dimension on a store that already holds data requires
+    re-embedding it — the existing vectors are not convertible.
+
+Running a multilingual model, for example:
+
+```bash
+export OMEGA_EMBEDDING_MODEL=bge-m3
+export OMEGA_EMBEDDING_DIM=1024
+export OMEGA_EMBEDDING_POOLING=cls
+```
+
 ## Hooks
 
 OMEGA uses 7 hook processes (batched from 11 handlers) that run automatically during Claude Code sessions. All hooks are **fail-open** — if a hook errors, it logs to `~/.omega/hooks.log` and lets the operation proceed.

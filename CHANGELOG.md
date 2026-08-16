@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.11] - 2026-08-16
+
+### Fixed
+- **Memory writes no longer report success when the vector is not stored.** A
+  failed `memories_vec` insert — most commonly an embedding-dimension mismatch
+  — was logged at `DEBUG` and swallowed, so `store()` returned an id and a
+  count while the memory was written with no vector and was invisible to every
+  later semantic search. The write now fails loudly and rolls back, so a
+  rejected write leaves no vectorless row behind. `update_node()` had the same
+  bug in a worse form: it deleted the existing vector before inserting the new
+  one, so a swallowed failure discarded a working vector.
+
+### Added
+- Added `OMEGA_EMBEDDING_MODEL`, `OMEGA_EMBEDDING_DIM`,
+  `OMEGA_EMBEDDING_POOLING`, `OMEGA_EMBEDDING_MODEL_DIR`,
+  `OMEGA_EMBEDDING_PAD_TOKEN` and `OMEGA_EMBEDDING_PAD_ID`, read once at import
+  and validated. The embedding dimension, model, pooling strategy and pad token
+  were previously literals across five modules, so multilingual deployments
+  maintained local patches that every upgrade silently reverted. Restart OMEGA
+  after changing them.
+- Opening a store now verifies the configured dimension against the dimension
+  the `memories_vec` table was created with, and refuses to start on a
+  mismatch. `CREATE VIRTUAL TABLE IF NOT EXISTS` keeps the original dimension,
+  so this previously surfaced only as a slow trickle of rejected writes.
+- `pooling=cls` supports CLS-pooled models such as `bge-m3` alongside the
+  default mean pooling.
+
+### Changed
+- `OMEGA_ONNX_MODEL_DIR` is now consulted before the packaged default model
+  directory. It was previously checked only if the default path was missing —
+  and since `omega setup --download-model` installs exactly that path, the
+  override was unreachable on a normal install.
+
 ## [1.5.10] - 2026-08-14
 
 ### Fixed
