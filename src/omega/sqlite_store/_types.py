@@ -7,9 +7,12 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from omega.embedding_config import get_embedding_config
 from omega.schema import SCHEMA_VERSION  # noqa: F401 -- re-exported
 
-EMBEDDING_DIM = 384
+# Resolved from OMEGA_EMBEDDING_DIM at import. Must match the dimension the
+# vec0 tables were created with; SQLiteStore validates that on open.
+EMBEDDING_DIM = get_embedding_config().dim
 
 # Pre-compiled regex for query deduplication (strip trailing git hashes)
 _TRAILING_HASH_RE = re.compile(r"\s*-\s*[0-9a-f]{6,40}\s*$")

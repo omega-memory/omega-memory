@@ -10,9 +10,26 @@ from typing import Any, Dict, List, Optional
 
 from omega import json_compat as json
 from omega.exceptions import StorageError
-from ._types import MemoryResult, _serialize_f32, _canonicalize
+from ._types import EMBEDDING_DIM, MemoryResult, _serialize_f32, _canonicalize
 
 logger = logging.getLogger("omega.sqlite_store")
+
+
+def _check_embedding_dim(embedding: List[float]) -> None:
+    """Raise if ``embedding`` does not match the configured vector dimension.
+
+    Checked before the insert so the failure names both dimensions. sqlite-vec
+    reports its own mismatch, but the store is the only layer that knows the
+    configured dimension came from ``OMEGA_EMBEDDING_DIM``, which is what the
+    operator actually has to change.
+    """
+    if len(embedding) != EMBEDDING_DIM:
+        raise StorageError(
+            f"Embedding dimension mismatch: got {len(embedding)}, "
+            f"store expects {EMBEDDING_DIM}. The vector tables were built at "
+            f"{EMBEDDING_DIM} dimensions; set OMEGA_EMBEDDING_DIM to match the "
+            f"embedding model and re-embed the store if the model changed."
+        )
 
 
 class StoreMixin:
@@ -257,12 +274,25 @@ class StoreMixin:
 
             # Insert embedding into vec table
             if embedding and self._vec_available:
+                # A failure here used to be logged at DEBUG and swallowed, so
+                # the memory row committed with no vector and store() still
+                # returned an id: the write reported success and was
+                # unretrievable by every later semantic search. Roll the whole
+                # store back and raise instead — a rejected write the caller
+                # can retry beats a silently vectorless one.
                 try:
+                    _check_embedding_dim(embedding)
                     self._exec(
                         "INSERT INTO memories_vec (rowid, embedding) VALUES (?, ?)", (rowid, _serialize_f32(embedding))
                     )
+                except StorageError:
+                    # Dimension mismatch: the message already says what to fix.
+                    self._conn.rollback()
+                    raise
                 except Exception as e:
-                    logger.debug(f"Vec insert failed: {e}")
+                    self._conn.rollback()
+                    logger.error("Vec insert failed; rolled back store: %s", e, exc_info=True)
+                    raise StorageError(f"Failed to store embedding vector: {e}") from e
 
             # Add causal edges if dependencies provided
             if dependencies:
@@ -456,14 +486,26 @@ class StoreMixin:
             if new_embedding is not None:
                 row = self._exec("SELECT id FROM memories WHERE node_id = ?", (node_id,)).fetchone()
                 if row:
+                    # The DELETE lands before the INSERT, so swallowing a
+                    # failure here discarded the memory's existing, working
+                    # vector and left it with none — silent data loss on a
+                    # record that was previously fine. Roll back instead.
                     try:
+                        _check_embedding_dim(new_embedding)
                         self._exec("DELETE FROM memories_vec WHERE rowid = ?", (row[0],))
                         self._exec(
                             "INSERT INTO memories_vec (rowid, embedding) VALUES (?, ?)",
                             (row[0], _serialize_f32(new_embedding)),
                         )
+                    except StorageError:
+                        self._conn.rollback()
+                        raise
                     except Exception as e:
-                        logger.debug("update_node: vec update failed: %s", e)
+                        self._conn.rollback()
+                        logger.error(
+                            "update_node: vec update failed; rolled back: %s", e, exc_info=True
+                        )
+                        raise StorageError(f"Failed to update embedding vector: {e}") from e
             self._commit()
         return True
 

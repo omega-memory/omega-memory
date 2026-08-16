@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time as _time
@@ -12,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from omega import json_compat as json
 from omega.db_utils import retry_on_locked as _retry_on_locked
+from omega.exceptions import StorageError
 from omega.schema import SCHEMA_VERSION  # noqa: F401 -- re-exported
 from omega.schema import init_schema as _init_schema_fn
 
@@ -526,6 +528,35 @@ class SQLiteStoreBase:
         self._vec_available, self._fts_available = _init_schema_fn(
             self._conn, self._vec_available, EMBEDDING_DIM
         )
+        if self._vec_available:
+            self._verify_embedding_dim()
+
+    def _verify_embedding_dim(self) -> None:
+        """Fail loudly if the configured dimension disagrees with the store.
+
+        ``CREATE VIRTUAL TABLE IF NOT EXISTS`` silently keeps the dimension an
+        existing table was built with, so an upgrade that changes
+        ``OMEGA_EMBEDDING_DIM`` (or reverts a patched default) leaves every
+        subsequent write failing its dimension check at run time. Catching it
+        at open turns a slow trickle of rejected writes into one clear error.
+        """
+        row = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memories_vec'"
+        ).fetchone()
+        if not row or not row[0]:
+            return
+        match = re.search(r"float\[(\d+)\]", row[0])
+        if not match:
+            return
+        actual = int(match.group(1))
+        if actual != EMBEDDING_DIM:
+            raise StorageError(
+                f"Embedding dimension mismatch: memories_vec was created with "
+                f"{actual} dimensions but this process is configured for "
+                f"{EMBEDDING_DIM} (OMEGA_EMBEDDING_DIM). Set OMEGA_EMBEDDING_DIM="
+                f"{actual} to match the existing store, or re-embed the store "
+                f"at {EMBEDDING_DIM} dimensions."
+            )
 
     def get_thread_local_read_conn(self) -> sqlite3.Connection:
         """Return a lazily created per-thread connection for analyzer reads.

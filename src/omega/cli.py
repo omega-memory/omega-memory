@@ -2415,11 +2415,20 @@ def cmd_doctor(args):
         else:
             warn("ONNX Runtime not available, will use fallback")
 
+        from omega.embedding_config import get_embedding_config
+
+        expected_dim = get_embedding_config().dim
         emb = generate_embedding("test embedding")
-        if len(emb) == 384:
-            ok(f"Embedding generation works (384-dim, backend={info.get('backend', 'unknown')})")
+        if len(emb) == expected_dim:
+            ok(
+                f"Embedding generation works ({expected_dim}-dim, "
+                f"backend={info.get('backend', 'unknown')})"
+            )
         else:
-            fail(f"Embedding dimension wrong: {len(emb)} (expected 384)")
+            fail(
+                f"Embedding dimension wrong: {len(emb)} "
+                f"(expected {expected_dim} from OMEGA_EMBEDDING_DIM)"
+            )
     except Exception as e:
         fail(f"Embedding generation failed: {e}")
 
