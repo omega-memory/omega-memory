@@ -1,6 +1,6 @@
 [project]
 name = "omega-memory"
-version = "1.5.10"
+version = "1.5.11"
 description = "Cross-model memory for AI agents. Local-first, works with Claude, GPT, Gemini, Cursor, Claw Code, and any MCP client"
 readme = "README.md"
 requires-python = ">=3.11"
