@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.12] - 2026-08-20
+
+### Fixed
+
+- **Query constraint correctness.** Fixed an issue where graph expansion during
+  semantic/unified retrieval could reintroduce records that had already been
+  excluded by caller-supplied hard constraints such as `entity_id`,
+  `agent_type`, or excluded types.
+
+  **Queries may return fewer results after upgrading**, in cases where earlier
+  versions incorrectly returned records outside the requested scope. That is the
+  correction taking effect, not data loss: the records are still present and are
+  still returned for queries whose constraints actually match them. Legitimate
+  graph expansion within the requested constraints is unchanged.
+
+  The underlying rule is now enforced rather than assumed: once a candidate
+  fails a caller-supplied hard constraint, no later stage of the pipeline may
+  reintroduce it. Expansion is checked before a neighbour is admitted, and the
+  full result set is checked again before assembly, so a miss in one place
+  cannot leak through the other.
+
 ## [1.5.11] - 2026-08-16
 
 ### Fixed
