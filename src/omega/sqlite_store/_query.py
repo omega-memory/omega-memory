@@ -34,6 +34,130 @@ ADAPTIVE_RETRY_THRESHOLD = float(os.environ.get("OMEGA_ADAPTIVE_RETRY_THRESHOLD"
 ADAPTIVE_RETRY_RELAXATION = float(os.environ.get("OMEGA_ADAPTIVE_RETRY_RELAXATION", "0.6"))
 
 
+class HardConstraints:
+    """The caller-supplied constraints a candidate must satisfy to be returned.
+
+    Hard constraints are monotonic: once a candidate fails one, no later
+    ranking, expansion, or graph phase may resurrect it. Phases 4 and 5 apply
+    these in bulk over the candidate set; this object applies the same rules to
+    a single candidate, so phases that introduce *new* candidates (graph
+    expansion) can be held to them too.
+
+    Membership in the surviving candidate set is deliberately not the test — a
+    legitimate graph hop introduces node ids that were never candidates. Each
+    new node is evaluated against the predicate itself.
+    """
+
+    __slots__ = (
+        "excluded_types", "session_id", "project_path", "scope",
+        "valid_at", "entity_id", "agent_type", "_store",
+    )
+
+    def __init__(
+        self,
+        store,
+        exclude_types: Optional[List[str]] = None,
+        include_infrastructure: bool = False,
+        session_id: Optional[str] = None,
+        project_path: str = "",
+        scope: str = "project",
+        valid_at: Optional[str] = None,
+        entity_id: Optional[str] = None,
+        agent_type: Optional[str] = None,
+    ) -> None:
+        excluded = set(exclude_types) if exclude_types else set()
+        if not include_infrastructure:
+            excluded |= store._INFRASTRUCTURE_TYPES
+        self.excluded_types = excluded
+        self.session_id = session_id
+        self.project_path = project_path
+        self.scope = scope
+        self.valid_at = valid_at
+        self.entity_id = entity_id
+        self.agent_type = agent_type
+        self._store = store
+
+    def violation(self, node_id: str, result) -> Optional[str]:
+        """Return the name of the first constraint this candidate fails.
+
+        Returns None when the candidate is admissible. The constraint names
+        mirror the Phase 4/5 blocks so a reported violation points straight at
+        the rule that was bypassed.
+        """
+        metadata = getattr(result, "metadata", None) or {}
+
+        if result.is_expired():
+            return "expired"
+        if metadata.get("superseded"):
+            return "superseded"
+        if metadata.get("flagged_for_review"):
+            return "flagged_for_review"
+        if self.excluded_types and metadata.get("event_type", "") in self.excluded_types:
+            return "excluded_type"
+
+        node_session = metadata.get("session_id")
+        if self.session_id and node_session and node_session != self.session_id:
+            return "session_id"
+        if (
+            self.project_path
+            and self.scope == "project"
+            and metadata.get("project") not in (None, "", self.project_path)
+        ):
+            return "project_path"
+
+        # entity_id admits unscoped records (None); agent_type does not. This
+        # asymmetry matches the Phase 5 blocks exactly — do not "tidy" it.
+        if self.entity_id:
+            resolved = self._resolve_column(node_id, metadata, "entity_id")
+            if resolved is not None and resolved != self.entity_id:
+                return "entity_id"
+        if self.agent_type:
+            resolved = self._resolve_column(node_id, metadata, "agent_type")
+            if resolved != self.agent_type:
+                return "agent_type"
+
+        if self.valid_at and not self._valid_at_ok(node_id):
+            return "valid_at"
+        return None
+
+    def permits(self, node_id: str, result) -> bool:
+        return self.violation(node_id, result) is None
+
+    def _resolve_column(self, node_id: str, metadata: dict, column: str) -> Optional[str]:
+        """Read a scoping column from metadata, falling back to the row.
+
+        Mirrors the Phase 5 batch lookup for a single node. A failed lookup
+        resolves to None, which is the same fail-open behaviour Phase 5 has.
+        """
+        value = metadata.get(column)
+        if value is not None:
+            return value
+        try:
+            row = self._store._conn.execute(
+                f"SELECT {column} FROM memories WHERE node_id = ?", (node_id,)
+            ).fetchone()
+        except Exception as e:
+            logger.debug("Constraint lookup for %s failed: %s", column, e)
+            return None
+        return row[0] if row else None
+
+    def _valid_at_ok(self, node_id: str) -> bool:
+        try:
+            row = self._store._conn.execute(
+                """SELECT 1 FROM memories
+                   WHERE node_id = ?
+                   AND (
+                       (valid_from IS NOT NULL AND valid_from > ?)
+                       OR (valid_until IS NOT NULL AND valid_until <= ?)
+                   )""",
+                (node_id, self.valid_at, self.valid_at),
+            ).fetchone()
+        except Exception as e:
+            logger.debug("Constraint valid_at lookup failed: %s", e)
+            return True
+        return row is None
+
+
 class QueryMixin:
 
     # ------------------------------------------------------------------
@@ -244,6 +368,20 @@ class QueryMixin:
             all_results[hr.id] = hr
             node_scores[hr.id] = hr.relevance * 0.8
 
+        # The caller's hard constraints, in one object, so every phase that can
+        # introduce candidates is held to the same rules Phases 4 and 5 apply.
+        constraints = HardConstraints(
+            self,
+            exclude_types=exclude_types,
+            include_infrastructure=include_infrastructure,
+            session_id=session_id,
+            project_path=project_path,
+            scope=scope,
+            valid_at=valid_at,
+            entity_id=entity_id,
+            agent_type=agent_type,
+        )
+
         # Phase 1: Vector similarity search
         query_emb = self._query_phase_vec(
             query_text, skip_vec, entity_id, limit,
@@ -280,6 +418,7 @@ class QueryMixin:
                 context_file, context_tags, temporal_range,
                 temporal_boost_only, pw_ctx, entity_id, agent_type,
             )
+            self._enforce_hard_constraints(all_results, node_scores, constraints)
             _result, _conf = self._query_phase_assemble(
                 query_text, all_results, node_scores, raw_vec_sims,
                 limit, _cache_key, now_mono, session_id, query_hint,
@@ -325,8 +464,12 @@ class QueryMixin:
         # Phase 6: Graph expansion + cross-encoder reranking
         self._query_phase_rerank(
             query_text, all_results, node_scores,
-            limit, pw_graph,
+            limit, pw_graph, constraints,
         )
+
+        # Invariant backstop: hard constraints are monotonic, so nothing a
+        # later phase introduced may survive into assembly.
+        self._enforce_hard_constraints(all_results, node_scores, constraints)
 
         # Phase 7: Assembly (sort, dedup, abstention, normalize, cache, track)
         _result, _conf = self._query_phase_assemble(
@@ -996,6 +1139,46 @@ class QueryMixin:
         except Exception as e:
             logger.debug("Entity graph expansion failed: %s", e)
 
+    def _enforce_hard_constraints(
+        self,
+        all_results: Dict[str, "MemoryResult"],
+        node_scores: Dict[str, float],
+        constraints: Optional["HardConstraints"],
+    ) -> None:
+        """Final invariant: nothing inadmissible reaches assembly.
+
+        Phase 6 already screens the candidates it introduces. This is the
+        backstop for the same class of bug appearing anywhere else — a future
+        expansion mechanism, a plugin modifier, a change in phase order. A
+        removal here means an upstream phase violated the invariant, so it is
+        logged at warning level rather than silently corrected.
+        """
+        if constraints is None or not node_scores:
+            return
+        violations: Dict[str, str] = {}
+        for nid in list(node_scores):
+            result = all_results.get(nid)
+            if result is None:
+                continue
+            failed = constraints.violation(nid, result)
+            if failed:
+                violations[nid] = failed
+                node_scores.pop(nid, None)
+        if violations:
+            by_rule: Dict[str, int] = {}
+            for rule in violations.values():
+                by_rule[rule] = by_rule.get(rule, 0) + 1
+            self.stats["hard_constraint_violations"] = (
+                self.stats.get("hard_constraint_violations", 0) + len(violations)
+            )
+            logger.warning(
+                "Hard-constraint invariant violated before assembly; removed %d "
+                "candidate(s): %s. An upstream phase admitted records the caller "
+                "excluded.",
+                len(violations),
+                by_rule,
+            )
+
     def _query_phase_rerank(
         self,
         query_text: str,
@@ -1003,8 +1186,15 @@ class QueryMixin:
         node_scores: Dict[str, float],
         limit: int,
         pw_graph: float,
+        constraints: Optional["HardConstraints"] = None,
     ) -> None:
-        """Phase 6: Graph expansion + cross-encoder reranking + plugin modifiers."""
+        """Phase 6: Graph expansion + cross-encoder reranking + plugin modifiers.
+
+        Graph expansion introduces candidates that no earlier phase screened,
+        so every neighbour is checked against the caller's hard constraints
+        before it enters the candidate set. Without that check, connectivity
+        silently overrides the caller's filters.
+        """
         # Multi-hop graph traversal with spreading activation (P6).
         _MAX_GRAPH_HOPS = 2
         _HOP_DECAY = 0.4  # Score multiplier per hop (0.4 for hop 1, 0.16 for hop 2)
@@ -1025,6 +1215,16 @@ class QueryMixin:
                         result = entry["_result"]
                         if result.is_expired() or result.metadata.get("superseded"):
                             continue
+                        if constraints is not None:
+                            failed = constraints.violation(nbr_id, result)
+                            if failed:
+                                self.stats["graph_expansion_blocked"] = (
+                                    self.stats.get("graph_expansion_blocked", 0) + 1
+                                )
+                                logger.debug(
+                                    "Graph hop blocked by %s constraint", failed
+                                )
+                                continue
                         hop = entry["hop"]
                         weight = entry["weight"]
                         nbr_score = seed_score * (_HOP_DECAY ** hop) * min(weight, 1.0) * pw_graph
