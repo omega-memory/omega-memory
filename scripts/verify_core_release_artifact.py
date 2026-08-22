@@ -8,6 +8,7 @@ installs, imports, or otherwise executes the wheel under inspection.
 from __future__ import annotations
 
 import argparse
+import configparser
 import re
 import stat
 import sys
@@ -20,6 +21,16 @@ EXPECTED_NAME = "omega-memory"
 EXPECTED_VERSION = "1.5.13"
 _EXPECTED_FILENAME = "omega_memory-1.5.13-py3-none-any.whl"
 _EXPECTED_DIST_INFO = "omega_memory-1.5.13.dist-info"
+_EXPECTED_CLASSIFIERS = {
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+}
 _MAX_MEMBER_BYTES = 10 * 1024 * 1024
 _SECRET_VALUE = re.compile(
     r"(?i)\b(?:api[_-]?key|token|secret|password|private[_-]?key|credential)\b"
@@ -29,9 +40,18 @@ _SECRET_VALUE = re.compile(
 )
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")
 _AWS_KEY = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
-_PERSONAL_PATH = re.compile(r"(?i)(?:/users/[^/\s]+/|/home/[^/\s]+/|[A-Z]:\\+Users\\+[^\\\s]+\\+)")
+_PERSONAL_PATH = re.compile(
+    r"(?i)(?:/users/[^/\s]+/|/home/[^/\s]+/|/root/\.omega(?:/|\b)|"
+    r"[A-Z]:\\+Users\\+[^\\\s]+\\+)"
+)
 _CUSTOMER_VALUE = re.compile(
     r"(?i)\b(?:customer|client)[_-](?:name|email|id)\b\s*[:=]\s*['\"][^'\"]+['\"]"
+)
+_CUSTOMER_EMAIL_UNQUOTED = re.compile(
+    r"(?i)\b(?:customer|client)[_-]email\b\s*[:=]\s*[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"
+)
+_CUSTOMER_NAME_UNQUOTED = re.compile(
+    r"\b(?:customer|client)[_-]name\b\s*[:=]\s*[A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+)+"
 )
 _INTERNAL_PRODUCT_MARKER = re.compile(r"(?i)\bsynaptic\b")
 _SECRET_NAME = re.compile(r"(?i)(?:^|[_\-.])(api[_-]?key|token|secret|password|private[_-]?key|credential)(?:[_\-.]|$)")
@@ -79,7 +99,11 @@ def _content_violation(payload: bytes) -> str | None:
         return "personal absolute path in payload"
     if _INTERNAL_PRODUCT_MARKER.search(text):
         return "internal-only product marker in payload"
-    if _CUSTOMER_VALUE.search(text):
+    if (
+        _CUSTOMER_VALUE.search(text)
+        or _CUSTOMER_EMAIL_UNQUOTED.search(text)
+        or _CUSTOMER_NAME_UNQUOTED.search(text)
+    ):
         return "customer-like value in payload"
     if _SECRET_VALUE.search(text) or _PRIVATE_KEY.search(text) or _AWS_KEY.search(text):
         return "secret-like value in payload"
@@ -101,9 +125,8 @@ def _metadata_violations(archive: zipfile.ZipFile, names: list[str]) -> list[str
     if metadata.get("Requires-Python") != ">=3.11":
         violations.append("metadata Requires-Python must be >=3.11")
     classifiers = metadata.get_all("Classifier", [])
-    apache_classifier = "License :: OSI Approved :: Apache Software License"
-    if apache_classifier not in classifiers:
-        violations.append("metadata must contain the Apache Software License classifier")
+    if len(classifiers) != len(_EXPECTED_CLASSIFIERS) or set(classifiers) != _EXPECTED_CLASSIFIERS:
+        violations.append("metadata classifier set does not match the exact public Core allowlist")
     for raw_requirement in metadata.get_all("Requires-Dist", []):
         match = re.match(r"\s*([A-Za-z0-9_.-]+)", raw_requirement)
         package = re.sub(r"[-_.]+", "-", match.group(1)).lower() if match else ""
@@ -114,8 +137,17 @@ def _metadata_violations(archive: zipfile.ZipFile, names: list[str]) -> list[str
         violations.append("wheel must contain exactly one expected entry_points.txt")
     else:
         entry_text = archive.read(entry_name).decode("utf-8", errors="replace")
-        if "[console_scripts]" not in entry_text or "omega = omega.cli:main" not in entry_text:
-            violations.append("wheel is missing the expected Core console entry point")
+        parser = configparser.ConfigParser(interpolation=None, strict=True)
+        parser.optionxform = str
+        try:
+            parser.read_string(entry_text)
+            exact_entry_points = parser.sections() == ["console_scripts"] and dict(
+                parser.items("console_scripts")
+            ) == {"omega": "omega.cli:main"}
+        except configparser.Error:
+            exact_entry_points = False
+        if not exact_entry_points:
+            violations.append("wheel entry-point groups must contain only the expected Core console script")
     return violations
 
 

@@ -20,6 +20,16 @@ release = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(release)
 
 _VERIFIER = Path(__file__).resolve().parents[1] / "scripts" / "verify_core_release_artifact.py"
+_CORE_CLASSIFIERS = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
 
 
 def _write_exact_core_wheel(
@@ -30,13 +40,18 @@ def _write_exact_core_wheel(
     version: str = "1.5.13",
     license_expression: str = "Apache-2.0",
     requires_python: str = ">=3.11",
+    classifiers: list[str] | None = None,
+    entry_points: str = "[console_scripts]\nomega = omega.cli:main\n",
 ) -> None:
+    classifier_lines = "".join(
+        f"Classifier: {classifier}\n" for classifier in (classifiers or _CORE_CLASSIFIERS)
+    )
     metadata = (
         "Metadata-Version: 2.4\n"
         f"Name: {name}\n"
         f"Version: {version}\n"
         f"License-Expression: {license_expression}\n"
-        "Classifier: License :: OSI Approved :: Apache Software License\n"
+        f"{classifier_lines}"
         f"Requires-Python: {requires_python}\n"
     )
     with zipfile.ZipFile(path, "w") as archive:
@@ -45,7 +60,7 @@ def _write_exact_core_wheel(
         archive.writestr("omega_memory-1.5.13.dist-info/METADATA", metadata)
         archive.writestr(
             "omega_memory-1.5.13.dist-info/entry_points.txt",
-            "[console_scripts]\nomega = omega.cli:main\n",
+            entry_points,
         )
         archive.writestr("omega_memory-1.5.13.dist-info/WHEEL", "Wheel-Version: 1.0\n")
         for member, content in (extra_members or {}).items():
@@ -134,8 +149,11 @@ def test_boundary_rejects_private_distribution_dependency(tmp_path, artifact):
         ("omega/private.py", "/Users/another-user/.omega/omega.db"),
         ("omega/private.py", "/home/private-user/.omega/omega.db"),
         ("omega/private.py", r"C:\Users\private-user\.omega\omega.db"),
+        ("omega/private.py", "/root/.omega/omega.db"),
         ("omega/private.py", "synaptic release configuration"),
         ("omega/private.py", 'customer_email = "private.person@paid.invalid"'),
+        ("omega/private.py", "customer_email = private.person@paid.invalid"),
+        ("omega/private.py", "customer_name: Private Person"),
         ("omega/private.py", "api_key = super-secret-value-123"),
         ("omega/token.txt", ""),
         ("omega/settings.yaml", "data_path: /Users/singularityjason/.omega/omega.db"),
@@ -224,3 +242,42 @@ def test_core_artifact_verifier_requires_exact_candidate_filename(tmp_path):
 
     assert result.returncode == 1
     assert "release candidate" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "classifiers",
+    [
+        _CORE_CLASSIFIERS + ["License :: Other/Proprietary License"],
+        [item for item in _CORE_CLASSIFIERS if not item.startswith("License ::")],
+        _CORE_CLASSIFIERS + ["Topic :: Database :: Database Engines/Servers"],
+    ],
+)
+def test_core_artifact_verifier_requires_the_exact_classifier_set(tmp_path, classifiers):
+    wheel = tmp_path / "omega_memory-1.5.13-py3-none-any.whl"
+    _write_exact_core_wheel(wheel, classifiers=classifiers)
+
+    result = subprocess.run([sys.executable, str(_VERIFIER), str(wheel)], capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert "classifier" in result.stderr.lower()
+
+
+@pytest.mark.parametrize(
+    "entry_points",
+    [
+        (
+            "[console_scripts]\nomega = omega.cli:main\n"
+            "[omega.plugins]\nomega_pro = omega_platform.plugin:OmegaPlatformPlugin\n"
+        ),
+        "[omega.plugins]\nomega_pro = omega_platform.plugin:OmegaPlatformPlugin\n",
+        "[console_scripts]\nomega = omega_platform.cli:main\n",
+    ],
+)
+def test_core_artifact_verifier_rejects_plugin_and_unexpected_entry_points(tmp_path, entry_points):
+    wheel = tmp_path / "omega_memory-1.5.13-py3-none-any.whl"
+    _write_exact_core_wheel(wheel, entry_points=entry_points)
+
+    result = subprocess.run([sys.executable, str(_VERIFIER), str(wheel)], capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert "entry" in result.stderr.lower()
