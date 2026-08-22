@@ -392,7 +392,7 @@ def _capture_usage_to_supabase(session_id: str, project_dir: str):
         claude_data = json.loads(claude_json_path.read_text())
         projects = claude_data.get("projects", {})
 
-        # Find project entry — keys are paths like "/Users/.../project"
+        # Find the project entry; keys are absolute project paths.
         project_entry = None
         for path_key, entry in projects.items():
             # Exact match or normalized match (avoid substring false positives)

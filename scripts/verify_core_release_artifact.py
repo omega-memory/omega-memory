@@ -9,22 +9,36 @@ from __future__ import annotations
 
 import argparse
 import re
+import stat
 import sys
 import zipfile
+from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
 
 
+EXPECTED_NAME = "omega-memory"
+EXPECTED_VERSION = "1.5.13"
+_EXPECTED_FILENAME = "omega_memory-1.5.13-py3-none-any.whl"
+_EXPECTED_DIST_INFO = "omega_memory-1.5.13.dist-info"
 _MAX_MEMBER_BYTES = 10 * 1024 * 1024
 _SECRET_VALUE = re.compile(
-    r"(?i)\b(?:api[_-]?key|token|secret|password|private[_-]?key|credential)\b\s*[:=]\s*(?:['\"][^'\"]{8,}['\"]|[A-Za-z0-9_-]{16,})"
+    r"(?i)\b(?:api[_-]?key|token|secret|password|private[_-]?key|credential)\b"
+    r"\s*[:=]\s*(?:['\"][^'\"]{8,}['\"]|"
+    r"(?=[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-]))(?=[A-Za-z0-9_-]*[0-9])"
+    r"[A-Za-z0-9_-]+(?!\s*\())"
 )
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")
 _AWS_KEY = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
-_PERSONAL_PATH = re.compile(r"(?i)(?:/users/singularityjason|[A-Z]:\\\\Users\\\\singularityjason)")
+_PERSONAL_PATH = re.compile(r"(?i)(?:/users/[^/\s]+/|/home/[^/\s]+/|[A-Z]:\\+Users\\+[^\\\s]+\\+)")
+_CUSTOMER_VALUE = re.compile(
+    r"(?i)\b(?:customer|client)[_-](?:name|email|id)\b\s*[:=]\s*['\"][^'\"]+['\"]"
+)
+_INTERNAL_PRODUCT_MARKER = re.compile(r"(?i)\bsynaptic\b")
 _SECRET_NAME = re.compile(r"(?i)(?:^|[_\-.])(api[_-]?key|token|secret|password|private[_-]?key|credential)(?:[_\-.]|$)")
 
 
-def _member_violation(name: str) -> str | None:
+def _member_violation(info: zipfile.ZipInfo) -> str | None:
+    name = info.filename
     normalized = name.replace("\\", "/")
     path = PurePosixPath(normalized)
     parts = [part.lower() for part in path.parts]
@@ -34,7 +48,7 @@ def _member_violation(name: str) -> str | None:
         return "empty archive path"
     if parts[0] == "omega":
         pass
-    elif re.fullmatch(r"omega[-_]memory[-_].+\.dist-info", parts[0]):
+    elif parts[0] == _EXPECTED_DIST_INFO:
         pass
     else:
         return "member is outside the Core package or standard distribution metadata"
@@ -47,6 +61,11 @@ def _member_violation(name: str) -> str | None:
         return "database or log file"
     if _SECRET_NAME.search(filename):
         return "secret-like filename"
+    unix_mode = info.external_attr >> 16
+    if unix_mode and stat.S_ISLNK(unix_mode):
+        return "symbolic link"
+    if info.flag_bits & 0x1:
+        return "encrypted archive member"
     return None
 
 
@@ -58,22 +77,62 @@ def _content_violation(payload: bytes) -> str | None:
         return "unrecognized non-text payload"
     if _PERSONAL_PATH.search(text):
         return "personal absolute path in payload"
+    if _INTERNAL_PRODUCT_MARKER.search(text):
+        return "internal-only product marker in payload"
+    if _CUSTOMER_VALUE.search(text):
+        return "customer-like value in payload"
     if _SECRET_VALUE.search(text) or _PRIVATE_KEY.search(text) or _AWS_KEY.search(text):
         return "secret-like value in payload"
     return None
+
+
+def _metadata_violations(archive: zipfile.ZipFile, names: list[str]) -> list[str]:
+    violations: list[str] = []
+    metadata_name = f"{_EXPECTED_DIST_INFO}/METADATA"
+    if names.count(metadata_name) != 1:
+        return ["wheel must contain exactly one expected Core METADATA file"]
+    metadata = BytesParser().parsebytes(archive.read(metadata_name))
+    if metadata.get("Name") != EXPECTED_NAME:
+        violations.append(f"metadata Name must be {EXPECTED_NAME}")
+    if metadata.get("Version") != EXPECTED_VERSION:
+        violations.append(f"metadata Version must be {EXPECTED_VERSION}")
+    if metadata.get("License-Expression") != "Apache-2.0":
+        violations.append("metadata License-Expression must be Apache-2.0")
+    if metadata.get("Requires-Python") != ">=3.11":
+        violations.append("metadata Requires-Python must be >=3.11")
+    classifiers = metadata.get_all("Classifier", [])
+    apache_classifier = "License :: OSI Approved :: Apache Software License"
+    if apache_classifier not in classifiers:
+        violations.append("metadata must contain the Apache Software License classifier")
+    for raw_requirement in metadata.get_all("Requires-Dist", []):
+        match = re.match(r"\s*([A-Za-z0-9_.-]+)", raw_requirement)
+        package = re.sub(r"[-_.]+", "-", match.group(1)).lower() if match else ""
+        if package in {"omega-memory-pro", "omega-platform"}:
+            violations.append(f"metadata contains forbidden private dependency {package}")
+    entry_name = f"{_EXPECTED_DIST_INFO}/entry_points.txt"
+    if names.count(entry_name) != 1:
+        violations.append("wheel must contain exactly one expected entry_points.txt")
+    else:
+        entry_text = archive.read(entry_name).decode("utf-8", errors="replace")
+        if "[console_scripts]" not in entry_text or "omega = omega.cli:main" not in entry_text:
+            violations.append("wheel is missing the expected Core console entry point")
+    return violations
 
 
 def verify_core_wheel(wheel: str | Path) -> list[str]:
     """Return privacy-boundary violations after inspecting *wheel* without execution."""
     path = Path(wheel)
     violations: list[str] = []
-    if path.suffix != ".whl" or not path.is_file():
-        return ["expected an existing .whl file"]
+    if path.name != _EXPECTED_FILENAME or not path.is_file():
+        return [f"expected the {_EXPECTED_FILENAME} release candidate"]
     try:
         with zipfile.ZipFile(path) as archive:
+            names = archive.namelist()
+            if len(names) != len(set(names)):
+                violations.append("wheel contains duplicate member names")
             for info in archive.infolist():
                 name = info.filename
-                violation = _member_violation(name)
+                violation = _member_violation(info)
                 if violation:
                     violations.append(f"member {name!r}: {violation}")
                     continue
@@ -85,6 +144,7 @@ def verify_core_wheel(wheel: str | Path) -> list[str]:
                 payload_violation = _content_violation(archive.read(info))
                 if payload_violation:
                     violations.append(f"member {name!r}: {payload_violation}")
+            violations.extend(_metadata_violations(archive, names))
     except (OSError, zipfile.BadZipFile) as error:
         return [f"unreadable wheel: {error}"]
     return violations

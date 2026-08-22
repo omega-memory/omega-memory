@@ -22,6 +22,36 @@ _SPEC.loader.exec_module(release)
 _VERIFIER = Path(__file__).resolve().parents[1] / "scripts" / "verify_core_release_artifact.py"
 
 
+def _write_exact_core_wheel(
+    path: Path,
+    *,
+    extra_members: dict[str, str | bytes] | None = None,
+    name: str = "omega-memory",
+    version: str = "1.5.13",
+    license_expression: str = "Apache-2.0",
+    requires_python: str = ">=3.11",
+) -> None:
+    metadata = (
+        "Metadata-Version: 2.4\n"
+        f"Name: {name}\n"
+        f"Version: {version}\n"
+        f"License-Expression: {license_expression}\n"
+        "Classifier: License :: OSI Approved :: Apache Software License\n"
+        f"Requires-Python: {requires_python}\n"
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("omega/__init__.py", '__version__ = "1.5.13"\n')
+        archive.writestr("omega/pure.py", "raise RuntimeError('must not execute')\n")
+        archive.writestr("omega_memory-1.5.13.dist-info/METADATA", metadata)
+        archive.writestr(
+            "omega_memory-1.5.13.dist-info/entry_points.txt",
+            "[console_scripts]\nomega = omega.cli:main\n",
+        )
+        archive.writestr("omega_memory-1.5.13.dist-info/WHEEL", "Wheel-Version: 1.0\n")
+        for member, content in (extra_members or {}).items():
+            archive.writestr(member, content)
+
+
 def _write_wheel(path: Path, *, extra_members: dict[str, str] | None = None, dependency: str | None = None) -> None:
     metadata = "Metadata-Version: 2.4\nName: omega-memory\nVersion: 9.9.9\n"
     if dependency:
@@ -101,6 +131,11 @@ def test_boundary_rejects_private_distribution_dependency(tmp_path, artifact):
         ("logs/hooks.log", ""),
         ("results/audit.json", ""),
         ("omega/private.py", "/Users/singularityjason/.omega/omega.db"),
+        ("omega/private.py", "/Users/another-user/.omega/omega.db"),
+        ("omega/private.py", "/home/private-user/.omega/omega.db"),
+        ("omega/private.py", r"C:\Users\private-user\.omega\omega.db"),
+        ("omega/private.py", "synaptic release configuration"),
+        ("omega/private.py", 'customer_email = "private.person@paid.invalid"'),
         ("omega/private.py", "api_key = super-secret-value-123"),
         ("omega/token.txt", ""),
         ("omega/settings.yaml", "data_path: /Users/singularityjason/.omega/omega.db"),
@@ -109,8 +144,8 @@ def test_boundary_rejects_private_distribution_dependency(tmp_path, artifact):
     ],
 )
 def test_core_artifact_verifier_rejects_private_members_and_content(tmp_path, member, content):
-    wheel = tmp_path / "omega_memory-9.9.9-py3-none-any.whl"
-    _write_wheel(wheel, extra_members={member: content})
+    wheel = tmp_path / "omega_memory-1.5.13-py3-none-any.whl"
+    _write_exact_core_wheel(wheel, extra_members={member: content})
 
     result = subprocess.run(
         [sys.executable, str(_VERIFIER), str(wheel)],
@@ -123,8 +158,8 @@ def test_core_artifact_verifier_rejects_private_members_and_content(tmp_path, me
 
 
 def test_core_artifact_verifier_accepts_core_members_without_executing_them(tmp_path):
-    wheel = tmp_path / "omega_memory-9.9.9-py3-none-any.whl"
-    _write_wheel(wheel, extra_members={"omega/pure.py": "raise RuntimeError('must not execute')"})
+    wheel = tmp_path / "omega_memory-1.5.13-py3-none-any.whl"
+    _write_exact_core_wheel(wheel)
 
     result = subprocess.run(
         [sys.executable, str(_VERIFIER), str(wheel)],
@@ -134,3 +169,58 @@ def test_core_artifact_verifier_accepts_core_members_without_executing_them(tmp_
 
     assert result.returncode == 0, result.stderr
     assert "OK: inspected" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        "omega_memory_pro-1.5.10.dist-info/METADATA",
+        "omega_memory-1.5.12.dist-info/RECORD",
+        "unrelated-1.0.dist-info/METADATA",
+    ],
+)
+def test_core_artifact_verifier_rejects_every_other_distribution_root(tmp_path, member):
+    wheel = tmp_path / "omega_memory-1.5.13-py3-none-any.whl"
+    _write_exact_core_wheel(wheel, extra_members={member: "Metadata-Version: 2.4\n"})
+
+    result = subprocess.run([sys.executable, str(_VERIFIER), str(wheel)], capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert member in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("name", "version", "license_expression", "requires_python"),
+    [
+        ("omega-memory-pro", "1.5.13", "Apache-2.0", ">=3.11"),
+        ("omega-memory", "1.5.12", "Apache-2.0", ">=3.11"),
+        ("omega-memory", "1.5.13", "LicenseRef-Proprietary", ">=3.11"),
+        ("omega-memory", "1.5.13", "Apache-2.0", ">=3.12"),
+    ],
+)
+def test_core_artifact_verifier_requires_exact_metadata(
+    tmp_path, name, version, license_expression, requires_python
+):
+    wheel = tmp_path / "omega_memory-1.5.13-py3-none-any.whl"
+    _write_exact_core_wheel(
+        wheel,
+        name=name,
+        version=version,
+        license_expression=license_expression,
+        requires_python=requires_python,
+    )
+
+    result = subprocess.run([sys.executable, str(_VERIFIER), str(wheel)], capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert "Core artifact privacy violation" in result.stderr
+
+
+def test_core_artifact_verifier_requires_exact_candidate_filename(tmp_path):
+    wheel = tmp_path / "omega_memory-1.5.13-py3-none-macosx_11_0_arm64.whl"
+    _write_exact_core_wheel(wheel)
+
+    result = subprocess.run([sys.executable, str(_VERIFIER), str(wheel)], capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert "release candidate" in result.stderr
