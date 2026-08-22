@@ -4,9 +4,6 @@ import math
 import pytest
 from datetime import datetime, timedelta, timezone
 
-from omega.sqlite_store import SQLiteStore
-
-
 # ============================================================================
 # Fixture: fresh store per test
 # ============================================================================
@@ -68,14 +65,12 @@ def test_old_memory_near_floor():
     old_date = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()
 
     # "memory" type has lambda=0.02, so after 365 days: exp(-0.02*365) ≈ 0.0007
-    # Never-accessed memories use _DECAY_FLOOR_NEVER_ACCESSED (0.15)
-    # Accessed memories use _DECAY_FLOOR (0.35)
+    # Access history no longer changes decay; both use the same floor.
     factor = store._compute_decay_factor("memory", None, old_date, access_count=0)
     assert factor == store._DECAY_FLOOR_NEVER_ACCESSED, f"Expected floor {store._DECAY_FLOOR_NEVER_ACCESSED}, got {factor}"
 
-    # With access_count > 0, should use the higher floor
     factor_accessed = store._compute_decay_factor("memory", None, old_date, access_count=1)
-    assert factor_accessed == store._DECAY_FLOOR, f"Expected floor {store._DECAY_FLOOR}, got {factor_accessed}"
+    assert factor_accessed == factor
 
 
 # ============================================================================
@@ -93,9 +88,8 @@ def test_never_accessed_uses_created_at():
     factor = store._compute_decay_factor("memory", None, old_date, access_count=0)
     assert factor == store._DECAY_FLOOR_NEVER_ACCESSED
 
-    # With access_count > 0, uses higher floor (0.35)
     factor_accessed = store._compute_decay_factor("memory", None, old_date, access_count=1)
-    assert factor_accessed == store._DECAY_FLOOR
+    assert factor_accessed == factor
 
 
 # ============================================================================
@@ -113,9 +107,8 @@ def test_floor_enforced():
     assert factor == store._DECAY_FLOOR_NEVER_ACCESSED
     assert factor > 0, "Decay factor should never be zero"
 
-    # Accessed uses the higher floor
     factor_accessed = store._compute_decay_factor("session_summary", None, ancient, access_count=1)
-    assert factor_accessed == store._DECAY_FLOOR
+    assert factor_accessed == factor
 
 
 # ============================================================================

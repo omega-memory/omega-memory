@@ -290,36 +290,41 @@ class TestDecayCurves:
 
 
 class TestPriorityFactor:
-    """Higher priority memories should rank above lower priority ones."""
+    """Priority breaks semantic ties without manufacturing relevance."""
 
     def test_high_priority_ranks_above_low(self):
-        """Priority 5 should rank above priority 1 with same type."""
-        store = _get_store()
-        # Insert high-priority first (FTS5 disadvantage) so priority alone drives ranking
-        high_id = _insert_memory(
-            store,
-            "Redis cluster caching strategy for session data replication",
-            "decision",
-            priority=5,
-        )
-        _set_metadata(store, high_id, priority=5)
-        low_id = _insert_memory(
-            store,
-            "Redis cluster caching strategy for session data persistence",
-            "decision",
+        """Priority 5 wins only when semantic evidence is equal."""
+        from omega.sqlite_store._query import _score_bounded_metadata
+
+        low, _ = _score_bounded_metadata(
+            semantic_score=0.8,
+            best_semantic_score=0.8,
             priority=1,
+            access_count=0,
         )
-        _set_metadata(store, low_id, priority=1)
-        ids = _query_ids(store, "Redis cluster caching session strategy data")
-        assert high_id in ids and low_id in ids, f"Both should be returned, got {ids}"
-        assert ids.index(high_id) < ids.index(low_id), "Priority 5 should rank above priority 1"
+        high, _ = _score_bounded_metadata(
+            semantic_score=0.8,
+            best_semantic_score=0.8,
+            priority=5,
+            access_count=0,
+        )
+
+        assert high > low
 
     def test_priority_factor_math(self):
-        """Priority factor formula: 0.7 + (priority * 0.08)."""
-        assert 0.7 + 1 * 0.08 == pytest.approx(0.78)
-        assert 0.7 + 3 * 0.08 == pytest.approx(0.94)
-        assert 0.7 + 5 * 0.08 == pytest.approx(1.10)
-        assert (0.7 + 5 * 0.08) > (0.7 + 1 * 0.08)
+        """Priority contributes nothing outside the semantic near-tie band."""
+        from omega.sqlite_store._query import _score_bounded_metadata
+
+        score, reasons = _score_bounded_metadata(
+            semantic_score=0.78,
+            best_semantic_score=0.8,
+            priority=5,
+            access_count=500,
+        )
+
+        assert score == pytest.approx(0.78)
+        assert reasons["priority_contribution"] == 0.0
+        assert reasons["access_contribution"] == 0.0
 
 
 # ============================================================================

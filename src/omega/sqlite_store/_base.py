@@ -207,8 +207,8 @@ class SQLiteStoreBase:
     }
 
     # ------------------------------------------------------------------
-    # Decay curves — memories lose relevance over time unless accessed
-    # factor = max(floor, exp(-lambda * days_since_last_access))
+    # Decay curves use creation time only. Explicit access remains audit data
+    # and a tiny capped near-tie signal in the query layer.
     # ------------------------------------------------------------------
     _DECAY_LAMBDAS = {
         "constraint": 0.0,              # No decay — permanent
@@ -225,8 +225,8 @@ class SQLiteStoreBase:
         "session_summary": 0.05,       # 50% at ~14 days
         "coordination_snapshot": 0.10,  # 50% at ~7 days
     }
-    _DECAY_FLOOR = 0.35  # Floor for memories with access_count > 0
-    _DECAY_FLOOR_NEVER_ACCESSED = 0.15  # Lower floor for never-accessed (reduces zombie noise)
+    _DECAY_FLOOR = 0.35  # Legacy compatibility constant; not access-selected in ranking
+    _DECAY_FLOOR_NEVER_ACCESSED = 0.15  # Universal decay floor
 
     # Abstention thresholds — minimum quality for results to survive
     _MIN_VEC_SIMILARITY = 0.60  # Minimum cosine similarity for vec results (raised from 0.50)
@@ -783,14 +783,14 @@ class SQLiteStoreBase:
     # ------------------------------------------------------------------
 
     def _refresh_hot_cache(self) -> None:
-        """Refresh the hot memory cache (#2) with top memories by access_count."""
+        """Refresh the fast candidate cache without popularity selection."""
         try:
             rows = self._conn.execute(
                 """SELECT node_id, content, metadata, created_at,
                           access_count, last_accessed, ttl_seconds
-                   FROM memories WHERE access_count > 0
-                     AND json_extract(metadata, '$.superseded') IS NULL
-                   ORDER BY access_count DESC LIMIT ?""",
+                   FROM memories
+                   WHERE json_extract(metadata, '$.superseded') IS NULL
+                   ORDER BY created_at DESC LIMIT ?""",
                 (_HOT_CACHE_SIZE,),
             ).fetchall()
             new_hot: Dict[str, MemoryResult] = {}

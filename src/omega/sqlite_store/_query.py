@@ -33,6 +33,91 @@ STRONG_SIGNAL_GAP = float(os.environ.get("OMEGA_STRONG_SIGNAL_GAP", "0.15"))
 ADAPTIVE_RETRY_THRESHOLD = float(os.environ.get("OMEGA_ADAPTIVE_RETRY_THRESHOLD", "0.3"))
 ADAPTIVE_RETRY_RELAXATION = float(os.environ.get("OMEGA_ADAPTIVE_RETRY_RELAXATION", "0.6"))
 
+# Calibrated against the deterministic reliability grid.  Priority and access
+# are permitted to break only genuine semantic near-ties.  Their combined
+# maximum (0.0075) remains below the 0.01 semantic band, so metadata cannot
+# promote a clearly weaker candidate across that boundary.
+SEMANTIC_NEAR_TIE_DELTA = 0.01
+PRIORITY_MAX_ADDITIVE = 0.005
+ACCESS_MAX_ADDITIVE = 0.0025
+ACCESS_SCORING_CAP = 3
+QUALITY_MAX_ADDITIVE = 0.0025
+
+
+def _score_bounded_metadata(
+    *,
+    semantic_score: float,
+    best_semantic_score: float,
+    priority: int,
+    access_count: int,
+    semantic_tie_delta: float = SEMANTIC_NEAR_TIE_DELTA,
+    priority_max_additive: float = PRIORITY_MAX_ADDITIVE,
+    access_max_additive: float = ACCESS_MAX_ADDITIVE,
+    access_scoring_cap: int = ACCESS_SCORING_CAP,
+) -> Tuple[float, Dict[str, float | int | bool]]:
+    """Apply calibrated metadata only inside a semantic near-tie band."""
+    semantic = max(0.0, min(1.0, float(semantic_score)))
+    best_semantic = max(0.0, min(1.0, float(best_semantic_score)))
+    near_tie = (best_semantic - semantic) <= max(0.0, semantic_tie_delta) + 1e-12
+
+    bounded_priority = max(1, min(5, int(priority)))
+    bounded_access_cap = max(1, int(access_scoring_cap))
+    bounded_access = max(0, min(int(access_count), bounded_access_cap))
+    priority_contribution = 0.0
+    access_contribution = 0.0
+    if near_tie:
+        priority_contribution = (
+            (bounded_priority - 1) / 4.0 * max(0.0, priority_max_additive)
+        )
+        access_contribution = (
+            bounded_access / bounded_access_cap * max(0.0, access_max_additive)
+        )
+
+    final_score = semantic + priority_contribution + access_contribution
+    reasons: Dict[str, float | int | bool] = {
+        "semantic": round(semantic, 6),
+        "semantic_best": round(best_semantic, 6),
+        "near_tie": near_tie,
+        "priority": bounded_priority,
+        "priority_contribution": round(priority_contribution, 6),
+        "access_count": max(0, int(access_count)),
+        "bounded_access_count": bounded_access,
+        "access_contribution": round(access_contribution, 6),
+        "final": round(final_score, 6),
+    }
+    return final_score, reasons
+
+
+def _fuse_semantic_channels(
+    ranked_lists: List[List[Tuple[str, float]]],
+    weights: Optional[List[float]] = None,
+) -> Dict[str, float]:
+    """Blend raw retrieval relevance, preserving score distance between ranks."""
+    if not ranked_lists:
+        return {}
+    if weights is None:
+        weights = [1.0] * len(ranked_lists)
+    total_weight = sum(
+        max(0.0, weights[index])
+        for index, ranked in enumerate(ranked_lists)
+        if ranked
+    )
+    if total_weight <= 0:
+        return {}
+
+    scores: Dict[str, float] = {}
+    for channel_index, ranked in enumerate(ranked_lists):
+        weight = max(0.0, weights[channel_index])
+        if weight <= 0:
+            continue
+        channel_best: Dict[str, float] = {}
+        for doc_id, raw_score in ranked:
+            bounded = max(0.0, min(1.0, float(raw_score)))
+            channel_best[doc_id] = max(channel_best.get(doc_id, 0.0), bounded)
+        for doc_id, raw_score in channel_best.items():
+            scores[doc_id] = scores.get(doc_id, 0.0) + weight * raw_score
+    return {doc_id: score / total_weight for doc_id, score in scores.items()}
+
 
 class HardConstraints:
     """The caller-supplied constraints a candidate must satisfy to be returned.
@@ -363,10 +448,11 @@ class QueryMixin:
         text_ranked: List[Tuple[str, float]] = []
         temporal_ranked: List[Tuple[str, float]] = []
 
-        # Seed with hot cache results (#2) — bypass RRF, merge later
+        # Hot-tier rows are candidate hydration only.  They never receive a
+        # score merely because they were cached; retrieval channels must earn
+        # their place through semantic or lexical relevance.
         for hr in hot_results:
             all_results[hr.id] = hr
-            node_scores[hr.id] = hr.relevance * 0.8
 
         # The caller's hard constraints, in one object, so every phase that can
         # introduce candidates is held to the same rules Phases 4 and 5 apply.
@@ -769,18 +855,21 @@ class QueryMixin:
         pw_ctx: float,
         perspective: Optional[str],
     ) -> None:
-        """Phase 3: Reciprocal Rank Fusion + metadata scoring + word/preference boosts."""
-        # RRF fusion
-        rrf_channels = [vec_ranked, text_ranked]
-        rrf_weights = [pw_vec, pw_text]
+        """Phase 3: semantic fusion plus bounded near-tie metadata scoring."""
+        semantic_channels = [vec_ranked, text_ranked]
+        semantic_weights = [pw_vec, pw_text]
         if temporal_ranked:
-            rrf_channels.append(temporal_ranked)
-            rrf_weights.append(1.2)  # Temporal channel weight
+            semantic_channels.append(temporal_ranked)
+            semantic_weights.append(1.2)  # Temporal channel weight
 
-        rrf_scores = self._rrf_fuse(rrf_channels, weights=rrf_weights)
+        semantic_scores = _fuse_semantic_channels(
+            semantic_channels, weights=semantic_weights
+        )
+        best_semantic = max(semantic_scores.values(), default=0.0)
 
-        # Apply metadata factors on RRF base scores
-        for nid, rrf_score in rrf_scores.items():
+        # Metadata can distinguish near-equal matches, but cannot manufacture
+        # relevance for a candidate outside the calibrated semantic band.
+        for nid, semantic_score in semantic_scores.items():
             if nid not in all_results:
                 continue
             node = all_results[nid]
@@ -792,19 +881,38 @@ class QueryMixin:
             fb_score = node.metadata.get("feedback_score", 0)
             fb_factor = self._compute_fb_factor(fb_score)
             priority = node.metadata.get("priority", 3)
-            priority_factor = 0.7 + (priority * 0.08)
             _la = node.last_accessed.isoformat() if node.last_accessed else None
             _ca = node.created_at.isoformat() if node.created_at else None
             decay_factor = self._compute_decay_factor(event_type, _la, _ca, node.access_count or 0)
             # Thompson sampling boost (outcome-correlated learning)
             thompson_boost = self._get_thompson_boost(event_type)
-            score = rrf_score * type_weight * fb_factor * priority_factor * decay_factor * thompson_boost
             # Consolidation quality boost (compacted knowledge nodes)
             cq = node.metadata.get("consolidation_quality", 0)
-            if cq > 0:
-                score *= 1.0 + min(cq, 3.0) * 0.1  # up to 1.3x
-            # Merge with hot cache scores (take max)
-            node_scores[nid] = max(node_scores.get(nid, 0.0), score)
+            consolidation_factor = 1.0 + min(max(cq, 0), 3.0) * 0.1
+            score, reasons = _score_bounded_metadata(
+                semantic_score=semantic_score,
+                best_semantic_score=best_semantic,
+                priority=priority,
+                access_count=node.access_count or 0,
+            )
+            quality_factor = (
+                type_weight
+                * fb_factor
+                * decay_factor
+                * thompson_boost
+                * consolidation_factor
+            )
+            quality_contribution = 0.0
+            if reasons["near_tie"]:
+                quality_contribution = max(
+                    -QUALITY_MAX_ADDITIVE,
+                    min(QUALITY_MAX_ADDITIVE, (quality_factor - 1.0) * QUALITY_MAX_ADDITIVE),
+                )
+                score += quality_contribution
+            reasons["quality_contribution"] = round(quality_contribution, 6)
+            reasons["final"] = round(score, 6)
+            node.metadata["_ranking_reasons"] = reasons
+            node_scores[nid] = score
 
         # Word/tag overlap boost
         _query_words = [w for w in query_text.lower().split() if len(w) > 2]
@@ -1501,22 +1609,6 @@ class QueryMixin:
             while len(self._recent_query_context) > self._QUERY_CONTEXT_MAX:
                 self._recent_query_context.popitem(last=False)
 
-        # --- Batch access_count + retrieval_count increment for returned results ---
-        if deduped:
-            _returned_ids = [n.id for n in deduped]
-            _now = datetime.now(timezone.utc).isoformat()
-            try:
-                ph = ",".join("?" * len(_returned_ids))
-                self._conn.execute(
-                    f"UPDATE memories SET access_count = access_count + 1, "
-                    f"retrieval_count = COALESCE(retrieval_count, 0) + 1, "
-                    f"last_accessed = ? WHERE node_id IN ({ph})",
-                    [_now] + _returned_ids,
-                )
-                self._commit()
-            except Exception:
-                logger.debug("access_count batch update failed", exc_info=True)
-
         # Annotate results with embedding backend for transparency
         try:
             from omega.embedding import get_active_backend
@@ -1824,20 +1916,17 @@ class QueryMixin:
                                access_count: int = 0) -> float:
         """Compute time-decay factor for query scoring.
 
-        Uses exponential decay: factor = max(floor, exp(-lambda * days))
-        Protected types (lambda=0) return 1.0 immediately.
-        For decisions, each access reduces lambda by 15% (floor 0.002, ~346-day half-life).
+        Uses exponential decay: factor = max(floor, exp(-lambda * days)).
+        Protected types (lambda=0) return 1.0 immediately.  Access history is
+        deliberately excluded so retrieval cannot make itself decay slower.
         """
         lam = self._DECAY_LAMBDAS.get(event_type, 0.02)
         if lam == 0.0:
             return 1.0
 
-        # Access-aware decay: well-used decisions persist longer
-        if event_type == "decision" and access_count > 0:
-            lam = max(0.002, lam * (0.85 ** min(access_count, 10)))
-
-        # Use last_accessed if available, else created_at
-        ref_str = last_accessed or created_at
+        # Decay from creation time.  last_accessed is retained for audit and
+        # direct-retrieval UX, but must not reinforce future ranking.
+        ref_str = created_at
         if not ref_str:
             return 1.0
 
@@ -1848,8 +1937,7 @@ class QueryMixin:
             days = (datetime.now(timezone.utc) - ref_dt).total_seconds() / 86400.0
             if days <= 0:
                 return 1.0
-            floor = self._DECAY_FLOOR if access_count > 0 else self._DECAY_FLOOR_NEVER_ACCESSED
-            return max(floor, math.exp(-lam * days))
+            return max(self._DECAY_FLOOR_NEVER_ACCESSED, math.exp(-lam * days))
         except Exception as e:
             logger.debug("Decay computation failed: %s", e)
             return 1.0

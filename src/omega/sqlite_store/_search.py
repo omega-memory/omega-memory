@@ -879,7 +879,7 @@ class SearchMixin:
                         f"""SELECT node_id, content, metadata, created_at,
                                    access_count, last_accessed, ttl_seconds
                             FROM memories WHERE ({conditions})
-                            ORDER BY access_count DESC LIMIT ?""",
+                            ORDER BY created_at DESC LIMIT ?""",
                         params,
                     ).fetchall()
                     seen_ids = {m[1].id for m in matches}
@@ -935,14 +935,14 @@ class SearchMixin:
         return results
 
     def _refresh_hot_cache(self) -> None:
-        """Refresh the hot memory cache (#2) with top memories by access_count."""
+        """Refresh the fast candidate cache without popularity selection."""
         try:
             rows = self._conn.execute(
                 """SELECT node_id, content, metadata, created_at,
                           access_count, last_accessed, ttl_seconds
-                   FROM memories WHERE access_count > 0
-                     AND json_extract(metadata, '$.superseded') IS NULL
-                   ORDER BY access_count DESC LIMIT ?""",
+                   FROM memories
+                   WHERE json_extract(metadata, '$.superseded') IS NULL
+                   ORDER BY created_at DESC LIMIT ?""",
                 (_HOT_CACHE_SIZE,),
             ).fetchall()
             new_hot: Dict[str, MemoryResult] = {}
@@ -965,8 +965,8 @@ class SearchMixin:
             try:
                 rows = self._conn.execute(
                     """SELECT content FROM memories
-                       WHERE project = ? AND access_count > 0
-                       ORDER BY access_count DESC LIMIT 100""",
+                       WHERE project = ?
+                       ORDER BY created_at DESC LIMIT 100""",
                     (project_path,),
                 ).fetchall()
                 import re as _re
@@ -991,7 +991,7 @@ class SearchMixin:
                               access_count, last_accessed, ttl_seconds
                        FROM memories WHERE LOWER(content) LIKE ?
                        AND (project = ? OR project IS NULL)
-                       ORDER BY access_count DESC LIMIT 10""",
+                       ORDER BY created_at DESC LIMIT 10""",
                     (f"%{stem.lower()}%", project_path),
                 ).fetchall()
                 results = []

@@ -1,0 +1,86 @@
+{
+  "customer_style_cases": [
+    {
+      "name": "certificate_rotation_policy",
+      "candidates": [
+        {"id": "canonical", "semantic": 0.91, "priority": 1, "access_count": 0},
+        {"id": "stale", "semantic": 0.44, "priority": 5, "access_count": 64}
+      ],
+      "expected": "canonical"
+    },
+    {
+      "name": "database_lock_recovery",
+      "candidates": [
+        {"id": "canonical", "semantic": 0.84, "priority": 2, "access_count": 1},
+        {"id": "stale", "semantic": 0.51, "priority": 5, "access_count": 500}
+      ],
+      "expected": "canonical"
+    },
+    {
+      "name": "coordination_claim_contract",
+      "candidates": [
+        {"id": "canonical", "semantic": 0.78, "priority": 1, "access_count": 0},
+        {"id": "stale", "semantic": 0.63, "priority": 5, "access_count": 1000}
+      ],
+      "expected": "canonical"
+    },
+    {
+      "name": "document_index_state",
+      "candidates": [
+        {"id": "canonical", "semantic": 0.88, "priority": 2, "access_count": 2},
+        {"id": "stale", "semantic": 0.57, "priority": 5, "access_count": 90}
+      ],
+      "expected": "canonical"
+    },
+    {
+      "name": "supersede_direction",
+      "candidates": [
+        {"id": "canonical", "semantic": 0.82, "priority": 1, "access_count": 0},
+        {"id": "stale", "semantic": 0.69, "priority": 5, "access_count": 250}
+      ],
+      "expected": "canonical"
+    },
+    {
+      "name": "priority_edit_history",
+      "candidates": [
+        {"id": "canonical", "semantic": 0.74, "priority": 1, "access_count": 0},
+        {"id": "stale", "semantic": 0.61, "priority": 5, "access_count": 64}
+      ],
+      "expected": "canonical"
+    }
+  ],
+  "adversarial_cases": [
+    {
+      "name": "priority_breaks_exact_semantic_tie",
+      "candidates": [
+        {"id": "low_priority", "semantic": 0.8, "priority": 1, "access_count": 0},
+        {"id": "high_priority", "semantic": 0.8, "priority": 5, "access_count": 0}
+      ],
+      "expected": "high_priority"
+    },
+    {
+      "name": "bounded_access_breaks_remaining_tie",
+      "candidates": [
+        {"id": "unused", "semantic": 0.8, "priority": 3, "access_count": 0},
+        {"id": "used", "semantic": 0.8, "priority": 3, "access_count": 3}
+      ],
+      "expected": "used"
+    },
+    {
+      "name": "historical_extreme_is_no_stronger_than_cap",
+      "candidates": [
+        {"id": "semantic_winner", "semantic": 0.8, "priority": 3, "access_count": 3},
+        {"id": "historical_outlier", "semantic": 0.7995, "priority": 3, "access_count": 500}
+      ],
+      "expected": "semantic_winner"
+    },
+    {
+      "name": "metadata_cannot_cross_semantic_band",
+      "candidates": [
+        {"id": "semantic_winner", "semantic": 0.8, "priority": 1, "access_count": 0},
+        {"id": "metadata_winner", "semantic": 0.78, "priority": 5, "access_count": 500}
+      ],
+      "expected": "semantic_winner"
+    }
+  ]
+}

@@ -1925,6 +1925,7 @@ def query(
         elif _qconf is not None and _qconf <= 0.7:
             _conf_label = " (confidence: medium)"
         output = f"Results: {len(results)}{_conf_label}\n"
+        rendered_ids = {node.id for node in results}
 
         if results:
             for i, node in enumerate(results[:limit], 1):
@@ -1968,6 +1969,7 @@ def query(
                     for cr in matching_constraints[:3]:
                         preview = cr.content[:150]
                         output += f"- [`{cr.id}`] {preview}\n"
+                        rendered_ids.add(cr.id)
             except Exception as e:
                 logger.debug("Constraint injection failed: %s", e)
 
@@ -1999,6 +2001,7 @@ def query(
                         for pr in matching_prefs[:3]:
                             preview = pr.content[:150]
                             output += f"- [`{pr.id}`] {preview}\n"
+                            rendered_ids.add(pr.id)
             except Exception as e:
                 logger.debug("Preference injection failed: %s", e)
 
@@ -2009,6 +2012,9 @@ def query(
                 output += "\n**Note:** Semantic search is degraded (embedding model unavailable). Results are text-match only.\n"
         except Exception as e:
             logger.warning("Embedding degradation check failed: %s", e)
+
+        for memory_id in rendered_ids:
+            db.record_memory_access(memory_id)
 
         logger.info(f"Query '{query_text[:30]}...' returned {len(results)} results")
         return output
@@ -2179,6 +2185,8 @@ def query_structured(
             except Exception as e:
                 logger.debug("Preference injection failed (structured): %s", e)
 
+        for memory_id in {item["id"] for item in structured if item.get("id")}:
+            db.record_memory_access(memory_id)
         return structured
 
     except Exception as e:
@@ -3006,6 +3014,7 @@ def get_cross_session_lessons(
                     "lesson_id": meta.get("lesson_id") or node.id,
                     "session_id": node_session,
                     "access_count": getattr(node, "access_count", 0) or 0,
+                    "relevance": getattr(node, "relevance", 0.0),
                     "created_at": node.created_at.isoformat() if node.created_at else "",
                     "verified_count": 0,
                     "_key": key,
@@ -3023,7 +3032,7 @@ def get_cross_session_lessons(
         lesson.pop("_key", None)
 
     lessons.sort(
-        key=lambda lesson: (lesson.get("verified_count", 0), lesson.get("access_count", 0)),
+        key=lambda lesson: (lesson.get("verified_count", 0), lesson.get("relevance", 0.0)),
         reverse=True,
     )
 
@@ -3399,6 +3408,7 @@ def get_cross_project_lessons(
                     "lesson_id": meta.get("lesson_id") or node.id,
                     "session_id": meta.get("session_id", ""),
                     "access_count": getattr(node, "access_count", 0) or 0,
+                    "relevance": getattr(node, "relevance", 0.0),
                     "created_at": node.created_at.isoformat() if node.created_at else "",
                     "projects_seen": 1,
                     "_key": key,
@@ -3415,9 +3425,9 @@ def get_cross_project_lessons(
         lesson["cross_project"] = proj_count > 1
         lesson.pop("_key", None)
 
-    # Sort by cross-project occurrence, then access count
+    # Cross-project corroboration is primary; semantic relevance breaks ties.
     lessons.sort(
-        key=lambda lesson: (lesson.get("projects_seen", 0), lesson.get("access_count", 0)),
+        key=lambda lesson: (lesson.get("projects_seen", 0), lesson.get("relevance", 0.0)),
         reverse=True,
     )
 

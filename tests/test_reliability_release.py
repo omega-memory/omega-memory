@@ -8,6 +8,9 @@ by the shared test fixture.
 import asyncio
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
+from itertools import product
+from pathlib import Path
 
 import pytest
 
@@ -45,6 +48,34 @@ def _set_memory_status_representations(store, memory_id, sql_status, metadata_st
         (sql_status, json.dumps(metadata), memory_id),
     )
     store._conn.commit()
+
+
+def _ranking_cases():
+    fixture_path = Path(__file__).parent / "fixtures" / "reliability_ranking_cases.json"
+    return json.loads(fixture_path.read_text())
+
+
+def _rank_case(case, settings):
+    import omega.sqlite_store._query as query_module
+
+    scorer = getattr(query_module, "_score_bounded_metadata", None)
+    assert scorer is not None, "semantic-first bounded metadata scorer is missing"
+    tie_delta, priority_delta, access_delta, access_cap = settings
+    best_semantic = max(candidate["semantic"] for candidate in case["candidates"])
+    scored = []
+    for position, candidate in enumerate(case["candidates"]):
+        score, _reasons = scorer(
+            semantic_score=candidate["semantic"],
+            best_semantic_score=best_semantic,
+            priority=candidate["priority"],
+            access_count=candidate["access_count"],
+            semantic_tie_delta=tie_delta,
+            priority_max_additive=priority_delta,
+            access_max_additive=access_delta,
+            access_scoring_cap=access_cap,
+        )
+        scored.append((score, candidate["semantic"], -position, candidate["id"]))
+    return max(scored)[-1]
 
 
 def test_supersede_marks_old_memory_and_links_replacement(handler_store):
@@ -607,6 +638,192 @@ def test_search_does_not_count_returned_results_as_accesses(store):
     assert after == before
 
 
+def test_search_and_listing_leave_all_access_fields_unchanged(store):
+    """Neither semantic discovery nor ordinary list APIs count as an access."""
+    memory_id = store.store(
+        "Read-only discovery and listing contract",
+        metadata={"event_type": "decision"},
+    )
+    before = store._conn.execute(
+        """SELECT access_count, retrieval_count, last_accessed
+           FROM memories WHERE node_id = ?""",
+        (memory_id,),
+    ).fetchone()
+
+    store.query("read only discovery listing contract", limit=5, use_cache=False)
+    store.get_recent(limit=5)
+    store.get_by_type("decision", limit=5)
+
+    after = store._conn.execute(
+        """SELECT access_count, retrieval_count, last_accessed
+           FROM memories WHERE node_id = ?""",
+        (memory_id,),
+    ).fetchone()
+    assert after == before
+
+
+def test_explicit_access_path_records_direct_retrieval(store):
+    """A direct fetch routes through the explicit access mutation API."""
+    memory_id = store.store(
+        "Direct retrieval counts as access", metadata={"event_type": "memory"}
+    )
+    recorder = getattr(store, "record_memory_access", None)
+    assert recorder is not None, "explicit record_memory_access API is missing"
+
+    node = store.get_node(memory_id)
+
+    assert node is not None
+    row = store._conn.execute(
+        "SELECT access_count, last_accessed FROM memories WHERE node_id = ?",
+        (memory_id,),
+    ).fetchone()
+    assert row[0] == 1
+    assert row[1] is not None
+
+
+def test_final_rendered_query_records_only_returned_context(handler_store, monkeypatch):
+    """The bridge records an access after a result survives final filtering."""
+    import omega.bridge as bridge
+
+    memory_id = handler_store.store(
+        "Rendered context is an explicit access", metadata={"event_type": "memory"}
+    )
+    result = handler_store.get_node(memory_id, track_access=False)
+    monkeypatch.setattr(handler_store, "query", lambda *_args, **_kwargs: [result])
+
+    output = bridge.query("rendered context", limit=1)
+
+    assert memory_id in output
+    row = handler_store._conn.execute(
+        "SELECT access_count, last_accessed FROM memories WHERE node_id = ?",
+        (memory_id,),
+    ).fetchone()
+    assert row[0] == 1
+    assert row[1] is not None
+
+
+def test_final_structured_query_records_only_returned_context(handler_store, monkeypatch):
+    """Machine-readable final context uses the same explicit access boundary."""
+    import omega.bridge as bridge
+
+    memory_id = handler_store.store(
+        "Structured context is an explicit access", metadata={"event_type": "memory"}
+    )
+    result = handler_store.get_node(memory_id, track_access=False)
+    monkeypatch.setattr(handler_store, "query", lambda *_args, **_kwargs: [result])
+
+    structured = bridge.query_structured("structured context", limit=1)
+
+    assert [item["id"] for item in structured] == [memory_id]
+    row = handler_store._conn.execute(
+        "SELECT access_count, last_accessed FROM memories WHERE node_id = ?",
+        (memory_id,),
+    ).fetchone()
+    assert row[0] == 1
+    assert row[1] is not None
+
+
+def test_hot_cache_population_does_not_select_by_access_count(store):
+    """A historically popular stale row cannot reserve a hot-cache slot."""
+    stale_id = store.store(
+        "Old popular hot cache row", metadata={"event_type": "memory"}
+    )
+    store._conn.execute(
+        """UPDATE memories SET access_count = 500, created_at = ?
+           WHERE node_id = ?""",
+        ("2020-01-01T00:00:00+00:00", stale_id),
+    )
+    for index in range(50):
+        store.store(
+            f"Recent cache candidate number {index}",
+            metadata={"event_type": "memory"},
+            skip_inference=True,
+        )
+    store._conn.commit()
+
+    store._refresh_hot_cache()
+
+    assert stale_id not in store._hot_memories
+
+
+def test_access_history_does_not_slow_decay(store):
+    """Access is a bounded tie signal, not a self-reinforcing decay input."""
+    old_date = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+
+    unused = store._compute_decay_factor("decision", None, old_date, access_count=0)
+    historical_outlier = store._compute_decay_factor(
+        "decision", None, old_date, access_count=500
+    )
+
+    assert historical_outlier == pytest.approx(unused)
+
+
+def test_cross_session_lessons_keep_semantic_order_over_access(handler_store, monkeypatch):
+    """Lesson rendering must not re-sort semantic results by popularity."""
+    import omega.bridge as bridge
+    from omega.sqlite_store import MemoryResult
+
+    semantic = MemoryResult(
+        id="semantic",
+        content="Canonical semantic lesson",
+        metadata={"event_type": "lesson_learned", "session_id": "s1"},
+        relevance=0.9,
+        access_count=0,
+    )
+    popular = MemoryResult(
+        id="popular",
+        content="Weak popular lesson",
+        metadata={"event_type": "lesson_learned", "session_id": "s2"},
+        relevance=0.4,
+        access_count=500,
+    )
+    monkeypatch.setattr(
+        handler_store, "query_by_type", lambda **_kwargs: [semantic, popular]
+    )
+
+    lessons = bridge.get_cross_session_lessons(task="semantic lesson", limit=2)
+
+    assert [lesson["lesson_id"] for lesson in lessons] == ["semantic", "popular"]
+
+
+def test_calibration_grid_selects_lowest_passing_metadata_influence():
+    """The committed constants are selected from the approved deterministic grid."""
+    import omega.sqlite_store._query as query_module
+
+    cases = _ranking_cases()
+    all_cases = cases["customer_style_cases"] + cases["adversarial_cases"]
+    grid = product(
+        (0.01, 0.02, 0.03),
+        (0.005, 0.01, 0.015),
+        (0.0, 0.0025, 0.005),
+        (3, 5, 10),
+    )
+    passing = [
+        settings
+        for settings in grid
+        if all(_rank_case(case, settings) == case["expected"] for case in all_cases)
+    ]
+    assert passing, "no approved calibration candidate passed the semantic-order gates"
+
+    selected = min(
+        passing,
+        key=lambda settings: (
+            settings[1] + settings[2],
+            settings[1],
+            settings[2],
+            settings[0],
+            settings[3],
+        ),
+    )
+    assert selected == (0.01, 0.005, 0.0025, 3)
+    assert selected == (
+        query_module.SEMANTIC_NEAR_TIE_DELTA,
+        query_module.PRIORITY_MAX_ADDITIVE,
+        query_module.ACCESS_MAX_ADDITIVE,
+        query_module.ACCESS_SCORING_CAP,
+    )
+
+
 def test_public_query_prefers_semantic_result_over_hot_high_priority_history(store, monkeypatch):
     """The public query path must not let hot/access metadata outrank relevance."""
     query_text = "semantic retrieval contract check"
@@ -661,3 +878,7 @@ def test_public_query_prefers_semantic_result_over_hot_high_priority_history(sto
     results = store.query(query_text, limit=2, use_cache=False, expand_query=False)
 
     assert results[0].id == semantic_id
+    reasons = results[0].metadata["_ranking_reasons"]
+    assert reasons["semantic"] > results[1].metadata["_ranking_reasons"]["semantic"]
+    assert reasons["priority_contribution"] == 0.0
+    assert reasons["access_contribution"] == 0.0

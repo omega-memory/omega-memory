@@ -369,15 +369,30 @@ class StoreMixin:
                 return None
 
             if track_access:
-                # Update access tracking
-                now = datetime.now(timezone.utc).isoformat()
-                self._exec(
-                    "UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE node_id = ?",
-                    (now, node_id),
-                )
-                self._commit()
+                self.record_memory_access(node_id)
 
             return self._row_to_result(row)
+
+    def record_memory_access(self, node_id: str) -> bool:
+        """Record an explicit direct retrieval or final context injection.
+
+        The audit counter remains truthful and is never rewritten.  Ranking
+        consumes only the calibrated capped portion, so extreme historical
+        values cannot create an unbounded feedback loop.
+        """
+        self._invalidate_query_cache()
+        with self._lock:
+            now = datetime.now(timezone.utc).isoformat()
+            cursor = self._exec(
+                """UPDATE memories
+                   SET access_count = access_count + 1, last_accessed = ?
+                   WHERE node_id = ?""",
+                (now, node_id),
+            )
+            if cursor.rowcount <= 0:
+                return False
+            self._commit()
+            return True
 
     def delete_node(self, node_id: str) -> bool:
         """Delete a node and its edges."""
