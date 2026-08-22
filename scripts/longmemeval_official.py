@@ -1362,6 +1362,31 @@ def compute_retrieval_recall(retrieval_log: list) -> None:
     print(f"  {'OVERALL':30s} {total_hits:3d}/{total:3d}  {overall_pct:5.1f}%")
     print()
 
+    # Rank-sensitive metrics.  Top-K recall saturates on this dataset, so these
+    # are what actually respond to a ranking change.
+    ranks = [e.get("evidence_rank") for e in retrieval_log]
+    scored = [r for r in ranks if r]
+    if scored:
+        mrr = sum(1.0 / r for r in scored) / len(ranks)
+        print(f"{'─' * 65}")
+        print("  Rank-sensitive retrieval metrics")
+        print(f"{'─' * 65}")
+        print(f"  {'MRR':30s} {mrr:.4f}")
+        for cutoff in (1, 3, 5):
+            at_k = sum(1 for r in scored if r <= cutoff)
+            print(f"  {'recall@' + str(cutoff):30s} {at_k:3d}/{len(ranks):3d}  "
+                  f"{at_k / len(ranks) * 100:5.1f}%")
+        print(f"  {'mean evidence rank':30s} {sum(scored) / len(scored):.2f}")
+        by_type: dict[str, list] = {}
+        for e in retrieval_log:
+            if e.get("evidence_rank"):
+                by_type.setdefault(e["question_type"], []).append(e["evidence_rank"])
+        for qtype in sorted(by_type):
+            rs = by_type[qtype]
+            print(f"    {qtype:28s} MRR={sum(1.0 / r for r in rs) / len(rs):.4f} "
+                  f"mean_rank={sum(rs) / len(rs):.2f}")
+        print()
+
 
 # ──────────────────────────── Main ───────────────────────────────────────────
 
@@ -1496,11 +1521,22 @@ def run_generation(args, dataset: list) -> int:
                         retrieved_sids.add(r.metadata.get("session_id", ""))
                 hit = bool(answer_sids & retrieved_sids)
 
+                # Rank of the first evidence-bearing result (1-based).
+                # Plain top-K recall saturates on this dataset and therefore
+                # cannot distinguish ranking changes; the rank can.
+                evidence_rank = None
+                for position, r in enumerate(retrieved, start=1):
+                    sid = r.metadata.get("session_id", "") if r.metadata else ""
+                    if sid in answer_sids:
+                        evidence_rank = position
+                        break
+
                 retrieval_log.append(
                     {
                         "question_id": qid,
                         "question_type": q["question_type"],
                         "retrieval_hit": hit,
+                        "evidence_rank": evidence_rank,
                         "answer_sids": list(answer_sids),
                         "retrieved_sids": list(retrieved_sids),
                     }
