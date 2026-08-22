@@ -802,15 +802,18 @@ class StoreMixin:
                     replacement_meta = (
                         json.loads(replacement_row[0]) if replacement_row[0] else {}
                     )
-                    replacement_status = (
-                        replacement_row[6]
-                        or replacement_meta.get("status")
-                        or "active"
-                    )
+                    sql_status = replacement_row[6] or "active"
+                    metadata_status = replacement_meta.get("status")
                     if (
-                        replacement_meta.get("superseded")
-                        or replacement_status != "active"
+                        metadata_status is not None
+                        and metadata_status != sql_status
                     ):
+                        self._conn.rollback()
+                        return (
+                            False,
+                            f"Replacement memory {replacement_id} has conflicting status",
+                        )
+                    if replacement_meta.get("superseded") or sql_status != "active":
                         self._conn.rollback()
                         return (
                             False,

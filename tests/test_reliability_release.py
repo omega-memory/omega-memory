@@ -37,6 +37,16 @@ def _edge_count(store, source_id, target_id, edge_type=None):
     return store._conn.execute(sql, params).fetchone()[0]
 
 
+def _set_memory_status_representations(store, memory_id, sql_status, metadata_status):
+    metadata = _metadata(store, memory_id)
+    metadata["status"] = metadata_status
+    store._conn.execute(
+        "UPDATE memories SET status = ?, metadata = ? WHERE node_id = ?",
+        (sql_status, json.dumps(metadata), memory_id),
+    )
+    store._conn.commit()
+
+
 def test_supersede_marks_old_memory_and_links_replacement(handler_store):
     """memory_id is the outdated record; target_id is its replacement."""
     from omega.server.handlers import handle_omega_memory
@@ -253,6 +263,100 @@ def test_supersede_rejects_inactive_replacement(handler_store, replacement_statu
     assert response.get("isError")
     assert not _metadata(handler_store, old_id).get("superseded", False)
     assert _edge_count(handler_store, new_id, old_id, "supersedes") == 0
+
+
+@pytest.mark.parametrize("metadata_status", ["archived", "superseded"])
+def test_supersede_rejects_metadata_only_terminal_replacement(
+    handler_store, metadata_status
+):
+    """A terminal metadata status cannot be hidden by SQL's active default."""
+    from omega.server.handlers import handle_omega_memory
+
+    old_id = handler_store.store(
+        "Legacy policy for metadata status validation",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    new_id = handler_store.store(
+        "Replacement policy with terminal metadata status",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    _set_memory_status_representations(
+        handler_store, new_id, "active", metadata_status
+    )
+
+    response = asyncio.run(
+        handle_omega_memory(
+            {"action": "supersede", "memory_id": old_id, "target_id": new_id}
+        )
+    )
+
+    assert response.get("isError")
+    assert not _metadata(handler_store, old_id).get("superseded", False)
+    assert _edge_count(handler_store, new_id, old_id, "supersedes") == 0
+
+
+def test_supersede_rejects_replacement_status_disagreement(handler_store):
+    """Any SQL/metadata status disagreement must fail closed."""
+    from omega.server.handlers import handle_omega_memory
+
+    old_id = handler_store.store(
+        "Legacy policy for status agreement validation",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    new_id = handler_store.store(
+        "Replacement policy with conflicting status representations",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    _set_memory_status_representations(
+        handler_store, new_id, "active", "speculative"
+    )
+
+    response = asyncio.run(
+        handle_omega_memory(
+            {"action": "supersede", "memory_id": old_id, "target_id": new_id}
+        )
+    )
+
+    assert response.get("isError")
+    assert not _metadata(handler_store, old_id).get("superseded", False)
+    assert _edge_count(handler_store, new_id, old_id, "supersedes") == 0
+
+
+def test_supersede_accepts_active_replacement_status_agreement(handler_store):
+    """Matching active SQL and metadata representations remain valid."""
+    from omega.server.handlers import handle_omega_memory
+
+    old_id = handler_store.store(
+        "Legacy policy with active replacement agreement",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    new_id = handler_store.store(
+        "Current policy with active replacement agreement",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    _set_memory_status_representations(handler_store, new_id, "active", "active")
+
+    response = asyncio.run(
+        handle_omega_memory(
+            {"action": "supersede", "memory_id": old_id, "target_id": new_id}
+        )
+    )
+
+    assert not response.get("isError")
+    assert _metadata(handler_store, old_id)["superseded"] is True
+    assert _edge_count(handler_store, new_id, old_id, "supersedes") == 1
 
 
 def test_memory_schema_describes_supersede_ids_and_editable_priority():
