@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import subprocess
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -16,6 +18,8 @@ _SPEC = importlib.util.spec_from_file_location("omega_release", _RELEASE_PATH)
 assert _SPEC and _SPEC.loader
 release = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(release)
+
+_VERIFIER = Path(__file__).resolve().parents[1] / "scripts" / "verify_core_release_artifact.py"
 
 
 def _write_wheel(path: Path, *, extra_members: dict[str, str] | None = None, dependency: str | None = None) -> None:
@@ -84,3 +88,46 @@ def test_boundary_rejects_private_distribution_dependency(tmp_path, artifact):
 
     with pytest.raises(SystemExit, match=rf"{artifact} dependency: Requires-Dist: omega-platform"):
         release.verify_public_artifact_boundary(wheel, sdist)
+
+
+@pytest.mark.parametrize(
+    ("member", "content"),
+    [
+        (".omega/omega.db", ""),
+        ("omega_platform/license.py", ""),
+        ("synaptic/private.py", ""),
+        ("omega/.env", ""),
+        ("omega/cache.sqlite", ""),
+        ("logs/hooks.log", ""),
+        ("results/audit.json", ""),
+        ("omega/private.py", "/Users/singularityjason/.omega/omega.db"),
+        ("omega/private.py", "api_key = super-secret-value-123"),
+        ("omega/token.txt", ""),
+    ],
+)
+def test_core_artifact_verifier_rejects_private_members_and_content(tmp_path, member, content):
+    wheel = tmp_path / "omega_memory-9.9.9-py3-none-any.whl"
+    _write_wheel(wheel, extra_members={member: content})
+
+    result = subprocess.run(
+        [sys.executable, str(_VERIFIER), str(wheel)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "Core artifact privacy violation" in result.stderr
+
+
+def test_core_artifact_verifier_accepts_core_members_without_executing_them(tmp_path):
+    wheel = tmp_path / "omega_memory-9.9.9-py3-none-any.whl"
+    _write_wheel(wheel, extra_members={"omega/pure.py": "raise RuntimeError('must not execute')"})
+
+    result = subprocess.run(
+        [sys.executable, str(_VERIFIER), str(wheel)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "OK: inspected" in result.stdout

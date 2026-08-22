@@ -1612,6 +1612,28 @@ def cmd_stats(args):
     print_bar_chart(items, title="Type Distribution", total=total)
 
 
+def cmd_audit_reliability(args):
+    """Report data-health findings for an explicitly selected database."""
+    from omega.reliability_audit import audit_database
+
+    try:
+        report = audit_database(args.db)
+    except ValueError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
+
+    if _use_json(args):
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return
+
+    print("OMEGA Reliability Audit (read-only)")
+    print(f"  Database: {report['database']}")
+    print(f"  Memories: {report['summary']['memory_count']}")
+    print(f"  Access outliers: {len(report['access']['outliers'])}")
+    print(f"  Invalid active records: {len(report['invalid_active_records'])}")
+    print(f"  Supersede inconsistencies: {len(report['supersede_inconsistencies'])}")
+
+
 def cmd_activity(args):
     """Show recent session activity: sessions, tasks, insights, claims."""
     days = getattr(args, "days", 7)
@@ -3661,6 +3683,12 @@ def main():
     stats_parser = subparsers.add_parser("stats", help="Show memory type distribution and health summary")
     stats_parser.add_argument("--json", action="store_true", help="Output as JSON (also: OMEGA_JSON=1)")
     stats_parser.add_argument("--card", action="store_true", help="Show a shareable stats card")
+    audit_parser = subparsers.add_parser(
+        "audit-reliability",
+        help="Read-only data-health audit for an explicitly selected SQLite database",
+    )
+    audit_parser.add_argument("--db", required=True, type=Path, help="Explicit SQLite database path; no default is used")
+    audit_parser.add_argument("--json", action="store_true", help="Output JSON")
     activity_parser = subparsers.add_parser("activity", help="Show recent session activity overview")
     activity_parser.add_argument("--days", type=int, default=7, help="Number of days to show (default: 7)")
     activity_parser.add_argument("--json", action="store_true", help="Output as JSON (also: OMEGA_JSON=1)")
@@ -3841,6 +3869,7 @@ def main():
         "backup": cmd_backup,
         "compact": cmd_compact,
         "stats": cmd_stats,
+        "audit-reliability": cmd_audit_reliability,
         "activity": cmd_activity,
         "logs": cmd_logs,
         "validate": cmd_validate,
