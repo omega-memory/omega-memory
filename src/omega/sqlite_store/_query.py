@@ -43,6 +43,27 @@ ACCESS_MAX_ADDITIVE = 0.0025
 ACCESS_SCORING_CAP = 3
 QUALITY_MAX_ADDITIVE = 0.0025
 
+# Recency is a first-class ranking signal, not a near-tie tiebreaker.  Among
+# semantically equivalent records the fresher one must win, so this term is
+# applied to every candidate rather than only inside the near-tie band.  It
+# stays bounded so age can never override a clearly stronger semantic match:
+# the contribution spans at most RECENCY_MAX_ADDITIVE, so any candidate whose
+# semantic lead exceeds that span still wins regardless of age.  The value is
+# calibrated in docs/ranking-calibration.md, not chosen by intuition.
+RECENCY_MAX_ADDITIVE = float(os.environ.get("OMEGA_RECENCY_MAX_ADDITIVE", "0.05"))
+
+# Cross-encoder confidence scale, in raw score units.
+#
+# The reranker boost is driven by min-max normalised CE scores, which map the
+# best candidate to 1.0 and the worst to 0.0 *regardless of how far apart they
+# actually are*.  For a candidate set whose CE scores are effectively tied that
+# manufactures the full boost out of noise, which is what stopped any bounded
+# recency term from ever deciding between two equivalent records.  Scaling the
+# boost by the observed spread keeps the reranker's full authority when it
+# genuinely discriminates and silences it when it does not.  Calibrated in
+# docs/ranking-calibration.md.
+CE_SPREAD_FULL_SCALE = float(os.environ.get("OMEGA_CE_SPREAD_FULL_SCALE", "1.0"))
+
 
 def _score_bounded_metadata(
     *,
@@ -895,10 +916,12 @@ class QueryMixin:
                 priority=priority,
                 access_count=node.access_count or 0,
             )
+            # Decay is deliberately excluded from the near-tie quality bundle.
+            # It is the recency signal, and collapsing it into a +/-0.0025
+            # tiebreaker is what let a stale record outrank a fresh one.
             quality_factor = (
                 type_weight
                 * fb_factor
-                * decay_factor
                 * thompson_boost
                 * consolidation_factor
             )
@@ -908,15 +931,28 @@ class QueryMixin:
                     -QUALITY_MAX_ADDITIVE,
                     min(QUALITY_MAX_ADDITIVE, (quality_factor - 1.0) * QUALITY_MAX_ADDITIVE),
                 )
+            # Bounded, always-applied recency.  decay_factor is 1.0 for a brand
+            # new or non-decaying record and falls toward the decay floor as the
+            # record ages, so this rewards freshness by at most one span.
+            recency_contribution = (
+                max(0.0, min(1.0, decay_factor)) * RECENCY_MAX_ADDITIVE
+            )
             metadata_contribution = (
                 float(reasons["priority_contribution"])
                 + float(reasons["access_contribution"])
             )
-            # Later word/context/reranker multipliers operate on the semantic
-            # and quality score only. The bounded priority/access amount is
-            # added exactly once immediately before final sorting.
-            score = score_with_metadata - metadata_contribution + quality_contribution
+            # Later word/context/reranker multipliers operate on the semantic,
+            # quality, and recency score only. The bounded priority/access
+            # amount is added exactly once immediately before final sorting.
+            score = (
+                score_with_metadata
+                - metadata_contribution
+                + quality_contribution
+                + recency_contribution
+            )
             reasons["quality_contribution"] = round(quality_contribution, 6)
+            reasons["decay_factor"] = round(decay_factor, 6)
+            reasons["recency_contribution"] = round(recency_contribution, 6)
             reasons["_pending_metadata_contribution"] = metadata_contribution
             node.metadata["_ranking_reasons"] = reasons
             node_scores[nid] = score
@@ -1380,6 +1416,10 @@ class QueryMixin:
                         ce_norm = [(s - ce_min) / ce_range for s in ce_scores]
                     else:
                         ce_norm = [0.5] * len(ce_scores)
+                    # Down-weight the whole rerank when the candidates are
+                    # effectively tied, so normalisation cannot turn a
+                    # negligible score gap into a full-strength boost.
+                    ce_confidence = min(1.0, ce_range / CE_SPREAD_FULL_SCALE) if CE_SPREAD_FULL_SCALE > 0 else 1.0
 
                     # Position-aware CE boost (QMD-inspired): top RRF results
                     # are already high-confidence from multi-channel fusion, so
@@ -1392,7 +1432,7 @@ class QueryMixin:
                             ce_w = 0.30   # Rank 4-10: balanced
                         else:
                             ce_w = 0.50   # Rank 11+: trust reranker more
-                        node_scores[nid] *= 1.0 + ce_w * ce_norm[i]
+                        node_scores[nid] *= 1.0 + ce_w * ce_norm[i] * ce_confidence
             except ImportError:
                 pass  # reranker module not available
             except Exception as e:
@@ -1523,6 +1563,8 @@ class QueryMixin:
                     ),
                     "access_contribution": 0.0,
                     "quality_contribution": 0.0,
+                    "decay_factor": 1.0,
+                    "recency_contribution": 0.0,
                 }
                 pending = 0.0
             pre_metadata_final = float(node_scores[nid])
