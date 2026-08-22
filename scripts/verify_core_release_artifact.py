@@ -15,7 +15,6 @@ from pathlib import Path, PurePosixPath
 
 
 _MAX_MEMBER_BYTES = 10 * 1024 * 1024
-_TEXT_SUFFIXES = frozenset({".py", ".pyi", ".json", ".toml", ".txt", ".md", ".cfg", ".ini", ".rst", ""})
 _SECRET_VALUE = re.compile(
     r"(?i)\b(?:api[_-]?key|token|secret|password|private[_-]?key|credential)\b\s*[:=]\s*(?:['\"][^'\"]{8,}['\"]|[A-Za-z0-9_-]{16,})"
 )
@@ -52,7 +51,11 @@ def _member_violation(name: str) -> str | None:
 
 
 def _content_violation(payload: bytes) -> str | None:
-    text = payload.decode("utf-8", errors="replace")
+    """Inspect all bounded textual package data, failing closed on binary data."""
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return "unrecognized non-text payload"
     if _PERSONAL_PATH.search(text):
         return "personal absolute path in payload"
     if _SECRET_VALUE.search(text) or _PRIVATE_KEY.search(text) or _AWS_KEY.search(text):
@@ -79,11 +82,9 @@ def verify_core_wheel(wheel: str | Path) -> list[str]:
                 if info.file_size > _MAX_MEMBER_BYTES:
                     violations.append(f"member {name!r}: exceeds {_MAX_MEMBER_BYTES} byte inspection limit")
                     continue
-                suffix = PurePosixPath(name).suffix.lower()
-                if suffix in _TEXT_SUFFIXES:
-                    payload_violation = _content_violation(archive.read(info))
-                    if payload_violation:
-                        violations.append(f"member {name!r}: {payload_violation}")
+                payload_violation = _content_violation(archive.read(info))
+                if payload_violation:
+                    violations.append(f"member {name!r}: {payload_violation}")
     except (OSError, zipfile.BadZipFile) as error:
         return [f"unreadable wheel: {error}"]
     return violations

@@ -103,6 +103,9 @@ def test_boundary_rejects_private_distribution_dependency(tmp_path, artifact):
         ("omega/private.py", "/Users/singularityjason/.omega/omega.db"),
         ("omega/private.py", "api_key = super-secret-value-123"),
         ("omega/token.txt", ""),
+        ("omega/settings.yaml", "data_path: /Users/singularityjason/.omega/omega.db"),
+        ("omega/settings.yaml", "api_key: super-secret-value-123"),
+        ("omega/credentials.pem", "-----BEGIN PRIVATE KEY-----\nprivate material\n-----END PRIVATE KEY-----"),
     ],
 )
 def test_core_artifact_verifier_rejects_private_members_and_content(tmp_path, member, content):

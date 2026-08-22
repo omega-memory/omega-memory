@@ -107,7 +107,7 @@ def audit_database(database: str | Path) -> dict[str, Any]:
 
     invalid_active_records: list[dict[str, str]] = []
     supersede_inconsistencies: list[dict[str, str]] = []
-    node_ids = {str(row["node_id"]) for row in rows}
+    rows_by_node_id = {str(row["node_id"]): row for row in rows}
     for row in rows:
         node_id = str(row["node_id"])
         metadata = _metadata(row["metadata"])
@@ -134,7 +134,7 @@ def audit_database(database: str | Path) -> dict[str, Any]:
         replacement_id = metadata.get("superseded_by")
         if replacement_id:
             replacement_id = str(replacement_id)
-            if replacement_id not in node_ids:
+            if replacement_id not in rows_by_node_id:
                 supersede_inconsistencies.append(
                     {"node_id": node_id, "reason": "replacement_missing"}
                 )
@@ -148,7 +148,12 @@ def audit_database(database: str | Path) -> dict[str, Any]:
             )
 
     for source_id, target_id in sorted(edges):
-        target = next((row for row in rows if row["node_id"] == target_id), None)
+        source = rows_by_node_id.get(str(source_id))
+        target = rows_by_node_id.get(str(target_id))
+        if source is None:
+            supersede_inconsistencies.append(
+                {"node_id": target_id, "reason": f"supersedes_edge_source_missing:{source_id}"}
+            )
         if target is None:
             supersede_inconsistencies.append(
                 {"node_id": target_id, "reason": f"supersedes_edge_targets_missing_record:{source_id}"}

@@ -45,6 +45,7 @@ def _fixture_database(path: Path) -> None:
         rows,
     )
     connection.execute("INSERT INTO edges(source_id, target_id, edge_type) VALUES ('new', 'old', 'supersedes')")
+    connection.execute("INSERT INTO edges(source_id, target_id, edge_type) VALUES ('missing-source', 'old', 'supersedes')")
     connection.commit()
     connection.close()
 
@@ -62,7 +63,10 @@ def test_audit_reports_reliability_findings_without_mutating_database(tmp_path: 
     assert [item["node_id"] for item in report["access"]["outliers"]] == ["hot"]
     assert report["priority"]["dominance"]["priority"] == 5
     assert {item["node_id"] for item in report["invalid_active_records"]} == {"empty", "mismatched"}
-    assert {item["node_id"] for item in report["supersede_inconsistencies"]} == {"mismatched"}
+    assert {item["node_id"] for item in report["supersede_inconsistencies"]} == {"mismatched", "old"}
+    assert {
+        item["reason"] for item in report["supersede_inconsistencies"] if item["node_id"] == "old"
+    } == {"supersedes_edge_source_missing:missing-source"}
     assert hashlib.sha256(database.read_bytes()).hexdigest() == before
 
 
