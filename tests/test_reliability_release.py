@@ -177,6 +177,84 @@ def test_cross_entity_supersede_leaves_both_records_unchanged(handler_store):
     assert _edge_count(handler_store, new_id, old_id) == 0
 
 
+@pytest.mark.parametrize(
+    ("scope_argument", "caller_scope"),
+    [
+        ("entity_id", "account-a"),
+        ("project", "project-a"),
+        ("caller_session_id", "session-a"),
+    ],
+)
+def test_supersede_rejects_matching_records_outside_caller_scope(
+    handler_store, scope_argument, caller_scope
+):
+    """Two mutually matching records still cannot escape the caller's scope."""
+    from omega.server.handlers import handle_omega_memory
+
+    metadata = {"event_type": "decision", "project": "project-b"}
+    old_id = handler_store.store(
+        "Account B legacy deployment policy",
+        metadata=metadata,
+        session_id="session-b",
+        entity_id="account-b",
+        skip_inference=True,
+    )
+    new_id = handler_store.store(
+        "Account B current deployment policy",
+        metadata=metadata,
+        session_id="session-b",
+        entity_id="account-b",
+        skip_inference=True,
+    )
+    arguments = {
+        "action": "supersede",
+        "memory_id": old_id,
+        "target_id": new_id,
+        scope_argument: caller_scope,
+    }
+
+    response = asyncio.run(handle_omega_memory(arguments))
+
+    assert response.get("isError")
+    assert not _metadata(handler_store, old_id).get("superseded", False)
+    assert not _metadata(handler_store, new_id).get("superseded", False)
+    assert _edge_count(handler_store, new_id, old_id, "supersedes") == 0
+
+
+@pytest.mark.parametrize("replacement_status", ["superseded", "archived"])
+def test_supersede_rejects_inactive_replacement(handler_store, replacement_status):
+    """A replacement must still be active when the transaction validates it."""
+    from omega.server.handlers import handle_omega_memory
+
+    old_id = handler_store.store(
+        "Legacy active policy awaiting correction",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    new_id = handler_store.store(
+        "Replacement policy that is no longer active",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    handler_store._conn.execute(
+        "UPDATE memories SET status = ? WHERE node_id = ?",
+        (replacement_status, new_id),
+    )
+    handler_store._conn.commit()
+
+    response = asyncio.run(
+        handle_omega_memory(
+            {"action": "supersede", "memory_id": old_id, "target_id": new_id}
+        )
+    )
+
+    assert response.get("isError")
+    assert not _metadata(handler_store, old_id).get("superseded", False)
+    assert _edge_count(handler_store, new_id, old_id, "supersedes") == 0
+
+
 def test_memory_schema_describes_supersede_ids_and_editable_priority():
     """The public tool contract must make both IDs and edit fields unambiguous."""
     from omega.server.tool_schemas import TOOL_SCHEMAS
@@ -188,6 +266,9 @@ def test_memory_schema_describes_supersede_ids_and_editable_priority():
     assert "replacement" in properties["target_id"]["description"].lower()
     assert properties["priority"]["minimum"] == 1
     assert properties["priority"]["maximum"] == 5
+    assert "caller" in properties["entity_id"]["description"].lower()
+    assert "caller" in properties["project"]["description"].lower()
+    assert "caller" in properties["caller_session_id"]["description"].lower()
 
 
 def test_priority_only_edit_preserves_memory_identity_and_history(handler_store):
@@ -244,6 +325,43 @@ def test_priority_only_edit_preserves_memory_identity_and_history(handler_store)
     assert after[10] == 5
     assert _metadata(handler_store, memory_id)["priority"] == 5
     assert _edge_count(handler_store, memory_id, related_id, "related") == 1
+
+
+def test_priority_edit_preserves_metadata_added_after_bridge_read(
+    handler_store, monkeypatch
+):
+    """A late metadata writer must not be erased by stale bridge state."""
+    from omega.server.handlers import handle_omega_memory
+
+    memory_id = handler_store.store(
+        "Concurrent metadata preservation",
+        metadata={"event_type": "decision", "priority": 2, "source": "seed"},
+    )
+    original_update_node = handler_store.update_node
+
+    def add_metadata_before_transaction(*args, **kwargs):
+        current = _metadata(handler_store, memory_id)
+        current["late_audit_marker"] = "must-survive"
+        handler_store._conn.execute(
+            "UPDATE memories SET metadata = ? WHERE node_id = ?",
+            (json.dumps(current), memory_id),
+        )
+        handler_store._conn.commit()
+        return original_update_node(*args, **kwargs)
+
+    monkeypatch.setattr(handler_store, "update_node", add_metadata_before_transaction)
+
+    response = asyncio.run(
+        handle_omega_memory(
+            {"action": "edit", "memory_id": memory_id, "priority": 5}
+        )
+    )
+
+    assert not response.get("isError")
+    metadata = _metadata(handler_store, memory_id)
+    assert metadata["late_audit_marker"] == "must-survive"
+    assert metadata["priority"] == 5
+    assert metadata["edit_count"] == 1
 
 
 def test_edit_accepts_content_only(handler_store):

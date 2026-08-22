@@ -2295,6 +2295,17 @@ async def handle_omega_supersede_memory(arguments: dict) -> dict:
     if not memory_id:
         return mcp_error("memory_id is required for action='supersede'")
 
+    caller_scopes = {}
+    for argument_name, store_name in (
+        ("entity_id", "expected_entity_id"),
+        ("project", "expected_project"),
+        ("caller_session_id", "expected_session_id"),
+    ):
+        value = arguments.get(argument_name)
+        if value is not None and not isinstance(value, str):
+            return mcp_error(f"{argument_name} must be a string")
+        caller_scopes[store_name] = value.strip() if value else None
+
     reason = arguments.get("reason", "").strip() or "manual supersession"
 
     try:
@@ -2311,7 +2322,12 @@ async def handle_omega_supersede_memory(arguments: dict) -> dict:
                 f"Memory `{memory_id[:16]}` is already superseded (by `{superseded_by}`)."
             )
 
-        success, error = db.supersede_with_replacement(memory_id, target_id, reason)
+        success, error = db.supersede_with_replacement(
+            memory_id,
+            target_id,
+            reason,
+            **caller_scopes,
+        )
         if not success:
             return mcp_error(error or "Supersede failed")
 

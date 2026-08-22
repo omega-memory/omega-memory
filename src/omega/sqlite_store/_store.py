@@ -443,6 +443,7 @@ class StoreMixin:
         metadata: Optional[Dict] = None,
         access_count: Optional[int] = None,
         priority: Optional[int] = None,
+        record_edit: bool = False,
     ) -> bool:
         """Update fields on an existing node."""
         if priority is not None and (
@@ -467,89 +468,112 @@ class StoreMixin:
                     logger.debug("update_node: re-embed failed: %s", e)
 
         with self._lock:
-            sets = []
-            params = []
-            effective_metadata = dict(metadata) if metadata is not None else None
-            edit_timestamp = datetime.now(timezone.utc).isoformat()
-            current = None
+            try:
+                self._exec("BEGIN IMMEDIATE")
+                sets = []
+                params = []
+                edit_timestamp = datetime.now(timezone.utc).isoformat()
+                current = None
 
-            if priority is not None or effective_metadata is not None:
-                current = self._exec(
-                    """SELECT metadata, priority, event_type, session_id, project
-                       FROM memories WHERE node_id = ?""",
-                    (node_id,),
-                ).fetchone()
-                if current is None:
+                if priority is not None or metadata is not None or record_edit:
+                    current = self._exec(
+                        """SELECT metadata, priority, event_type, session_id, project
+                           FROM memories WHERE node_id = ?""",
+                        (node_id,),
+                    ).fetchone()
+                    if current is None:
+                        self._conn.rollback()
+                        return False
+
+                current_metadata = (
+                    json.loads(current[0]) if current and current[0] else {}
+                )
+                if record_edit:
+                    effective_metadata = current_metadata
+                    if metadata is not None:
+                        effective_metadata.update(metadata)
+                    effective_metadata["edited_at"] = edit_timestamp
+                    effective_metadata["edit_count"] = (
+                        current_metadata.get("edit_count", 0) + 1
+                    )
+                else:
+                    effective_metadata = (
+                        dict(metadata) if metadata is not None else None
+                    )
+
+                if priority is not None:
+                    if effective_metadata is None:
+                        effective_metadata = current_metadata
+                    history = effective_metadata.get("priority_edit_history", [])
+                    if not isinstance(history, list):
+                        history = []
+                    else:
+                        history = list(history)
+                    if current[1] != priority:
+                        history.append(
+                            {
+                                "old_priority": current[1],
+                                "new_priority": priority,
+                                "edited_at": edit_timestamp,
+                            }
+                        )
+                    effective_metadata["priority_edit_history"] = history[
+                        -_PRIORITY_EDIT_HISTORY_LIMIT:
+                    ]
+                    effective_metadata["priority"] = priority
+                    sets.append("priority = ?")
+                    params.append(priority)
+
+                if content is not None:
+                    sets.extend(
+                        ("content = ?", "content_hash = ?", "canonical_hash = ?")
+                    )
+                    params.extend(
+                        (
+                            content,
+                            hashlib.sha256(content.encode()).hexdigest(),
+                            hashlib.sha256(_canonicalize(content).encode()).hexdigest(),
+                        )
+                    )
+
+                if effective_metadata is not None:
+                    sets.append("metadata = ?")
+                    params.append(json.dumps(effective_metadata))
+                    # Update denormalized columns without clearing omitted scope.
+                    sets.extend(("event_type = ?", "session_id = ?", "project = ?"))
+                    params.extend(
+                        (
+                            effective_metadata.get("event_type")
+                            or effective_metadata.get("type")
+                            or current[2],
+                            (
+                                effective_metadata["session_id"]
+                                if "session_id" in effective_metadata
+                                else current[3]
+                            ),
+                            (
+                                effective_metadata["project"]
+                                if "project" in effective_metadata
+                                else current[4]
+                            ),
+                        )
+                    )
+                if access_count is not None:
+                    sets.append("access_count = ?")
+                    params.append(access_count)
+
+                if (
+                    content is not None
+                    or effective_metadata is not None
+                    or priority is not None
+                ):
+                    sets.append("updated_at = ?")
+                    params.append(edit_timestamp)
+
+                if not sets:
+                    self._conn.rollback()
                     return False
 
-            if priority is not None:
-                current_metadata = json.loads(current[0]) if current[0] else {}
-                if effective_metadata is None:
-                    effective_metadata = current_metadata
-                history = effective_metadata.get("priority_edit_history", [])
-                if not isinstance(history, list):
-                    history = []
-                else:
-                    history = list(history)
-                if current[1] != priority:
-                    history.append(
-                        {
-                            "old_priority": current[1],
-                            "new_priority": priority,
-                            "edited_at": edit_timestamp,
-                        }
-                    )
-                effective_metadata["priority_edit_history"] = history[
-                    -_PRIORITY_EDIT_HISTORY_LIMIT:
-                ]
-                effective_metadata["priority"] = priority
-                sets.append("priority = ?")
-                params.append(priority)
-
-            if content is not None:
-                sets.extend(("content = ?", "content_hash = ?", "canonical_hash = ?"))
-                params.extend(
-                    (
-                        content,
-                        hashlib.sha256(content.encode()).hexdigest(),
-                        hashlib.sha256(_canonicalize(content).encode()).hexdigest(),
-                    )
-                )
-
-            if effective_metadata is not None:
-                sets.append("metadata = ?")
-                params.append(json.dumps(effective_metadata))
-                # Update denormalized columns
-                sets.extend(("event_type = ?", "session_id = ?", "project = ?"))
-                params.extend(
-                    (
-                        effective_metadata.get("event_type")
-                        or effective_metadata.get("type")
-                        or current[2],
-                        (
-                            effective_metadata["session_id"]
-                            if "session_id" in effective_metadata
-                            else current[3]
-                        ),
-                        (
-                            effective_metadata["project"]
-                            if "project" in effective_metadata
-                            else current[4]
-                        ),
-                    )
-                )
-            if access_count is not None:
-                sets.append("access_count = ?")
-                params.append(access_count)
-
-            if content is not None or effective_metadata is not None or priority is not None:
-                sets.append("updated_at = ?")
-                params.append(edit_timestamp)
-
-            if not sets:
-                return False
-
-            try:
                 params.append(node_id)
                 cursor = self._exec(
                     f"UPDATE memories SET {', '.join(sets)} WHERE node_id = ?", params
@@ -709,6 +733,10 @@ class StoreMixin:
         old_id: str,
         replacement_id: Optional[str] = None,
         reason: str = "manual supersession",
+        *,
+        expected_entity_id: Optional[str] = None,
+        expected_project: Optional[str] = None,
+        expected_session_id: Optional[str] = None,
     ) -> tuple[bool, Optional[str]]:
         """Retire ``old_id`` and optionally link its replacement atomically.
 
@@ -739,6 +767,26 @@ class StoreMixin:
                     self._conn.rollback()
                     return False, f"Memory {old_id} is already superseded"
 
+                caller_scope_fields = (
+                    ("entity", expected_entity_id, old_row[3]),
+                    ("project", expected_project, old_row[4]),
+                    ("session", expected_session_id, old_row[5]),
+                )
+                unauthorized_scope = next(
+                    (
+                        name
+                        for name, expected_value, stored_value in caller_scope_fields
+                        if expected_value is not None and expected_value != stored_value
+                    ),
+                    None,
+                )
+                if unauthorized_scope:
+                    self._conn.rollback()
+                    return (
+                        False,
+                        f"Caller authorization failed: {unauthorized_scope} scope differs",
+                    )
+
                 replacement_row = None
                 if replacement_id:
                     replacement_row = self._exec(
@@ -750,6 +798,24 @@ class StoreMixin:
                     if replacement_row is None:
                         self._conn.rollback()
                         return False, f"Replacement memory {replacement_id} not found"
+
+                    replacement_meta = (
+                        json.loads(replacement_row[0]) if replacement_row[0] else {}
+                    )
+                    replacement_status = (
+                        replacement_row[6]
+                        or replacement_meta.get("status")
+                        or "active"
+                    )
+                    if (
+                        replacement_meta.get("superseded")
+                        or replacement_status != "active"
+                    ):
+                        self._conn.rollback()
+                        return (
+                            False,
+                            f"Replacement memory {replacement_id} is not active",
+                        )
 
                     ownership_fields = (
                         ("entity", old_row[3], replacement_row[3]),

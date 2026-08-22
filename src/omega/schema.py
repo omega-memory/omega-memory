@@ -314,7 +314,7 @@ def init_schema(
             content TEXT NOT NULL,
             metadata TEXT,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             last_accessed TEXT,
             access_count INTEGER DEFAULT 0,
             ttl_seconds INTEGER,

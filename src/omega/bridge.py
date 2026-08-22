@@ -1676,15 +1676,11 @@ def edit_memory(
 
         old_content = node.content
         old_preview = old_content[:80]
-        emeta = dict(node.metadata or {})
-        emeta["edited_at"] = datetime.now(timezone.utc).isoformat()
-        emeta["edit_count"] = emeta.get("edit_count", 0) + 1
-
         success = db.update_node(
             memory_id,
             content=new_content,
-            metadata=emeta,
             priority=priority,
+            record_edit=True,
         )
         if not success:
             return {"success": False, "error": f"Memory {memory_id} not found"}
