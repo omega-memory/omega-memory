@@ -392,23 +392,46 @@ class TestOmegaMemorySupersede:
 
     @pytest.mark.asyncio
     async def test_supersede_already_superseded(self):
-        """Superseding an already-superseded memory returns informative message."""
-        store_result = await HANDLERS["omega_store"]({"content": "Use Redis for caching in all services"})
-        node_id = _extract_node_id(_text(store_result))
+        """Repeating replacement supersede is rejected without another mutation."""
+        old_result = await HANDLERS["omega_store"](
+            {"content": "Use Redis for caching in all services"}
+        )
+        replacement_result = await HANDLERS["omega_store"](
+            {"content": "Use the managed cache selected for each service"}
+        )
+        old_id = _extract_node_id(_text(old_result))
+        replacement_id = _extract_node_id(_text(replacement_result))
 
         # Supersede once
-        await HANDLERS["omega_memory"]({
+        first = await HANDLERS["omega_memory"]({
             "action": "supersede",
-            "target_id": node_id,
+            "memory_id": old_id,
+            "target_id": replacement_id,
         })
+        assert not _is_error(first)
+
         # Supersede again
         result = await HANDLERS["omega_memory"]({
             "action": "supersede",
-            "target_id": node_id,
+            "memory_id": old_id,
+            "target_id": replacement_id,
         })
         assert not _is_error(result)
         text = _text(result)
         assert "already superseded" in text.lower()
+
+        from omega.bridge import _get_store
+
+        store = _get_store()
+        old = store.get_node(old_id, track_access=False)
+        replacement = store.get_node(replacement_id, track_access=False)
+        assert old.metadata["superseded_by"] == replacement_id
+        assert not replacement.metadata.get("superseded", False)
+        assert store._conn.execute(
+            """SELECT COUNT(*) FROM edges
+               WHERE source_id = ? AND target_id = ? AND edge_type = 'supersedes'""",
+            (replacement_id, old_id),
+        ).fetchone()[0] == 1
 
     @pytest.mark.asyncio
     async def test_supersede_nonexistent_returns_error(self):
