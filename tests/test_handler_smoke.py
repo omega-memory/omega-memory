@@ -353,21 +353,42 @@ class TestOmegaResumeTask:
 
 class TestOmegaMemorySupersede:
     @pytest.mark.asyncio
-    async def test_supersede_marks_target(self):
-        """Superseding a memory should mark it as superseded."""
-        # Store a memory first
-        store_result = await HANDLERS["omega_store"]({"content": "Deploy to staging every Monday morning"})
-        node_id = _extract_node_id(_text(store_result))
+    async def test_supersede_marks_old_and_links_replacement(self):
+        """memory_id is retired and target_id remains the active replacement."""
+        old_result = await HANDLERS["omega_store"](
+            {"content": "Deploy to staging every Monday morning"}
+        )
+        replacement_result = await HANDLERS["omega_store"](
+            {"content": "Deploy to staging after every approved release"}
+        )
+        old_id = _extract_node_id(_text(old_result))
+        replacement_id = _extract_node_id(_text(replacement_result))
 
         result = await HANDLERS["omega_memory"]({
             "action": "supersede",
-            "target_id": node_id,
+            "memory_id": old_id,
+            "target_id": replacement_id,
             "reason": "no longer relevant",
         })
         assert not _is_error(result)
         text = _text(result)
         assert "Superseded" in text
         assert "no longer relevant" in text
+        assert old_id in text
+        assert replacement_id in text
+
+        from omega.bridge import _get_store
+
+        store = _get_store()
+        old = store.get_node(old_id, track_access=False)
+        replacement = store.get_node(replacement_id, track_access=False)
+        assert old.metadata["superseded"] is True
+        assert not replacement.metadata.get("superseded", False)
+        assert store._conn.execute(
+            """SELECT COUNT(*) FROM edges
+               WHERE source_id = ? AND target_id = ? AND edge_type = 'supersedes'""",
+            (replacement_id, old_id),
+        ).fetchone()[0] == 1
 
     @pytest.mark.asyncio
     async def test_supersede_already_superseded(self):
