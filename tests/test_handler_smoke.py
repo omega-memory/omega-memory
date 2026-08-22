@@ -438,19 +438,19 @@ class TestOmegaMemorySupersede:
         """Superseding a non-existent memory ID returns an error."""
         result = await HANDLERS["omega_memory"]({
             "action": "supersede",
-            "target_id": "mem-nonexistent999",
+            "memory_id": "mem-nonexistent999",
         })
         assert _is_error(result)
         assert "not found" in _text(result).lower()
 
     @pytest.mark.asyncio
-    async def test_supersede_missing_target_id_returns_error(self):
-        """Supersede without target_id should return an error."""
+    async def test_supersede_missing_memory_id_returns_error(self):
+        """Supersede without the old memory_id should return an error."""
         result = await HANDLERS["omega_memory"]({
             "action": "supersede",
         })
         assert _is_error(result)
-        assert "target_id" in _text(result).lower()
+        assert "memory_id" in _text(result).lower()
 
 
 # ============================================================================
