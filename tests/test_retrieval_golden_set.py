@@ -233,24 +233,55 @@ class TestDecayCurves:
     """Fresh memories rank higher; access slows decay; protected types don't decay."""
 
     def test_fresh_ranks_above_old(self):
-        """A memory created today should rank above one created 60 days ago."""
+        """A memory created today should rank above one created 60 days ago.
+
+        The two records must be semantically equivalent for this to isolate
+        decay.  The original pair here ("optimizes read performance" versus
+        "provides fast lookup") is not: the cross-encoder scores the second
+        wording 0.71 higher for this query, and that preference follows the
+        wording rather than the age -- swapping which record is aged leaves the
+        same wording on top.  The pair below differs only by a trailing
+        reference token, measuring ~0.007 of cross-encoder spread, so age is
+        genuinely the only signal separating them.
+
+        The previous pair passed before 1.5.13 only because decay was a large
+        multiplicative penalty that buried a real relevance difference.  Making
+        recency strong enough to reproduce that outcome would require
+        OMEGA_RECENCY_MAX_ADDITIVE ~0.20, which measurably degrades LongMemEval
+        ranking (see docs/ranking-calibration.md).
+        """
         store = _get_store()
         old_date = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        base = "Database indexing strategy for user queries optimizes read performance"
         # Insert fresh first (FTS5 disadvantage) so decay alone drives ranking
-        fresh_id = _insert_memory(
-            store,
-            "Database indexing strategy for user queries optimizes read performance",
-            "decision",
-        )
-        old_id = _insert_memory(
-            store,
-            "Database indexing strategy for user queries provides fast lookup",
-            "decision",
-        )
+        fresh_id = _insert_memory(store, f"{base} ref-1", "decision")
+        old_id = _insert_memory(store, f"{base} ref-2", "decision")
         _set_timestamps(store, old_id, created_at=old_date, last_accessed=old_date)
         ids = _query_ids(store, "database indexing strategy user queries")
         assert fresh_id in ids and old_id in ids, f"Both should be returned, got {ids}"
         assert ids.index(fresh_id) < ids.index(old_id), "Fresh should rank above old"
+
+    def test_stronger_match_wins_even_when_older(self):
+        """The converse guard: age must not bury a genuinely better match.
+
+        This is the case the original fixture was accidentally exercising, now
+        asserted deliberately.
+        """
+        store = _get_store()
+        old_date = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        strong_old = _insert_memory(
+            store,
+            "Database indexing strategy for user queries provides fast lookup",
+            "decision",
+        )
+        _set_timestamps(store, strong_old, created_at=old_date, last_accessed=old_date)
+        _insert_memory(
+            store,
+            "The office coffee machine was replaced on Tuesday morning",
+            "decision",
+        )
+        ids = _query_ids(store, "database indexing strategy user queries")
+        assert ids[0] == strong_old, f"Relevance must beat freshness, got {ids}"
 
     def test_access_is_bounded_tie_signal_not_decay_protection(self):
         """Access can break an exact semantic tie but cannot shield old memory decay."""
