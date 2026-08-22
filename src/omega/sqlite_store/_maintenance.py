@@ -403,10 +403,10 @@ class MaintenanceMixin:
         min_strength: float = 0.05,
         min_age_days: int = 30,
     ) -> dict:
-        """Mark weak, old, unaccessed memories as superseded (ACT-R forgetting curve).
+        """Mark weak, old memories as superseded (ACT-R forgetting curve).
 
         Computes strength = type_weight * feedback_factor * decay_factor for each
-        non-protected, non-superseded memory older than min_age_days with 0 access.
+        non-protected, non-superseded memory older than min_age_days.
         Memories below min_strength get marked superseded with reason 'strength_decay'.
         """
         protected_types = frozenset({
@@ -417,17 +417,13 @@ class MaintenanceMixin:
         stats: Dict[str, int] = {"decayed": 0, "scanned": 0}
 
         with self._lock:
-            # Scan two populations:
-            # 1. Never-accessed old memories (original behavior)
-            # 2. Accessed but negatively-rated memories (feedback_score <= -3)
-            #    These are "zombie" memories — surfaced but consistently ignored.
+            # Access history is audit data and cannot shield a weak old record
+            # from lifecycle decay.
             rows = self._conn.execute(
                 """SELECT node_id, content, metadata, created_at, access_count,
                           last_accessed, event_type
                    FROM memories
-                   WHERE created_at < ?
-                   AND (access_count = 0
-                        OR json_extract(metadata, '$.feedback_score') <= -3)""",
+                   WHERE created_at < ?""",
                 (cutoff,),
             ).fetchall()
 
@@ -440,12 +436,6 @@ class MaintenanceMixin:
                 continue
             if event_type in protected_types:
                 continue
-            if last_accessed:
-                la_dt = self._parse_dt(last_accessed)
-                cutoff_dt = datetime.now(timezone.utc) - timedelta(days=min_age_days)
-                if la_dt and la_dt > cutoff_dt:
-                    continue
-
             type_weight = self._TYPE_WEIGHTS.get(event_type, 1.0)
             decay = self._compute_decay_factor(
                 event_type or "", last_accessed, created_at, access_count,

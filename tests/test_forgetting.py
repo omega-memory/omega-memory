@@ -181,6 +181,31 @@ def test_prune_forgetting_log():
     assert len(entries) == 0
 
 
+def test_historical_access_cannot_shield_old_memory_from_strength_decay():
+    """Decay eligibility depends on age and strength, not access history."""
+    store = _get_store()
+    node_id = store.store(
+        content="Old accessed lifecycle record must remain eligible for decay",
+        metadata={"event_type": "memory"},
+        skip_inference=True,
+    )
+    old = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    recent = datetime.now(timezone.utc).isoformat()
+    store._conn.execute(
+        """UPDATE memories SET created_at = ?, last_accessed = ?, access_count = 500
+           WHERE node_id = ?""",
+        (old, recent, node_id),
+    )
+    store._conn.commit()
+
+    stats = store.apply_strength_decay(min_strength=2.0, min_age_days=30)
+
+    metadata = store.get_node(node_id, track_access=False).metadata
+    assert stats["scanned"] == 1
+    assert stats["decayed"] == 1
+    assert metadata["superseded_reason"] == "strength_decay"
+
+
 # ============================================================================
 # 7. Reason filter on get_forgetting_log
 # ============================================================================

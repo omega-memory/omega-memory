@@ -1,6 +1,7 @@
 """Tests for task-aware context_packet assembly."""
 
 import ast
+import sqlite3
 
 import pytest
 
@@ -8,6 +9,8 @@ from omega.server.context_handlers import (
     build_context_packet,
     handle_context_packet,
     _estimate_tokens,
+    _query_by_event_type,
+    _query_packet_scope_fallback,
     _render_context_packet,
 )
 
@@ -80,6 +83,135 @@ async def test_context_packet_includes_relevant_seed(tmp_omega_dir):
     assert any(row["rendered"] for row in payload["candidate_receipts"])
     assert payload["metrics"]["memories_used"] == len(payload["memories_used"])
     assert payload["metrics"]["estimated_tokens"] == payload["estimated_tokens"]
+
+
+def test_top_lessons_and_packet_fallback_ignore_access_popularity(tmp_omega_dir):
+    """Context selection must not promote an older record because it was popular."""
+    from omega.bridge import _get_store
+
+    db = _get_store()
+    old_popular = db.store(
+        content="Old popular lesson for context ordering",
+        metadata={"event_type": "lesson_learned"},
+        entity_id="omega-context-order",
+        skip_inference=True,
+    )
+    recent = db.store(
+        content="Recent lesson for context ordering",
+        metadata={"event_type": "lesson_learned"},
+        entity_id="omega-context-order",
+        skip_inference=True,
+    )
+    db._conn.execute(
+        "UPDATE memories SET created_at = ?, access_count = 500 WHERE node_id = ?",
+        ("2020-01-01T00:00:00+00:00", old_popular),
+    )
+    db._conn.execute(
+        "UPDATE memories SET created_at = ?, access_count = 0 WHERE node_id = ?",
+        ("2026-01-01T00:00:00+00:00", recent),
+    )
+    db._conn.commit()
+
+    lessons = _query_by_event_type(
+        db,
+        event_type="lesson_learned",
+        entity_id="omega-context-order",
+        limit=2,
+        since_iso=None,
+        order_by="access",
+    )
+    fallback = _query_packet_scope_fallback(
+        db,
+        scope={"entity_id": "omega-context-order", "project": None, "session_id": None},
+        max_sensitivity="restricted",
+        limit=2,
+    )
+
+    assert [row["id"] for row in lessons] == [recent, old_popular]
+    assert [row["id"] for row in fallback] == [recent, old_popular]
+
+
+def test_context_packet_records_only_unique_rendered_memory_ids(tmp_omega_dir, monkeypatch):
+    """Candidate discovery is read-only; only IDs actually rendered count as access."""
+    from omega.bridge import _get_store
+
+    db = _get_store()
+    memory_ids = []
+    for index in range(8):
+        memory_ids.append(db.store(
+            content=(
+                f"Decision {index}: packet access boundary requires a deliberately long "
+                "candidate body so the minimum packet budget cannot render every match. " * 3
+            ),
+            metadata={"event_type": "decision"},
+            entity_id="omega-packet-access",
+            skip_inference=True,
+        ))
+    monkeypatch.setattr(
+        db,
+        "query",
+        lambda *_args, **_kwargs: [
+            db.get_node(node_id, track_access=False) for node_id in memory_ids
+        ],
+    )
+
+    packet = build_context_packet(
+        db,
+        task="packet access boundary long candidate body",
+        scope={"entity_id": "omega-packet-access"},
+        budget_tokens=120,
+    )
+
+    assert packet["memories_used"]
+    assert set(packet["memories_used"]) < set(packet["candidate_ids"])
+    rows = db._conn.execute(
+        "SELECT node_id, access_count FROM memories WHERE entity_id = ?",
+        ("omega-packet-access",),
+    ).fetchall()
+    access_by_id = dict(rows)
+    assert all(access_by_id[node_id] == 1 for node_id in packet["memories_used"])
+    assert all(
+        access_by_id[node_id] == 0
+        for node_id in set(packet["candidate_ids"]) - set(packet["memories_used"])
+    )
+
+
+def test_context_packet_survives_second_connection_access_lock(tmp_omega_dir, monkeypatch):
+    """A locked audit write cannot replace a successfully assembled packet with an error."""
+    from omega.bridge import _get_store
+
+    db = _get_store()
+    memory_id = db.store(
+        content="Decision: locked access accounting must preserve context output.",
+        metadata={"event_type": "decision"},
+        entity_id="omega-packet-lock",
+        skip_inference=True,
+    )
+    monkeypatch.setattr(
+        db,
+        "query",
+        lambda *_args, **_kwargs: [db.get_node(memory_id, track_access=False)],
+    )
+    db._conn.execute("PRAGMA busy_timeout = 1")
+    blocker = sqlite3.connect(str(db.db_path), timeout=0, isolation_level=None)
+    try:
+        blocker.execute("BEGIN IMMEDIATE")
+        blocker.execute(
+            "UPDATE memories SET metadata = metadata WHERE node_id = ?", (memory_id,)
+        )
+
+        packet = build_context_packet(
+            db,
+            task="locked access accounting context output",
+            scope={"entity_id": "omega-packet-lock"},
+            budget_tokens=300,
+        )
+
+        assert packet["memories_used"] == [memory_id]
+        assert "locked access accounting" in packet["packet_markdown"]
+    finally:
+        blocker.execute("ROLLBACK")
+        blocker.close()
 
 
 async def test_context_packet_includes_graph_chain(tmp_omega_dir):

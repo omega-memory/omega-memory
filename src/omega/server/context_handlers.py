@@ -30,7 +30,7 @@ _SECTION_SPECS: List[Dict[str, Any]] = [
     {"id": "active_reminders",   "priority": 1, "event_type": None,               "limit": 10, "use_since": False, "order_by": "recency"},
     {"id": "active_constraints", "priority": 2, "event_type": "constraint",       "limit": 10, "use_since": False, "order_by": "recency"},
     {"id": "recent_decisions",   "priority": 3, "event_type": "decision",         "limit": 10, "use_since": True,  "order_by": "recency"},
-    {"id": "top_lessons",        "priority": 4, "event_type": "lesson_learned",   "limit": 10, "use_since": False, "order_by": "access"},
+    {"id": "top_lessons",        "priority": 4, "event_type": "lesson_learned",   "limit": 10, "use_since": False, "order_by": "recency"},
     {"id": "user_preferences",   "priority": 5, "event_type": "user_preference",  "limit": 8,  "use_since": False, "order_by": "recency"},
     {"id": "user_facts",         "priority": 6, "event_type": "user_fact",        "limit": 8,  "use_since": False, "order_by": "recency"},
 ]
@@ -113,9 +113,10 @@ def _query_by_event_type(
     order_by: str,
 ) -> List[Dict[str, Any]]:
     """Raw SQL filter against memories table. Skips superseded rows."""
-    order_clause = "access_count DESC, created_at DESC" if order_by == "access" else "created_at DESC"
+    # Access history is audit data, never a context-selection signal.
+    order_clause = "created_at DESC"
     sql = (
-        "SELECT node_id, content, metadata, created_at, access_count "
+        "SELECT node_id, content, metadata, created_at "
         "FROM memories WHERE event_type = ? AND COALESCE(status, 'active') != 'superseded'"
     )
     params: List[Any] = [event_type]
@@ -351,7 +352,7 @@ def _query_packet_scope_fallback(
     if scope.get("project"):
         sql += " AND COALESCE(project, '') = ?"
         params.append(scope["project"])
-    sql += " ORDER BY access_count DESC, created_at DESC LIMIT ?"
+    sql += " ORDER BY created_at DESC LIMIT ?"
     params.append(limit)
 
     try:
@@ -951,8 +952,19 @@ def build_context_packet(
         include_receipt=include_receipt,
     )
 
-    rendered_id_prefixes = set(_rendered_packet_memory_ids(packet_markdown))
-    used_ids = [item["id"] for item in admitted if item["id"][:12] in rendered_id_prefixes]
+    rendered_id_prefixes = _rendered_packet_memory_ids(packet_markdown)
+    used_ids: List[str] = []
+    for prefix in rendered_id_prefixes:
+        matched = next(
+            (
+                item["id"]
+                for item in admitted
+                if item["id"].startswith(prefix) and item["id"] not in used_ids
+            ),
+            None,
+        )
+        if matched:
+            used_ids.append(matched)
     render_rank = {node_id: idx for idx, node_id in enumerate(used_ids, start=1)}
     for receipt in candidate_receipts:
         if receipt["id"] in render_rank:
@@ -974,6 +986,14 @@ def build_context_packet(
         ),
         "budget_tokens": budget_tokens,
     }
+    try:
+        recorder = getattr(db, "record_memory_accesses", None)
+        if recorder is not None:
+            recorder(used_ids)
+    except Exception as exc:
+        # Access accounting is best effort. A valid context packet must never
+        # become an error because its audit write lost a lock race.
+        logger.warning("context_packet: access accounting failed: %s", exc)
     return {
         "packet_markdown": packet_markdown,
         "chains": chains,
