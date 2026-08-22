@@ -252,29 +252,35 @@ class TestDecayCurves:
         assert fresh_id in ids and old_id in ids, f"Both should be returned, got {ids}"
         assert ids.index(fresh_id) < ids.index(old_id), "Fresh should rank above old"
 
-    def test_accessed_old_ranks_above_unaccessed_old(self):
-        """An old memory with recent access should rank above equally old unaccessed one."""
+    def test_access_is_bounded_tie_signal_not_decay_protection(self):
+        """Access can break an exact semantic tie but cannot shield old memory decay."""
+        from omega.sqlite_store._query import _score_bounded_metadata
+
         store = _get_store()
         old_date = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         recent_access = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-
-        unaccessed_id = _insert_memory(
-            store,
-            "API rate limiting uses token bucket algorithm for request throttling configuration",
-            "decision",
+        unaccessed_decay = store._compute_decay_factor(
+            "decision", old_date, old_date, access_count=0
         )
-        _set_timestamps(store, unaccessed_id, created_at=old_date, last_accessed=old_date, access_count=0)
-
-        accessed_id = _insert_memory(
-            store,
-            "Request throttling via API rate limiting protects against excessive traffic loads",
-            "decision",
+        accessed_decay = store._compute_decay_factor(
+            "decision", recent_access, old_date, access_count=500
         )
-        _set_timestamps(store, accessed_id, created_at=old_date, last_accessed=recent_access, access_count=10)
+        unaccessed_score, _ = _score_bounded_metadata(
+            semantic_score=0.8,
+            best_semantic_score=0.8,
+            priority=3,
+            access_count=0,
+        )
+        accessed_score, reasons = _score_bounded_metadata(
+            semantic_score=0.8,
+            best_semantic_score=0.8,
+            priority=3,
+            access_count=500,
+        )
 
-        ids = _query_ids(store, "API rate limiting request throttling")
-        assert accessed_id in ids and unaccessed_id in ids, f"Both should be returned, got {ids}"
-        assert ids.index(accessed_id) < ids.index(unaccessed_id), "Accessed old > unaccessed old"
+        assert accessed_decay == pytest.approx(unaccessed_decay)
+        assert accessed_score - unaccessed_score == pytest.approx(0.0025)
+        assert reasons["bounded_access_count"] == 3
 
     def test_user_preference_no_decay(self):
         """user_preference has lambda=0.0 and should not decay even after a year."""

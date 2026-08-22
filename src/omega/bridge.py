@@ -781,7 +781,7 @@ def _auto_relate(store, node_id: str, max_related: int = 3, min_similarity: floa
         if not candidates:
             return 0
 
-        source_node = store.get_node(node_id)
+        source_node = store.get_node(node_id, track_access=False)
         if not source_node:
             return 0
         src_meta = source_node.metadata or {}
@@ -1216,7 +1216,6 @@ def auto_capture(
                 else:
                     sim = _jaccard(content.lower(), existing.content.lower())
                 if sim > dedup_threshold:
-                    store.update_node(existing.id, access_count=(existing.access_count or 0) + 1)
                     store.stats.setdefault("content_dedup_skips", 0)
                     store.stats["content_dedup_skips"] += 1
                     _schedule_auto_relate(store, existing.id)
@@ -1257,14 +1256,10 @@ def auto_capture(
                     old_words = {w.lower() for w in existing.content.split() if len(w) > 3}
                     new_info = {w.lower() for w in content.split() if len(w) > 3} - old_words
                     if len(new_info) == 0:
-                        # Near-exact reconfirmation — bump access count to strengthen memory
-                        store.update_node(
-                            existing.id,
-                            access_count=(existing.access_count or 0) + 1,
-                        )
+                        # Reconfirmation is a write outcome, not a retrieval.
                         store.stats.setdefault("reconfirmation_bumps", 0)
                         store.stats["reconfirmation_bumps"] += 1
-                        return f"Reconfirmed {existing.id} (access bumped)"
+                        return f"Reconfirmed {existing.id}"
                     # Allow evolution with even 1 new word (was 3 — caused dead zone)
                     # The sentence-level filter below still requires >= 2 new words per sentence
 
@@ -1298,7 +1293,6 @@ def auto_capture(
                             existing.id,
                             content=new_content,
                             metadata=emeta,
-                            access_count=(existing.access_count or 0) + 1,
                         )
 
                         store.stats.setdefault("memory_evolutions", 0)
@@ -1338,7 +1332,9 @@ def auto_capture(
                 # Flag-only: add conflict_flags to metadata for visibility
                 if not conflict["auto_resolve"] and conflict.get("existing_id"):
                     try:
-                        existing_node = store.get_node(conflict["existing_id"])
+                        existing_node = store.get_node(
+                            conflict["existing_id"], track_access=False
+                        )
                         if existing_node:
                             emeta = dict(existing_node.metadata or {})
                             flags = emeta.get("conflict_flags", [])
@@ -2013,8 +2009,7 @@ def query(
         except Exception as e:
             logger.warning("Embedding degradation check failed: %s", e)
 
-        for memory_id in rendered_ids:
-            db.record_memory_access(memory_id)
+        db.record_memory_accesses(list(rendered_ids))
 
         logger.info(f"Query '{query_text[:30]}...' returned {len(results)} results")
         return output
@@ -2185,8 +2180,9 @@ def query_structured(
             except Exception as e:
                 logger.debug("Preference injection failed (structured): %s", e)
 
-        for memory_id in {item["id"] for item in structured if item.get("id")}:
-            db.record_memory_access(memory_id)
+        db.record_memory_accesses(
+            [item["id"] for item in structured if item.get("id")]
+        )
         return structured
 
     except Exception as e:
@@ -5154,7 +5150,7 @@ def list_reminders(
 def dismiss_reminder(reminder_id: str) -> Dict[str, Any]:
     """Dismiss a reminder by updating its status."""
     db = _get_store()
-    node = db.get_node(reminder_id)
+    node = db.get_node(reminder_id, track_access=False)
     if node is None:
         return {"success": False, "error": f"Reminder {reminder_id} not found"}
 
@@ -5185,7 +5181,7 @@ def get_due_reminders(
         db = _get_store()
         now_iso = datetime.now(timezone.utc).isoformat()
         for r in due:
-            node = db.get_node(r["id"])
+            node = db.get_node(r["id"], track_access=False)
             if node:
                 meta = dict(node.metadata or {})
                 meta["reminder_status"] = "fired"

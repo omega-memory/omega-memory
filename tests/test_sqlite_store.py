@@ -1032,14 +1032,15 @@ class TestDeduplicationComprehensive:
         )
         assert id1 == id2
 
-    def test_dedup_bumps_access_count(self, store):
-        """Dedup hit should increment access_count on existing node."""
+    def test_dedup_does_not_count_as_retrieval_access(self, store):
+        """Duplicate write suppression is not a user retrieval."""
         nid = store.store(content="dedup access bump check")
-        # Store duplicate -- dedup bumps access_count from 0 to 1
         store.store(content="dedup access bump check")
-        # get_node SELECTs before its own increment, so returns 1
-        node = store.get_node(nid)
-        assert node.access_count >= 1
+        row = store._conn.execute(
+            "SELECT access_count, last_accessed FROM memories WHERE node_id = ?",
+            (nid,),
+        ).fetchone()
+        assert row == (0, None)
 
     def test_dedup_stats_incremented(self, store):
         """Dedup should be reflected in stats counters."""

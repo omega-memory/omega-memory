@@ -681,6 +681,122 @@ def test_explicit_access_path_records_direct_retrieval(store):
     assert row[1] is not None
 
 
+def test_batch_access_recording_deduplicates_ids_but_preserves_audit_growth(store):
+    """One packet increments each unique rendered ID once without saturating history."""
+    first = store.store("First batch access record", skip_inference=True)
+    second = store.store("Second batch access record", skip_inference=True)
+    store._conn.execute(
+        "UPDATE memories SET access_count = 9 WHERE node_id = ?", (first,)
+    )
+    store._conn.commit()
+
+    updated = store.record_memory_accesses([first, first, second])
+
+    rows = store._conn.execute(
+        "SELECT node_id, access_count FROM memories WHERE node_id IN (?, ?)",
+        (first, second),
+    ).fetchall()
+    assert updated == 2
+    assert dict(rows) == {first: 10, second: 1}
+
+
+def test_direct_fetch_survives_access_accounting_failure(store, monkeypatch):
+    """A bookkeeping write failure cannot turn a successful read into an error."""
+    memory_id = store.store("Readable despite access write failure", skip_inference=True)
+
+    def fail_access_commit():
+        raise sqlite3.OperationalError("injected access commit failure")
+
+    monkeypatch.setattr(store, "_commit", fail_access_commit)
+
+    node = store.get_node(memory_id)
+
+    assert node is not None
+    assert node.id == memory_id
+
+
+def test_direct_fetch_survives_second_connection_write_lock(store, monkeypatch):
+    """A real SQLite writer lock may lose accounting, never the successful read."""
+    memory_id = store.store("Readable while another connection writes", skip_inference=True)
+    monkeypatch.setattr("omega.db_utils.DB_RETRY_ATTEMPTS", 1)
+    store._conn.execute("PRAGMA busy_timeout = 1")
+    blocker = sqlite3.connect(str(store.db_path), timeout=0, isolation_level=None)
+    try:
+        blocker.execute("BEGIN IMMEDIATE")
+        blocker.execute(
+            "UPDATE memories SET metadata = metadata WHERE node_id = ?", (memory_id,)
+        )
+
+        node = store.get_node(memory_id)
+
+        assert node is not None
+        assert node.id == memory_id
+    finally:
+        blocker.execute("ROLLBACK")
+        blocker.close()
+
+
+def test_link_validation_does_not_increment_access(handler_store):
+    """Existence checks for a link are validation, not retrieval."""
+    from omega.server.handlers import handle_omega_link
+
+    source = handler_store.store("Link validation source", skip_inference=True)
+    target = handler_store.store("Link validation target", skip_inference=True)
+
+    response = asyncio.run(
+        handle_omega_link({"memory_id": source, "target_id": target})
+    )
+
+    assert not response.get("isError")
+    rows = handler_store._conn.execute(
+        "SELECT node_id, access_count FROM memories WHERE node_id IN (?, ?)",
+        (source, target),
+    ).fetchall()
+    assert dict(rows) == {source: 0, target: 0}
+
+
+def test_rejected_delete_ownership_check_does_not_increment_access(handler_store):
+    """A failed authorization validation cannot count as memory use."""
+    from omega.server.handlers import handle_omega_delete_memory
+
+    memory_id = handler_store.store(
+        "Owned delete validation record",
+        session_id="owner-session",
+        skip_inference=True,
+    )
+
+    response = asyncio.run(
+        handle_omega_delete_memory(
+            {"memory_id": memory_id, "caller_session_id": "other-session"}
+        )
+    )
+
+    assert response.get("isError")
+    access_count = handler_store._conn.execute(
+        "SELECT access_count FROM memories WHERE node_id = ?", (memory_id,)
+    ).fetchone()[0]
+    assert access_count == 0
+
+
+def test_pattern_reconfirmation_does_not_increment_access(handler_store):
+    """Confirming an existing behavioral pattern is a mutation, not retrieval."""
+    from omega.server.handlers import _handle_habits_confirm
+
+    pattern_id = handler_store.store(
+        "Behavioral pattern awaiting confirmation",
+        metadata={"event_type": "behavioral_pattern", "confidence": 0.5},
+        skip_inference=True,
+    )
+
+    response = asyncio.run(_handle_habits_confirm({"pattern_id": pattern_id}))
+
+    assert not response.get("isError")
+    access_count = handler_store._conn.execute(
+        "SELECT access_count FROM memories WHERE node_id = ?", (pattern_id,)
+    ).fetchone()[0]
+    assert access_count == 0
+
+
 def test_final_rendered_query_records_only_returned_context(handler_store, monkeypatch):
     """The bridge records an access after a result survives final filtering."""
     import omega.bridge as bridge
@@ -882,3 +998,159 @@ def test_public_query_prefers_semantic_result_over_hot_high_priority_history(sto
     assert reasons["semantic"] > results[1].metadata["_ranking_reasons"]["semantic"]
     assert reasons["priority_contribution"] == 0.0
     assert reasons["access_contribution"] == 0.0
+
+
+def test_metadata_contributions_remain_capped_after_later_score_multipliers(store, monkeypatch):
+    """Context and word boosts cannot multiply priority/access influence."""
+    import omega.sqlite_store._query as query_module
+    import omega.reranker as reranker
+
+    query_text = "bounded metadata multiplier contract"
+    plain_id = store.store(
+        "Bounded metadata multiplier contract plain candidate",
+        metadata={"event_type": "memory", "priority": 1},
+        skip_inference=True,
+    )
+    boosted_id = store.store(
+        "Bounded metadata multiplier contract metadata-target.py candidate",
+        metadata={"event_type": "memory", "priority": 5},
+        skip_inference=True,
+    )
+    store._conn.execute(
+        "UPDATE memories SET access_count = 500 WHERE node_id = ?", (boosted_id,)
+    )
+    store._conn.commit()
+    monkeypatch.setattr(query_module, "STRONG_SIGNAL_THRESHOLD", 99.0)
+    monkeypatch.setattr(reranker, "cross_encoder_score", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_fast_path_lookup", lambda *_args, **_kwargs: [])
+
+    def fake_vec(
+        _query_text, _skip_vec, _entity_id, _limit, all_results,
+        vec_ranked, raw_vec_sims, query_embedding=None,
+    ):
+        del query_embedding
+        for memory_id in (plain_id, boosted_id):
+            all_results[memory_id] = store.get_node(memory_id, track_access=False)
+            vec_ranked.append((memory_id, 0.8))
+            raw_vec_sims[memory_id] = 0.8
+        return None
+
+    def fake_fts(
+        _query_text, _temporal_range, _entity_id, _limit, all_results,
+        text_ranked, _temporal_ranked,
+    ):
+        for memory_id in (plain_id, boosted_id):
+            all_results[memory_id] = store.get_node(memory_id, track_access=False)
+            text_ranked.append((memory_id, 0.8))
+
+    monkeypatch.setattr(store, "_query_phase_vec", fake_vec)
+    monkeypatch.setattr(store, "_query_phase_fts", fake_fts)
+
+    results = store.query(
+        query_text,
+        limit=2,
+        context_file="metadata-target.py",
+        use_cache=False,
+        expand_query=False,
+    )
+
+    boosted = {result.id: result for result in results}[boosted_id]
+    reasons = boosted.metadata["_ranking_reasons"]
+    assert reasons["priority_contribution"] == pytest.approx(0.005)
+    assert reasons["access_contribution"] == pytest.approx(0.0025)
+    assert reasons["final"] - reasons["pre_metadata_final"] == pytest.approx(0.0075)
+    assert reasons["final"] == pytest.approx(
+        store._recent_query_context[boosted_id]["score"], abs=0.00011
+    )
+
+
+def test_strong_signal_results_always_have_safe_ranking_reasons(store, monkeypatch):
+    """The early return path must emit the same ranking diagnostics as normal queries."""
+    import omega.sqlite_store._query as query_module
+
+    first = store.store("Strong signal ranking diagnostics exact match", skip_inference=True)
+    second = store.store("Strong signal ranking diagnostics weaker match", skip_inference=True)
+    monkeypatch.setattr(query_module, "STRONG_SIGNAL_THRESHOLD", 0.9)
+    monkeypatch.setattr(query_module, "STRONG_SIGNAL_GAP", 0.5)
+    monkeypatch.setattr(store, "_fast_path_lookup", lambda *_args, **_kwargs: [])
+
+    def no_vec(*_args, **_kwargs):
+        return None
+
+    def fake_fts(
+        _query_text, _temporal_range, _entity_id, _limit, all_results,
+        text_ranked, _temporal_ranked,
+    ):
+        for memory_id, score in ((first, 0.95), (second, 0.2)):
+            all_results[memory_id] = store.get_node(memory_id, track_access=False)
+            text_ranked.append((memory_id, score))
+
+    monkeypatch.setattr(store, "_query_phase_vec", no_vec)
+    monkeypatch.setattr(store, "_query_phase_fts", fake_fts)
+
+    results = store.query(
+        "strong signal ranking diagnostics",
+        limit=2,
+        use_cache=False,
+        expand_query=False,
+    )
+
+    assert store.stats["strong_signal_shortcuts"] == 1
+    assert results
+    for result in results:
+        reasons = result.metadata["_ranking_reasons"]
+        assert reasons["priority_contribution"] == 0.0
+        assert reasons["access_contribution"] == 0.0
+        assert reasons["final"] == pytest.approx(
+            store._recent_query_context[result.id]["score"], abs=0.00011
+        )
+
+
+def test_graph_expansion_results_receive_safe_ranking_reasons(store, monkeypatch):
+    """A valid candidate introduced after fusion still has complete diagnostics."""
+    import omega.sqlite_store._query as query_module
+    import omega.reranker as reranker
+
+    anchor = store.store(
+        "MARKERANCHOR zebrafish payroll ledger Helsinki",
+        skip_inference=True,
+    )
+    neighbour = store.store(
+        "MARKERNEIGHBOUR zebrafish quarterly narwhal telemetry",
+        skip_inference=True,
+    )
+    store.add_edge(anchor, neighbour, edge_type="related", weight=1.0)
+    monkeypatch.setattr(query_module, "STRONG_SIGNAL_THRESHOLD", 99.0)
+    monkeypatch.setattr(reranker, "cross_encoder_score", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_fast_path_lookup", lambda *_args, **_kwargs: [])
+
+    def fake_vec(
+        _query_text, _skip_vec, _entity_id, _limit, all_results,
+        vec_ranked, raw_vec_sims, query_embedding=None,
+    ):
+        del query_embedding
+        all_results[anchor] = store.get_node(anchor, track_access=False)
+        vec_ranked.append((anchor, 0.9))
+        raw_vec_sims[anchor] = 0.9
+        return None
+
+    def fake_fts(
+        _query_text, _temporal_range, _entity_id, _limit, all_results,
+        text_ranked, _temporal_ranked,
+    ):
+        all_results[anchor] = store.get_node(anchor, track_access=False)
+        text_ranked.append((anchor, 0.8))
+
+    monkeypatch.setattr(store, "_query_phase_vec", fake_vec)
+    monkeypatch.setattr(store, "_query_phase_fts", fake_fts)
+
+    results = store.query("zebrafish record", limit=10, use_cache=False)
+
+    by_id = {result.id: result for result in results}
+    assert neighbour in by_id
+    reasons = by_id[neighbour].metadata["_ranking_reasons"]
+    assert reasons["priority_contribution"] == 0.0
+    assert reasons["access_contribution"] == 0.0
+    assert reasons["final"] == pytest.approx(
+        store._recent_query_context[neighbour]["score"], abs=0.00011
+    )

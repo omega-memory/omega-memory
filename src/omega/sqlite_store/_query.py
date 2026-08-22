@@ -889,7 +889,7 @@ class QueryMixin:
             # Consolidation quality boost (compacted knowledge nodes)
             cq = node.metadata.get("consolidation_quality", 0)
             consolidation_factor = 1.0 + min(max(cq, 0), 3.0) * 0.1
-            score, reasons = _score_bounded_metadata(
+            score_with_metadata, reasons = _score_bounded_metadata(
                 semantic_score=semantic_score,
                 best_semantic_score=best_semantic,
                 priority=priority,
@@ -908,9 +908,16 @@ class QueryMixin:
                     -QUALITY_MAX_ADDITIVE,
                     min(QUALITY_MAX_ADDITIVE, (quality_factor - 1.0) * QUALITY_MAX_ADDITIVE),
                 )
-                score += quality_contribution
+            metadata_contribution = (
+                float(reasons["priority_contribution"])
+                + float(reasons["access_contribution"])
+            )
+            # Later word/context/reranker multipliers operate on the semantic
+            # and quality score only. The bounded priority/access amount is
+            # added exactly once immediately before final sorting.
+            score = score_with_metadata - metadata_contribution + quality_contribution
             reasons["quality_contribution"] = round(quality_contribution, 6)
-            reasons["final"] = round(score, 6)
+            reasons["_pending_metadata_contribution"] = metadata_contribution
             node.metadata["_ranking_reasons"] = reasons
             node_scores[nid] = score
 
@@ -1492,6 +1499,38 @@ class QueryMixin:
             _SESSION_CACHE_MAX,
             _TRAILING_HASH_RE,
         )
+
+        # Apply bounded metadata exactly once at the final sort boundary and
+        # ensure candidates introduced after fusion have safe diagnostics.
+        for nid in list(node_scores):
+            node = all_results[nid]
+            reasons = node.metadata.get("_ranking_reasons")
+            pending = None
+            if isinstance(reasons, dict):
+                pending = reasons.pop("_pending_metadata_contribution", None)
+            if pending is None:
+                raw = float(node_scores[nid])
+                priority = node.metadata.get("priority", 3)
+                reasons = {
+                    "semantic": round(raw, 6),
+                    "semantic_best": round(raw, 6),
+                    "near_tie": False,
+                    "priority": max(1, min(5, int(priority))),
+                    "priority_contribution": 0.0,
+                    "access_count": max(0, int(node.access_count or 0)),
+                    "bounded_access_count": min(
+                        max(0, int(node.access_count or 0)), ACCESS_SCORING_CAP
+                    ),
+                    "access_contribution": 0.0,
+                    "quality_contribution": 0.0,
+                }
+                pending = 0.0
+            pre_metadata_final = float(node_scores[nid])
+            final_score = pre_metadata_final + float(pending)
+            node_scores[nid] = final_score
+            reasons["pre_metadata_final"] = round(pre_metadata_final, 6)
+            reasons["final"] = round(final_score, 6)
+            node.metadata["_ranking_reasons"] = reasons
 
         # Sort and dedup
         sorted_ids = sorted(node_scores.keys(), key=lambda x: node_scores[x], reverse=True)

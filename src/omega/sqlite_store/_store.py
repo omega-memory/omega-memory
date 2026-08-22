@@ -174,11 +174,6 @@ class StoreMixin:
                 (canonical_hash,),
             ).fetchone()
             if canonical_existing:
-                self._exec(
-                    "UPDATE memories SET access_count = access_count + 1 WHERE node_id = ?",
-                    (canonical_existing[0],),
-                )
-                self._commit()
                 self.stats.setdefault("dedup_canonical", 0)
                 self.stats["dedup_canonical"] += 1
                 self._last_store_deduped = True
@@ -194,10 +189,6 @@ class StoreMixin:
                 (content_hash,),
             ).fetchone()
             if existing:
-                self._exec(
-                    "UPDATE memories SET access_count = access_count + 1 WHERE node_id = ?", (existing[0],)
-                )
-                self._commit()
                 self.stats.setdefault("dedup_exact", 0)
                 self.stats["dedup_exact"] += 1
                 self._last_store_deduped = True
@@ -380,19 +371,43 @@ class StoreMixin:
         consumes only the calibrated capped portion, so extreme historical
         values cannot create an unbounded feedback loop.
         """
+        return self.record_memory_accesses([node_id]) > 0
+
+    def record_memory_accesses(self, node_ids: List[str]) -> int:
+        """Best-effort batch accounting for unique rendered/direct memory IDs.
+
+        Persisted counts remain an unbounded audit trail. Ranking consumes only
+        the separately capped contribution, and accounting failures never turn
+        an otherwise successful read into an error.
+        """
+        unique_ids = list(dict.fromkeys(
+            node_id for node_id in node_ids if isinstance(node_id, str) and node_id
+        ))
+        if not unique_ids:
+            return 0
+
         self._invalidate_query_cache()
-        with self._lock:
-            now = datetime.now(timezone.utc).isoformat()
-            cursor = self._exec(
-                """UPDATE memories
-                   SET access_count = access_count + 1, last_accessed = ?
-                   WHERE node_id = ?""",
-                (now, node_id),
-            )
-            if cursor.rowcount <= 0:
-                return False
-            self._commit()
-            return True
+        try:
+            with self._lock:
+                now = datetime.now(timezone.utc).isoformat()
+                placeholders = ",".join("?" for _ in unique_ids)
+                cursor = self._conn.execute(
+                    f"""UPDATE memories
+                        SET access_count = access_count + 1, last_accessed = ?
+                        WHERE node_id IN ({placeholders})""",
+                    (now, *unique_ids),
+                )
+                updated = max(cursor.rowcount, 0)
+                self._commit()
+                return updated
+        except Exception as exc:
+            logger.warning("Memory access accounting skipped: %s", exc)
+            try:
+                with self._lock:
+                    self._conn.rollback()
+            except Exception:
+                logger.debug("Access accounting rollback failed", exc_info=True)
+            return 0
 
     def delete_node(self, node_id: str) -> bool:
         """Delete a node and its edges."""

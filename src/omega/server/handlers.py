@@ -1111,7 +1111,7 @@ async def handle_omega_delete_memory(arguments: dict) -> dict:
         # Session ownership check: verify caller owns this memory
         if caller_session_id and not force:
             db = _get_store()
-            node = db.get_node(memory_id)
+            node = db.get_node(memory_id, track_access=False)
             if node is not None:
                 mem_session = (node.metadata or {}).get("session_id", "")
                 if mem_session and mem_session != caller_session_id:
@@ -2136,8 +2136,8 @@ async def handle_omega_link(arguments: dict) -> dict:
 
         db = _get_store()
         # Verify both memories exist
-        source = db.get_node(memory_id)
-        target = db.get_node(target_id)
+        source = db.get_node(memory_id, track_access=False)
+        target = db.get_node(target_id, track_access=False)
         if source is None:
             return mcp_error(f"Source memory `{memory_id}` not found")
         if target is None:
@@ -2907,7 +2907,7 @@ async def _handle_habits_confirm(arguments: dict) -> dict:
         from omega.bridge import _get_store
 
         store = _get_store()
-        node = store.get_node(pattern_id)
+        node = store.get_node(pattern_id, track_access=False)
         if node is None:
             return mcp_error(f"Pattern `{pattern_id}` not found")
 
@@ -2943,7 +2943,7 @@ async def _handle_habits_deny(arguments: dict) -> dict:
         from omega.bridge import _get_store
 
         store = _get_store()
-        node = store.get_node(pattern_id)
+        node = store.get_node(pattern_id, track_access=False)
         if node is None:
             return mcp_error(f"Pattern `{pattern_id}` not found")
 
