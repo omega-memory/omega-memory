@@ -7,7 +7,6 @@ by the shared test fixture.
 
 import asyncio
 import json
-from datetime import datetime, timezone
 
 import pytest
 
@@ -121,18 +120,26 @@ def test_priority_only_edit_preserves_memory_identity_and_history(handler_store)
     from omega.server.handlers import handle_omega_memory
 
     memory_id = handler_store.store(
-        "Keep this decision and its history", metadata={"event_type": "decision", "priority": 2}
+        "Keep this decision and its history",
+        metadata={
+            "event_type": "decision",
+            "priority": 2,
+            "revision_history": [{"source": "import"}],
+        },
+        entity_id="release-contract",
     )
     related_id = handler_store.store("Related decision", metadata={"event_type": "decision"})
     assert handler_store.add_edge(memory_id, related_id, "related")
     accessed_at = "2026-08-22T00:00:00+00:00"
     handler_store._conn.execute(
-        "UPDATE memories SET access_count = ?, last_accessed = ? WHERE node_id = ?",
-        (7, accessed_at, memory_id),
+        "UPDATE memories SET access_count = ?, last_accessed = ?, updated_at = ? WHERE node_id = ?",
+        (7, accessed_at, "2026-08-21T00:00:00+00:00", memory_id),
     )
     handler_store._conn.commit()
     before = handler_store._conn.execute(
-        "SELECT node_id, created_at, access_count, last_accessed FROM memories WHERE node_id = ?",
+        """SELECT node_id, content, entity_id, created_at, updated_at,
+                  access_count, last_accessed, metadata
+           FROM memories WHERE node_id = ?""",
         (memory_id,),
     ).fetchone()
 
@@ -142,13 +149,118 @@ def test_priority_only_edit_preserves_memory_identity_and_history(handler_store)
 
     assert not response.get("isError")
     after = handler_store._conn.execute(
-        "SELECT node_id, created_at, access_count, last_accessed, priority FROM memories WHERE node_id = ?",
+        """SELECT node_id, content, entity_id, created_at, updated_at,
+                  access_count, last_accessed, metadata, priority
+           FROM memories WHERE node_id = ?""",
         (memory_id,),
     ).fetchone()
-    assert after[:4] == before
-    assert after[4] == 5
+    assert after[0] == before[0]
+    assert after[1] == before[1]
+    assert after[2] == before[2]
+    assert after[3] == before[3]
+    assert after[5] == before[5]
+    assert after[6] == before[6]
+    assert json.loads(after[7])["revision_history"] == json.loads(before[7])["revision_history"]
+    assert after[4] > before[4]
+    assert after[8] == 5
     assert _metadata(handler_store, memory_id)["priority"] == 5
     assert _edge_count(handler_store, memory_id, related_id, "related") == 1
+
+
+def test_edit_accepts_content_only(handler_store):
+    """Content-only edits retain the existing priority."""
+    from omega.server.handlers import handle_omega_memory
+
+    memory_id = handler_store.store(
+        "Original content", metadata={"event_type": "decision", "priority": 2}
+    )
+
+    response = asyncio.run(
+        handle_omega_memory(
+            {"action": "edit", "memory_id": memory_id, "new_content": "Corrected content"}
+        )
+    )
+
+    assert not response.get("isError")
+    row = handler_store._conn.execute(
+        "SELECT content, priority FROM memories WHERE node_id = ?", (memory_id,)
+    ).fetchone()
+    assert row == ("Corrected content", 2)
+
+
+def test_edit_accepts_priority_only(handler_store):
+    """Priority-only correction is a first-class edit operation."""
+    from omega.server.handlers import handle_omega_memory
+
+    memory_id = handler_store.store(
+        "Priority correction", metadata={"event_type": "decision", "priority": 2}
+    )
+
+    response = asyncio.run(
+        handle_omega_memory({"action": "edit", "memory_id": memory_id, "priority": 4})
+    )
+
+    assert not response.get("isError")
+    assert handler_store._conn.execute(
+        "SELECT priority FROM memories WHERE node_id = ?", (memory_id,)
+    ).fetchone()[0] == 4
+
+
+def test_edit_accepts_content_and_priority(handler_store):
+    """A single edit may correct content and priority together."""
+    from omega.server.handlers import handle_omega_memory
+
+    memory_id = handler_store.store(
+        "Original policy", metadata={"event_type": "decision", "priority": 2}
+    )
+
+    response = asyncio.run(
+        handle_omega_memory(
+            {
+                "action": "edit",
+                "memory_id": memory_id,
+                "new_content": "Corrected policy",
+                "priority": 5,
+            }
+        )
+    )
+
+    assert not response.get("isError")
+    assert handler_store._conn.execute(
+        "SELECT content, priority FROM memories WHERE node_id = ?", (memory_id,)
+    ).fetchone() == ("Corrected policy", 5)
+
+
+def test_edit_rejects_request_with_neither_content_nor_priority(handler_store):
+    """An edit must contain at least one mutable field."""
+    from omega.server.handlers import handle_omega_memory
+
+    memory_id = handler_store.store("No-op edit", metadata={"event_type": "decision"})
+
+    response = asyncio.run(handle_omega_memory({"action": "edit", "memory_id": memory_id}))
+
+    assert response.get("isError")
+
+
+@pytest.mark.parametrize("priority", [0, 6])
+def test_edit_rejects_priority_outside_supported_range(handler_store, priority):
+    """Priority is constrained to the documented inclusive range of one through five."""
+    from omega.server.handlers import handle_omega_memory
+
+    memory_id = handler_store.store("Range checked priority", metadata={"event_type": "decision"})
+
+    response = asyncio.run(
+        handle_omega_memory(
+            {
+                "action": "edit",
+                "memory_id": memory_id,
+                "new_content": "Still valid content",
+                "priority": priority,
+            }
+        )
+    )
+
+    assert response.get("isError")
 
 
 def test_search_does_not_count_returned_results_as_accesses(store):
@@ -167,35 +279,57 @@ def test_search_does_not_count_returned_results_as_accesses(store):
     assert after == before
 
 
-def test_semantic_rank_beats_high_priority_metadata_outside_a_near_tie(store):
-    """Priority is a bounded tie-breaker, never a replacement for relevance."""
-    from omega.sqlite_store._types import MemoryResult
-
-    now = datetime.now(timezone.utc)
-    semantic_id = "semantic-winner"
-    metadata_id = "high-priority-metadata"
-    all_results = {
-        semantic_id: MemoryResult(
-            semantic_id, "the semantically relevant record", {"event_type": "memory", "priority": 1}, now
-        ),
-        metadata_id: MemoryResult(
-            metadata_id, "the metadata-favoured record", {"event_type": "memory", "priority": 5}, now
-        ),
-    }
-    scores = {}
-
-    store._query_phase_fusion(
-        "relevant query",
-        all_results,
-        scores,
-        [(semantic_id, 0.90), (metadata_id, 0.10)],
-        [(semantic_id, 0.90), (metadata_id, 0.10)],
-        [],
-        1.0,
-        1.0,
-        0.0,
-        0.0,
-        None,
+def test_public_query_prefers_semantic_result_over_hot_high_priority_history(store, monkeypatch):
+    """The public query path must not let hot/access metadata outrank relevance."""
+    query_text = "semantic retrieval contract check"
+    semantic_id = store.store(
+        "Semantic retrieval contract check canonical answer.",
+        metadata={"event_type": "memory", "priority": 1},
     )
+    hot_id = store.store(
+        "Semantic retrieval contract check legacy stale answer.",
+        metadata={"event_type": "memory", "priority": 5},
+    )
+    store._conn.execute(
+        "UPDATE memories SET access_count = ? WHERE node_id = ?", (500, hot_id)
+    )
+    store._conn.commit()
+    store._refresh_hot_cache()
+    monkeypatch.setattr(store, "_fast_path_lookup", lambda *_args, **_kwargs: [])
 
-    assert scores[semantic_id] > scores[metadata_id]
+    def fake_vec(
+        _query_text,
+        _skip_vec,
+        _entity_id,
+        _limit,
+        all_results,
+        vec_ranked,
+        raw_vec_sims,
+        query_embedding=None,
+    ):
+        del query_embedding
+        for memory_id, similarity in ((semantic_id, 0.90), (hot_id, 0.10)):
+            all_results[memory_id] = store.get_node(memory_id, track_access=False)
+            vec_ranked.append((memory_id, similarity))
+            raw_vec_sims[memory_id] = similarity
+        return None
+
+    def fake_fts(
+        _query_text,
+        _temporal_range,
+        _entity_id,
+        _limit,
+        all_results,
+        text_ranked,
+        _temporal_ranked,
+    ):
+        for memory_id, relevance in ((semantic_id, 0.80), (hot_id, 0.70)):
+            all_results[memory_id] = store.get_node(memory_id, track_access=False)
+            text_ranked.append((memory_id, relevance))
+
+    monkeypatch.setattr(store, "_query_phase_vec", fake_vec)
+    monkeypatch.setattr(store, "_query_phase_fts", fake_fts)
+
+    results = store.query(query_text, limit=2, use_cache=False, expand_query=False)
+
+    assert results[0].id == semantic_id
