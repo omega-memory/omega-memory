@@ -647,9 +647,10 @@ def _render_context_packet(
     warnings: List[Dict[str, Any]],
     budget_tokens: int,
     include_receipt: bool,
+    rendered_ids_out: Optional[List[str]] = None,
 ) -> str:
     lines = [f"[MEMORY_CONTEXT] Context packet for {title}"]
-    used_ids: set[str] = set()
+    used_ids: List[str] = []
 
     by_section: Dict[str, List[Dict[str, Any]]] = {}
     for item in admitted:
@@ -685,7 +686,7 @@ def _render_context_packet(
         candidate = f"- `{top_item['id'][:12]}`{edge}: {_packet_snippet(top_item['content'])}"
         if can_add(candidate):
             lines.append(candidate)
-            used_ids.add(top_item["id"])
+            used_ids.append(top_item["id"])
             rendered_count += 1
 
     for section in section_order:
@@ -710,7 +711,8 @@ def _render_context_packet(
             if not can_add(candidate):
                 break
             lines.append(candidate)
-            used_ids.add(item["id"])
+            if item["id"] not in used_ids:
+                used_ids.append(item["id"])
             rendered_count += 1
 
     warning_lines = _render_packet_warning_summary(warnings)
@@ -733,6 +735,8 @@ def _render_context_packet(
         if can_add(receipt):
             lines.append(receipt)
 
+    if rendered_ids_out is not None:
+        rendered_ids_out.extend(used_ids)
     return "\n".join(lines)
 
 
@@ -944,27 +948,16 @@ def build_context_packet(
             warnings.append({"reason": reason, "item": item})
 
     title = os.path.basename(files[0]) if files else (task[:48] or "current task")
+    used_ids: List[str] = []
     packet_markdown = _render_context_packet(
         title=title,
         admitted=admitted,
         warnings=warnings,
         budget_tokens=budget_tokens,
         include_receipt=include_receipt,
+        rendered_ids_out=used_ids,
     )
 
-    rendered_id_prefixes = _rendered_packet_memory_ids(packet_markdown)
-    used_ids: List[str] = []
-    for prefix in rendered_id_prefixes:
-        matched = next(
-            (
-                item["id"]
-                for item in admitted
-                if item["id"].startswith(prefix) and item["id"] not in used_ids
-            ),
-            None,
-        )
-        if matched:
-            used_ids.append(matched)
     render_rank = {node_id: idx for idx, node_id in enumerate(used_ids, start=1)}
     for receipt in candidate_receipts:
         if receipt["id"] in render_rank:

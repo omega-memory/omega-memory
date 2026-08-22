@@ -176,6 +176,62 @@ def test_context_packet_records_only_unique_rendered_memory_ids(tmp_omega_dir, m
     )
 
 
+def test_context_packet_records_full_id_rendered_after_prefix_collision(
+    tmp_omega_dir, monkeypatch
+):
+    """Access accounting uses renderer output, not ambiguous display prefixes."""
+    from omega.bridge import _get_store
+
+    db = _get_store()
+    earlier_original = db.store(
+        content="Earlier oversized decision content " * 20,
+        metadata={"event_type": "decision"},
+        entity_id="omega-packet-prefix-collision",
+        skip_inference=True,
+    )
+    later_original = db.store(
+        content="Later rendered decision",
+        metadata={"event_type": "decision"},
+        entity_id="omega-packet-prefix-collision",
+        skip_inference=True,
+    )
+    earlier_id = "mem-deadbeef0001"
+    later_id = "mem-deadbeef0002"
+    db._conn.execute(
+        "UPDATE memories SET node_id = ? WHERE node_id = ?",
+        (earlier_id, earlier_original),
+    )
+    db._conn.execute(
+        "UPDATE memories SET node_id = ? WHERE node_id = ?",
+        (later_id, later_original),
+    )
+    db._conn.commit()
+
+    earlier = db.get_node(earlier_id, track_access=False)
+    later = db.get_node(later_id, track_access=False)
+    assert earlier is not None
+    assert later is not None
+    earlier.relevance = 1.0
+    later.relevance = 0.9
+    monkeypatch.setattr(db, "query", lambda *_args, **_kwargs: [earlier, later])
+
+    packet = build_context_packet(
+        db,
+        files=[f"{'x' * 350}.py"],
+        scope={"entity_id": "omega-packet-prefix-collision"},
+        budget_tokens=120,
+    )
+
+    assert "Later rendered decision" in packet["packet_markdown"]
+    assert "Earlier oversized decision" not in packet["packet_markdown"]
+    assert packet["memories_used"] == [later_id]
+    rows = db._conn.execute(
+        "SELECT node_id, access_count FROM memories WHERE entity_id = ?",
+        ("omega-packet-prefix-collision",),
+    ).fetchall()
+    assert dict(rows) == {earlier_id: 0, later_id: 1}
+
+
 def test_context_packet_survives_second_connection_access_lock(tmp_omega_dir, monkeypatch):
     """A locked audit write cannot replace a successfully assembled packet with an error."""
     from omega.bridge import _get_store
