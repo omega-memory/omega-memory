@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.13] - 2026-08-22
+
+### Fixed
+
+- Improved memory replacement, priority correction, and search reliability so
+  the most relevant memory remains the strongest match.
+- Made search-only retrieval safer by separating it from memory access history.
+
 ## [1.5.12] - 2026-08-20
 
 ### Fixed
