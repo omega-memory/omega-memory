@@ -140,7 +140,7 @@ class TestOmegaMemorySupersede:
         id2 = store.store("New decision", metadata={"event_type": "decision"})
 
         result = await handle_omega_memory({
-            "action": "supersede", "memory_id": id2, "target_id": id1
+            "action": "supersede", "memory_id": id1, "target_id": id2
         })
         assert not result.get("isError")
         assert "superseded" in result["content"][0]["text"].lower()
@@ -153,7 +153,7 @@ class TestOmegaMemorySupersede:
         assert result.get("isError")
 
     @pytest.mark.asyncio
-    async def test_supersede_missing_target_id(self, mock_get_store):
+    async def test_supersede_without_target_is_simple_retirement(self, mock_get_store):
         result = await handle_omega_memory({
             "action": "supersede", "memory_id": "some-id"
         })

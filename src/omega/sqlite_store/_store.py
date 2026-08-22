@@ -14,6 +14,8 @@ from ._types import EMBEDDING_DIM, MemoryResult, _serialize_f32, _canonicalize
 
 logger = logging.getLogger("omega.sqlite_store")
 
+_PRIORITY_EDIT_HISTORY_LIMIT = 20
+
 
 def _check_embedding_dim(embedding: List[float]) -> None:
     """Raise if ``embedding`` does not match the configured vector dimension.
@@ -237,15 +239,16 @@ class StoreMixin:
             _insert_cur = self._exec(
                 """INSERT INTO memories
                    (node_id, content, metadata, created_at, access_count,
-                    ttl_seconds, session_id, event_type, project, content_hash,
+                    updated_at, ttl_seconds, session_id, event_type, project, content_hash,
                     priority, referenced_date, entity_id, agent_type, canonical_hash,
                     extracted_keywords, memory_type, valid_from,
                     derived_from, source_uri, status)
-                   VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     node_id,
                     content,
                     json.dumps(meta),
+                    now,
                     now,
                     ttl_seconds,
                     session_id,
@@ -439,19 +442,19 @@ class StoreMixin:
         content: Optional[str] = None,
         metadata: Optional[Dict] = None,
         access_count: Optional[int] = None,
+        priority: Optional[int] = None,
     ) -> bool:
         """Update fields on an existing node."""
+        if priority is not None and (
+            isinstance(priority, bool)
+            or not isinstance(priority, int)
+            or not 1 <= priority <= 5
+        ):
+            raise ValueError("priority must be an integer from 1 to 5")
+
         self._invalidate_query_cache()
-        sets = []
-        params = []
         new_embedding = None
         if content is not None:
-            sets.append("content = ?")
-            params.append(content)
-            sets.append("content_hash = ?")
-            params.append(hashlib.sha256(content.encode()).hexdigest())
-            sets.append("canonical_hash = ?")
-            params.append(hashlib.sha256(_canonicalize(content).encode()).hexdigest())
             # Re-embed to keep vec table in sync (CPU-bound, done outside lock)
             if self._vec_available:
                 try:
@@ -462,51 +465,119 @@ class StoreMixin:
                         new_embedding = None  # Hash fallback from real backend — don't store
                 except Exception as e:
                     logger.debug("update_node: re-embed failed: %s", e)
-        if metadata is not None:
-            sets.append("metadata = ?")
-            params.append(json.dumps(metadata))
-            # Update denormalized columns
-            sets.append("event_type = ?")
-            params.append(metadata.get("event_type") or metadata.get("type"))
-            sets.append("session_id = ?")
-            params.append(metadata.get("session_id"))
-            sets.append("project = ?")
-            params.append(metadata.get("project"))
-        if access_count is not None:
-            sets.append("access_count = ?")
-            params.append(access_count)
-
-        if not sets:
-            return False
 
         with self._lock:
-            params.append(node_id)
-            self._exec(f"UPDATE memories SET {', '.join(sets)} WHERE node_id = ?", params)
-            # Update vec embedding if content changed
-            if new_embedding is not None:
-                row = self._exec("SELECT id FROM memories WHERE node_id = ?", (node_id,)).fetchone()
-                if row:
-                    # The DELETE lands before the INSERT, so swallowing a
-                    # failure here discarded the memory's existing, working
-                    # vector and left it with none — silent data loss on a
-                    # record that was previously fine. Roll back instead.
-                    try:
+            sets = []
+            params = []
+            effective_metadata = dict(metadata) if metadata is not None else None
+            edit_timestamp = datetime.now(timezone.utc).isoformat()
+            current = None
+
+            if priority is not None or effective_metadata is not None:
+                current = self._exec(
+                    """SELECT metadata, priority, event_type, session_id, project
+                       FROM memories WHERE node_id = ?""",
+                    (node_id,),
+                ).fetchone()
+                if current is None:
+                    return False
+
+            if priority is not None:
+                current_metadata = json.loads(current[0]) if current[0] else {}
+                if effective_metadata is None:
+                    effective_metadata = current_metadata
+                history = effective_metadata.get("priority_edit_history", [])
+                if not isinstance(history, list):
+                    history = []
+                else:
+                    history = list(history)
+                if current[1] != priority:
+                    history.append(
+                        {
+                            "old_priority": current[1],
+                            "new_priority": priority,
+                            "edited_at": edit_timestamp,
+                        }
+                    )
+                effective_metadata["priority_edit_history"] = history[
+                    -_PRIORITY_EDIT_HISTORY_LIMIT:
+                ]
+                effective_metadata["priority"] = priority
+                sets.append("priority = ?")
+                params.append(priority)
+
+            if content is not None:
+                sets.extend(("content = ?", "content_hash = ?", "canonical_hash = ?"))
+                params.extend(
+                    (
+                        content,
+                        hashlib.sha256(content.encode()).hexdigest(),
+                        hashlib.sha256(_canonicalize(content).encode()).hexdigest(),
+                    )
+                )
+
+            if effective_metadata is not None:
+                sets.append("metadata = ?")
+                params.append(json.dumps(effective_metadata))
+                # Update denormalized columns
+                sets.extend(("event_type = ?", "session_id = ?", "project = ?"))
+                params.extend(
+                    (
+                        effective_metadata.get("event_type")
+                        or effective_metadata.get("type")
+                        or current[2],
+                        (
+                            effective_metadata["session_id"]
+                            if "session_id" in effective_metadata
+                            else current[3]
+                        ),
+                        (
+                            effective_metadata["project"]
+                            if "project" in effective_metadata
+                            else current[4]
+                        ),
+                    )
+                )
+            if access_count is not None:
+                sets.append("access_count = ?")
+                params.append(access_count)
+
+            if content is not None or effective_metadata is not None or priority is not None:
+                sets.append("updated_at = ?")
+                params.append(edit_timestamp)
+
+            if not sets:
+                return False
+
+            try:
+                params.append(node_id)
+                cursor = self._exec(
+                    f"UPDATE memories SET {', '.join(sets)} WHERE node_id = ?", params
+                )
+                if cursor.rowcount == 0:
+                    self._conn.rollback()
+                    return False
+
+                # Update vec embedding if content changed
+                if new_embedding is not None:
+                    row = self._exec(
+                        "SELECT id FROM memories WHERE node_id = ?", (node_id,)
+                    ).fetchone()
+                    if row:
                         _check_embedding_dim(new_embedding)
                         self._exec("DELETE FROM memories_vec WHERE rowid = ?", (row[0],))
                         self._exec(
                             "INSERT INTO memories_vec (rowid, embedding) VALUES (?, ?)",
                             (row[0], _serialize_f32(new_embedding)),
                         )
-                    except StorageError:
-                        self._conn.rollback()
-                        raise
-                    except Exception as e:
-                        self._conn.rollback()
-                        logger.error(
-                            "update_node: vec update failed; rolled back: %s", e, exc_info=True
-                        )
-                        raise StorageError(f"Failed to update embedding vector: {e}") from e
-            self._commit()
+                self._commit()
+            except StorageError:
+                self._conn.rollback()
+                raise
+            except Exception as e:
+                self._conn.rollback()
+                logger.error("update_node failed; rolled back: %s", e, exc_info=True)
+                raise StorageError(f"Failed to update memory: {e}") from e
         return True
 
     # ------------------------------------------------------------------
@@ -632,6 +703,104 @@ class StoreMixin:
             )
             self._commit()
         return True
+
+    def supersede_with_replacement(
+        self,
+        old_id: str,
+        replacement_id: Optional[str] = None,
+        reason: str = "manual supersession",
+    ) -> tuple[bool, Optional[str]]:
+        """Retire ``old_id`` and optionally link its replacement atomically.
+
+        Both records must have identical entity, project, and session ownership.
+        The lineage direction is always replacement -> supersedes -> old.
+        """
+        if not old_id:
+            return False, "old memory ID is required"
+        if replacement_id == old_id:
+            return False, "replacement must be a different memory"
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            try:
+                self._exec("BEGIN IMMEDIATE")
+                old_row = self._exec(
+                    """SELECT metadata, content, event_type, entity_id, project,
+                              session_id, status
+                       FROM memories WHERE node_id = ?""",
+                    (old_id,),
+                ).fetchone()
+                if old_row is None:
+                    self._conn.rollback()
+                    return False, f"Memory {old_id} not found"
+
+                old_meta = json.loads(old_row[0]) if old_row[0] else {}
+                if old_meta.get("superseded") or old_row[6] == "superseded":
+                    self._conn.rollback()
+                    return False, f"Memory {old_id} is already superseded"
+
+                replacement_row = None
+                if replacement_id:
+                    replacement_row = self._exec(
+                        """SELECT metadata, content, event_type, entity_id, project,
+                                  session_id, status
+                           FROM memories WHERE node_id = ?""",
+                        (replacement_id,),
+                    ).fetchone()
+                    if replacement_row is None:
+                        self._conn.rollback()
+                        return False, f"Replacement memory {replacement_id} not found"
+
+                    ownership_fields = (
+                        ("entity", old_row[3], replacement_row[3]),
+                        ("project", old_row[4], replacement_row[4]),
+                        ("session", old_row[5], replacement_row[5]),
+                    )
+                    mismatch = next(
+                        (name for name, old_value, new_value in ownership_fields
+                         if old_value != new_value),
+                        None,
+                    )
+                    if mismatch:
+                        self._conn.rollback()
+                        return False, f"Ownership check failed: {mismatch} scope differs"
+
+                old_meta["superseded"] = True
+                old_meta["superseded_by"] = replacement_id or f"manual: {reason}"
+                old_meta["superseded_at"] = now
+                old_meta["superseded_reason"] = reason
+                self._exec(
+                    """UPDATE memories
+                       SET metadata = ?, valid_until = ?, status = 'superseded'
+                       WHERE node_id = ?""",
+                    (json.dumps(old_meta), now, old_id),
+                )
+
+                if replacement_id:
+                    self._exec(
+                        """INSERT OR IGNORE INTO edges
+                           (source_id, target_id, edge_type, weight, created_at)
+                           VALUES (?, ?, 'supersedes', 1.0, ?)""",
+                        (replacement_id, old_id, now),
+                    )
+
+                self._log_forgetting(
+                    old_id,
+                    old_row[1] or "",
+                    old_row[2] or "",
+                    "manual_superseded",
+                    {"superseded_by": replacement_id, "reason": reason},
+                )
+                self._commit()
+            except Exception as exc:
+                self._conn.rollback()
+                logger.error(
+                    "Atomic supersede failed for %s: %s", old_id, exc, exc_info=True
+                )
+                return False, str(exc)
+
+        self._invalidate_query_cache()
+        return True, None
 
     # ------------------------------------------------------------------
     # Contradiction detection

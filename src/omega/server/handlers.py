@@ -1140,21 +1140,44 @@ async def handle_omega_delete_memory(arguments: dict) -> dict:
 
 
 async def handle_omega_edit_memory(arguments: dict) -> dict:
-    """Edit the content of a specific memory."""
-    memory_id = arguments.get("memory_id", "").strip()
-    new_content = arguments.get("new_content", "").strip()
+    """Edit the content, priority, or both for a specific memory."""
+    memory_id = (arguments.get("memory_id") or "").strip()
+    raw_content = arguments.get("new_content")
+    priority = arguments.get("priority")
 
     if not memory_id:
         return mcp_error("memory_id is required")
-    if not new_content:
-        return mcp_error("new_content is required")
+    if raw_content is not None and not isinstance(raw_content, str):
+        return mcp_error("new_content must be a string")
+    new_content = raw_content.strip() if isinstance(raw_content, str) else None
+    if new_content == "":
+        new_content = None
+    if new_content is None and priority is None:
+        return mcp_error("new_content or priority is required")
+    if priority is not None and (
+        isinstance(priority, bool)
+        or not isinstance(priority, int)
+        or not 1 <= priority <= 5
+    ):
+        return mcp_error("priority must be an integer from 1 to 5")
 
     try:
         from omega.bridge import edit_memory
 
-        result = edit_memory(memory_id=memory_id, new_content=new_content)
+        result = edit_memory(
+            memory_id=memory_id,
+            new_content=new_content,
+            priority=priority,
+        )
         if result.get("success"):
-            return mcp_response(f"Updated memory `{memory_id[:16]}`\nNew content: {new_content[:200]}")
+            changes = []
+            if new_content is not None:
+                changes.append(f"New content: {new_content[:200]}")
+            if priority is not None:
+                changes.append(f"New priority: {priority}")
+            return mcp_response(
+                f"Updated memory `{memory_id[:16]}`\n" + "\n".join(changes)
+            )
         else:
             return mcp_error(result.get("error", f"Memory {memory_id} not found"))
     except Exception as e:
@@ -2266,13 +2289,11 @@ async def handle_omega_dedup_stats(arguments: dict) -> dict:
 
 
 async def handle_omega_supersede_memory(arguments: dict) -> dict:
-    """Manually mark a memory as superseded."""
-    target_id = arguments.get("target_id", "").strip()
-    if not target_id:
-        # Fall back to memory_id for convenience
-        target_id = arguments.get("memory_id", "").strip()
-    if not target_id:
-        return mcp_error("target_id is required for action='supersede'")
+    """Retire an outdated memory and optionally link its replacement."""
+    memory_id = (arguments.get("memory_id") or "").strip()
+    target_id = (arguments.get("target_id") or "").strip() or None
+    if not memory_id:
+        return mcp_error("memory_id is required for action='supersede'")
 
     reason = arguments.get("reason", "").strip() or "manual supersession"
 
@@ -2280,22 +2301,31 @@ async def handle_omega_supersede_memory(arguments: dict) -> dict:
         from omega.bridge import _get_store
 
         db = _get_store()
-        node = db.get_node(target_id)
+        node = db.get_node(memory_id, track_access=False)
         if node is None:
-            return mcp_error(f"Memory `{target_id}` not found")
+            return mcp_error(f"Memory `{memory_id}` not found")
 
         if (node.metadata or {}).get("superseded"):
             superseded_by = (node.metadata or {}).get("superseded_by", "unknown")
             return mcp_response(
-                f"Memory `{target_id[:16]}` is already superseded (by `{superseded_by}`)."
+                f"Memory `{memory_id[:16]}` is already superseded (by `{superseded_by}`)."
             )
 
-        db.mark_superseded(target_id, superseded_by=f"manual: {reason}")
+        success, error = db.supersede_with_replacement(memory_id, target_id, reason)
+        if not success:
+            return mcp_error(error or "Supersede failed")
+
         snippet = (node.content or "")[:80]
+        lineage = (
+            f"Replacement `{target_id[:16]}` linked to the outdated memory."
+            if target_id
+            else "Simple retirement completed; no replacement was linked."
+        )
         return mcp_response(
-            f"Superseded memory `{target_id[:16]}`\n"
+            f"Superseded outdated memory `{memory_id[:16]}`\n"
             f"Content: {snippet}{'...' if len(node.content or '') > 80 else ''}\n"
-            f"Reason: {reason}"
+            f"Reason: {reason}\n"
+            f"{lineage}"
         )
     except Exception as e:
         logger.error("omega_supersede_memory failed: %s", e, exc_info=True)

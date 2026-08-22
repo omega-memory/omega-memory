@@ -1647,15 +1647,30 @@ def delete_memory(memory_id: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-def edit_memory(memory_id: str, new_content: str) -> Dict[str, Any]:
-    """Edit a memory's content by its node ID.
+def edit_memory(
+    memory_id: str,
+    new_content: Optional[str] = None,
+    priority: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Edit a memory's content, priority, or both without replacing its ID.
 
     After editing, extracts style observations from the diff and stores
     them as user_preference memories (memory-from-edits pattern).
     """
+    if new_content is None and priority is None:
+        return {"success": False, "error": "new_content or priority is required"}
+    if new_content is not None and not new_content.strip():
+        return {"success": False, "error": "new_content must not be empty"}
+    if priority is not None and (
+        isinstance(priority, bool)
+        or not isinstance(priority, int)
+        or not 1 <= priority <= 5
+    ):
+        return {"success": False, "error": "priority must be an integer from 1 to 5"}
+
     db = _get_store()
     try:
-        node = db.get_node(memory_id)
+        node = db.get_node(memory_id, track_access=False)
         if node is None:
             return {"success": False, "error": f"Memory {memory_id} not found"}
 
@@ -1665,23 +1680,36 @@ def edit_memory(memory_id: str, new_content: str) -> Dict[str, Any]:
         emeta["edited_at"] = datetime.now(timezone.utc).isoformat()
         emeta["edit_count"] = emeta.get("edit_count", 0) + 1
 
-        db.update_node(memory_id, content=new_content, metadata=emeta)
+        success = db.update_node(
+            memory_id,
+            content=new_content,
+            metadata=emeta,
+            priority=priority,
+        )
+        if not success:
+            return {"success": False, "error": f"Memory {memory_id} not found"}
 
         logger.info(f"Edited memory {memory_id[:12]}")
 
         # Memory-from-edits: extract style observations from the diff
-        edit_observation = _extract_edit_observation(
-            old_content, new_content,
-            event_type=(node.metadata or {}).get("event_type", "memory"),
-            memory_id=memory_id,
-        )
+        edit_observation = None
+        if new_content is not None:
+            edit_observation = _extract_edit_observation(
+                old_content,
+                new_content,
+                event_type=(node.metadata or {}).get("event_type", "memory"),
+                memory_id=memory_id,
+            )
 
         result = {
             "success": True,
             "id": memory_id,
             "old_content_preview": old_preview,
-            "new_content_preview": new_content[:80],
         }
+        if new_content is not None:
+            result["new_content_preview"] = new_content[:80]
+        if priority is not None:
+            result["priority"] = priority
 
         if edit_observation:
             result["style_observation"] = edit_observation

@@ -9,7 +9,7 @@ from typing import Tuple
 
 logger = logging.getLogger("omega.schema")
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 def init_schema(
@@ -289,6 +289,20 @@ def init_schema(
         c.commit()
         logger.info("Schema migrated v13 -> v14: added derived_from, source_uri, status columns")
 
+    # v14 -> v15: add an edit timestamp independent from access tracking
+    current_version = c.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+    if current_version and current_version[0] < 15:
+        try:
+            c.execute("ALTER TABLE memories ADD COLUMN updated_at TEXT")
+        except sqlite3.OperationalError:
+            pass
+        c.execute(
+            "UPDATE memories SET updated_at = created_at WHERE updated_at IS NULL"
+        )
+        c.execute("UPDATE schema_version SET version = 15")
+        c.commit()
+        logger.info("Schema migrated v14 -> v15: added memory updated_at column")
+
     # ----------------------------------------------------------------
     # Table definitions (idempotent CREATE IF NOT EXISTS)
     # ----------------------------------------------------------------
@@ -300,6 +314,7 @@ def init_schema(
             content TEXT NOT NULL,
             metadata TEXT,
             created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
             last_accessed TEXT,
             access_count INTEGER DEFAULT 0,
             ttl_seconds INTEGER,

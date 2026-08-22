@@ -27,9 +27,9 @@ class TestMemoryTypeSchema:
 
     def test_schema_version_is_12(self, store):
         from omega.schema import SCHEMA_VERSION
-        assert SCHEMA_VERSION == 14
+        assert SCHEMA_VERSION == 15
         row = store._conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
-        assert row[0] == 14
+        assert row[0] == 15
 
 
 class TestMemoryTypeAutoClassify:

@@ -681,7 +681,7 @@ class TestOmegaMemorySupersede:
         assert mem_id is not None
         result = run_async(handle_omega_memory({
             "action": "supersede",
-            "target_id": mem_id,
+            "memory_id": mem_id,
             "reason": "Switched to GraphQL",
         }))
         assert not _is_error(result)
@@ -695,13 +695,13 @@ class TestOmegaMemorySupersede:
         # Supersede once
         run_async(handle_omega_memory({
             "action": "supersede",
-            "target_id": mem_id,
+            "memory_id": mem_id,
             "reason": "first supersession",
         }))
         # Supersede again
         result = run_async(handle_omega_memory({
             "action": "supersede",
-            "target_id": mem_id,
+            "memory_id": mem_id,
             "reason": "second attempt",
         }))
         assert not _is_error(result)
@@ -711,7 +711,7 @@ class TestOmegaMemorySupersede:
         from omega.server.handlers import handle_omega_memory
         result = run_async(handle_omega_memory({
             "action": "supersede",
-            "target_id": "mem-0000000000000000",
+            "memory_id": "mem-0000000000000000",
         }))
         assert _is_error(result)
 

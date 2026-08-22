@@ -237,7 +237,7 @@ def test_schema_migration_creates_table():
 
     # Verify schema version is 13
     version = store._conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
-    assert version[0] == 14
+    assert version[0] == 15
 
 
 # ============================================================================

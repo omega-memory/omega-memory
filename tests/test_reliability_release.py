@@ -7,6 +7,7 @@ by the shared test fixture.
 
 import asyncio
 import json
+import sqlite3
 
 import pytest
 
@@ -78,8 +79,69 @@ def test_supersede_without_replacement_retires_only_old_memory(handler_store):
     )
 
     assert not response.get("isError")
+    assert "no replacement" in response["content"][0]["text"].lower()
     assert _metadata(handler_store, old_id)["superseded"] is True
     assert handler_store._conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 0
+
+
+def test_store_supersede_replacement_is_atomic(store):
+    """The store changes status and lineage together through one public operation."""
+    old_id = store.store(
+        "Legacy release approval policy",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    new_id = store.store(
+        "Current release approval policy",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+
+    success, error = store.supersede_with_replacement(
+        old_id, new_id, "policy corrected"
+    )
+
+    assert success is True
+    assert error is None
+    assert _metadata(store, old_id)["superseded"] is True
+    assert not _metadata(store, new_id).get("superseded", False)
+    assert _edge_count(store, new_id, old_id, "supersedes") == 1
+
+
+def test_store_supersede_rolls_back_status_when_lineage_insert_fails(store, monkeypatch):
+    """A failed edge write must leave both memory rows and the graph unchanged."""
+    old_id = store.store(
+        "Legacy atomic release policy",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    new_id = store.store(
+        "Current atomic release policy",
+        metadata={"event_type": "decision"},
+        entity_id="release-owner",
+        skip_inference=True,
+    )
+    original_exec = store._exec
+
+    def fail_supersedes_edge(sql, params=None):
+        if "INSERT OR IGNORE INTO edges" in sql and "supersedes" in sql:
+            raise sqlite3.IntegrityError("injected lineage failure")
+        return original_exec(sql, params)
+
+    monkeypatch.setattr(store, "_exec", fail_supersedes_edge)
+
+    success, error = store.supersede_with_replacement(
+        old_id, new_id, "policy corrected"
+    )
+
+    assert success is False
+    assert "injected lineage failure" in error
+    assert not _metadata(store, old_id).get("superseded", False)
+    assert not _metadata(store, new_id).get("superseded", False)
+    assert _edge_count(store, new_id, old_id, "supersedes") == 0
 
 
 def test_cross_entity_supersede_leaves_both_records_unchanged(handler_store):
@@ -115,6 +177,19 @@ def test_cross_entity_supersede_leaves_both_records_unchanged(handler_store):
     assert _edge_count(handler_store, new_id, old_id) == 0
 
 
+def test_memory_schema_describes_supersede_ids_and_editable_priority():
+    """The public tool contract must make both IDs and edit fields unambiguous."""
+    from omega.server.tool_schemas import TOOL_SCHEMAS
+
+    schema = next(item for item in TOOL_SCHEMAS if item["name"] == "omega_memory")
+    properties = schema["inputSchema"]["properties"]
+
+    assert "outdated" in properties["memory_id"]["description"].lower()
+    assert "replacement" in properties["target_id"]["description"].lower()
+    assert properties["priority"]["minimum"] == 1
+    assert properties["priority"]["maximum"] == 5
+
+
 def test_priority_only_edit_preserves_memory_identity_and_history(handler_store):
     """Correcting priority must not rewrite a memory or its relationships."""
     from omega.server.handlers import handle_omega_memory
@@ -126,6 +201,7 @@ def test_priority_only_edit_preserves_memory_identity_and_history(handler_store)
             "priority": 2,
             "revision_history": [{"source": "import"}],
         },
+        session_id="release-session",
         entity_id="release-contract",
     )
     related_id = handler_store.store("Related decision", metadata={"event_type": "decision"})
@@ -137,8 +213,8 @@ def test_priority_only_edit_preserves_memory_identity_and_history(handler_store)
     )
     handler_store._conn.commit()
     before = handler_store._conn.execute(
-        """SELECT node_id, content, entity_id, created_at, updated_at,
-                  access_count, last_accessed, metadata
+        """SELECT node_id, content, entity_id, project, session_id,
+                  created_at, updated_at, access_count, last_accessed, metadata
            FROM memories WHERE node_id = ?""",
         (memory_id,),
     ).fetchone()
@@ -149,8 +225,9 @@ def test_priority_only_edit_preserves_memory_identity_and_history(handler_store)
 
     assert not response.get("isError")
     after = handler_store._conn.execute(
-        """SELECT node_id, content, entity_id, created_at, updated_at,
-                  access_count, last_accessed, metadata, priority
+        """SELECT node_id, content, entity_id, project, session_id,
+                  created_at, updated_at, access_count, last_accessed, metadata,
+                  priority
            FROM memories WHERE node_id = ?""",
         (memory_id,),
     ).fetchone()
@@ -158,11 +235,13 @@ def test_priority_only_edit_preserves_memory_identity_and_history(handler_store)
     assert after[1] == before[1]
     assert after[2] == before[2]
     assert after[3] == before[3]
+    assert after[4] == before[4]
     assert after[5] == before[5]
-    assert after[6] == before[6]
-    assert json.loads(after[7])["revision_history"] == json.loads(before[7])["revision_history"]
-    assert after[4] > before[4]
-    assert after[8] == 5
+    assert after[7] == before[7]
+    assert after[8] == before[8]
+    assert json.loads(after[9])["revision_history"] == json.loads(before[9])["revision_history"]
+    assert after[6] > before[6]
+    assert after[10] == 5
     assert _metadata(handler_store, memory_id)["priority"] == 5
     assert _edge_count(handler_store, memory_id, related_id, "related") == 1
 
@@ -242,7 +321,7 @@ def test_edit_rejects_request_with_neither_content_nor_priority(handler_store):
     assert response.get("isError")
 
 
-@pytest.mark.parametrize("priority", [0, 6])
+@pytest.mark.parametrize("priority", [0, 6, True, 3.5, "4"])
 def test_edit_rejects_priority_outside_supported_range(handler_store, priority):
     """Priority is constrained to the documented inclusive range of one through five."""
     from omega.server.handlers import handle_omega_memory
@@ -261,6 +340,33 @@ def test_edit_rejects_priority_outside_supported_range(handler_store, priority):
     )
 
     assert response.get("isError")
+
+
+def test_priority_edit_history_is_bounded(handler_store):
+    """Repeated priority corrections retain only the twenty most recent changes."""
+    from omega.server.handlers import handle_omega_memory
+
+    memory_id = handler_store.store(
+        "Bounded priority history",
+        metadata={"event_type": "decision", "priority": 1},
+    )
+    priorities = [2, 3, 4, 5, 4] * 5
+
+    for priority in priorities:
+        response = asyncio.run(
+            handle_omega_memory(
+                {"action": "edit", "memory_id": memory_id, "priority": priority}
+            )
+        )
+        assert not response.get("isError")
+
+    history = _metadata(handler_store, memory_id)["priority_edit_history"]
+    assert len(history) == 20
+    assert history[0]["old_priority"] == 4
+    assert history[0]["new_priority"] == 2
+    assert history[-1]["old_priority"] == 5
+    assert history[-1]["new_priority"] == 4
+    assert all(entry["edited_at"].endswith("+00:00") for entry in history)
 
 
 def test_search_does_not_count_returned_results_as_accesses(store):
