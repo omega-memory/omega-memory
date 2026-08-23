@@ -34,7 +34,7 @@ import sys
 import tempfile
 import time
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Ensure omega is importable
@@ -515,6 +515,17 @@ def _extract_key_facts(content: str, api_key: str | None = None) -> str | None:
         return None
 
 
+def _parse_iso(value: str):
+    """Parse an ISO timestamp into an aware datetime, or None."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def ingest_question(question_data: dict, tmpdir: str, api_key: str | None = None,
                     extract_facts: bool = False):
     """Create a fresh SQLiteStore and ingest all haystack sessions for one question.
@@ -532,6 +543,17 @@ def ingest_question(question_data: dict, tmpdir: str, api_key: str | None = None
     session_ids = question_data["haystack_session_ids"]
     dates = question_data["haystack_dates"]
 
+    # Anchor the question's "present" to now, preserving the spacing between
+    # sessions. The dataset is set in 2023; decay is measured against the
+    # wall clock, so ingesting the literal dates puts every session past the
+    # decay floor and flattens age differences just as badly as ingesting them
+    # all at wall-clock time. Shifting the whole timeline keeps each session's
+    # age *relative to the question* intact, which is the quantity recency
+    # ranking is about.
+    _anchor = _parse_iso(parse_longmemeval_date(question_data.get("question_date", "")))
+    _now = datetime.now(timezone.utc)
+    _shift = (_now - _anchor) if _anchor else None
+
     for session_turns, sid, date_str in zip(sessions, session_ids, dates):
         content = format_session_text(session_turns)
         iso_date = parse_longmemeval_date(date_str)
@@ -542,7 +564,7 @@ def ingest_question(question_data: dict, tmpdir: str, api_key: str | None = None
             if facts:
                 content = content + facts
 
-        store.store(
+        node_id = store.store(
             content=content,
             session_id=sid,
             metadata={
@@ -552,6 +574,28 @@ def ingest_question(question_data: dict, tmpdir: str, api_key: str | None = None
             },
             skip_inference=True,
         )
+
+        # Backdate the record to the session's real date.
+        #
+        # Without this every haystack session is created at ingest wall-clock,
+        # so `_compute_decay_factor` — which decays from created_at, not from
+        # referenced_date — returns 1.0 for every candidate and the benchmark
+        # is structurally blind to age. A sweep of any recency constant then
+        # measures a uniform score offset rather than recency. The dataset's
+        # own session dates are the canonical timestamps; representing them
+        # is what makes a recency measurement meaningful.
+        if iso_date and node_id:
+            stamp = iso_date
+            if _shift is not None:
+                parsed = _parse_iso(iso_date)
+                if parsed:
+                    stamp = (parsed + _shift).isoformat()
+            store._conn.execute(
+                "UPDATE memories SET created_at = ? WHERE node_id = ?",
+                (stamp, node_id),
+            )
+    store._conn.commit()
+    store._invalidate_query_cache()
 
     return store
 
@@ -1588,6 +1632,14 @@ def run_generation(args, dataset: list) -> int:
     # Retrieval recall summary
     compute_retrieval_recall(retrieval_log)
 
+    # Per-question ranks, so two configurations can be compared question by
+    # question.  Aggregate MRR cannot tell a real shift from a couple of
+    # questions moving one rank; a paired test on this file can.
+    if args.retrieval_log:
+        with open(args.retrieval_log, "w") as log_file:
+            json.dump(retrieval_log, log_file, indent=2)
+        print(f"  Retrieval log: {args.retrieval_log}")
+
     # Optional grading
     if args.grade and not args.dry_run:
         print("  Grading hypotheses...")
@@ -1652,6 +1704,12 @@ examples:
         "--output",
         default="longmemeval_hypothesis.jsonl",
         help="Output JSONL path (default: longmemeval_hypothesis.jsonl)",
+    )
+    parser.add_argument(
+        "--retrieval-log",
+        default=None,
+        help="Write per-question retrieval ranks as JSON, for paired comparison "
+             "of two configurations",
     )
     parser.add_argument(
         "--limit",
