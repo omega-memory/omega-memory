@@ -403,11 +403,18 @@ class MaintenanceMixin:
         min_strength: float = 0.05,
         min_age_days: int = 30,
     ) -> dict:
-        """Mark weak, old memories as superseded (ACT-R forgetting curve).
+        """Mark weak, old, unaccessed memories as superseded (ACT-R forgetting curve).
 
         Computes strength = type_weight * feedback_factor * decay_factor for each
-        non-protected, non-superseded memory older than min_age_days.
+        non-protected, non-superseded memory older than min_age_days with 0 access,
+        plus "zombie" memories that are accessed but consistently rated down.
         Memories below min_strength get marked superseded with reason 'strength_decay'.
+
+        Access history does not change how fast a record decays — that is
+        ranking, and 1.5.13 deliberately removed access from it. But access does
+        still decide whether a record is *eligible* for automatic forgetting at
+        all. Those are different questions, and conflating them silently made
+        previously-immune records disappear from search.
         """
         protected_types = frozenset({
             "user_preference", "error_pattern", "behavioral_pattern",
@@ -417,13 +424,23 @@ class MaintenanceMixin:
         stats: Dict[str, int] = {"decayed": 0, "scanned": 0}
 
         with self._lock:
-            # Access history is audit data and cannot shield a weak old record
-            # from lifecycle decay.
+            # Scan two populations:
+            # 1. Never-accessed old memories (original behavior)
+            # 2. Accessed but negatively-rated memories (feedback_score <= -3)
+            #    These are "zombie" memories — surfaced but consistently ignored.
+            #
+            # Widening this to every record older than the cutoff is what let
+            # auto-consolidation supersede records a user had actually used.
+            # The approved design bounds how much access can influence ranking
+            # and decay rate; it does not remove lifecycle protection, and
+            # "bulk rewriting supersede records" is an explicit non-goal.
             rows = self._conn.execute(
                 """SELECT node_id, content, metadata, created_at, access_count,
                           last_accessed, event_type
                    FROM memories
-                   WHERE created_at < ?""",
+                   WHERE created_at < ?
+                   AND (access_count = 0
+                        OR json_extract(metadata, '$.feedback_score') <= -3)""",
                 (cutoff,),
             ).fetchall()
 
@@ -436,6 +453,14 @@ class MaintenanceMixin:
                 continue
             if event_type in protected_types:
                 continue
+            # A recently used record is not a forgetting candidate, however
+            # weak its computed strength.
+            if last_accessed:
+                la_dt = self._parse_dt(last_accessed)
+                cutoff_dt = datetime.now(timezone.utc) - timedelta(days=min_age_days)
+                if la_dt and la_dt > cutoff_dt:
+                    continue
+
             type_weight = self._TYPE_WEIGHTS.get(event_type, 1.0)
             decay = self._compute_decay_factor(
                 event_type or "", last_accessed, created_at, access_count,

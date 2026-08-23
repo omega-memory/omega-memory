@@ -52,17 +52,100 @@ QUALITY_MAX_ADDITIVE = 0.0025
 # calibrated in docs/ranking-calibration.md, not chosen by intuition.
 RECENCY_MAX_ADDITIVE = float(os.environ.get("OMEGA_RECENCY_MAX_ADDITIVE", "0.05"))
 
-# Cross-encoder confidence scale, in raw score units.
+# Cross-encoder confidence scale, in each model's own raw score units.
 #
 # The reranker boost is driven by min-max normalised CE scores, which map the
 # best candidate to 1.0 and the worst to 0.0 *regardless of how far apart they
-# actually are*.  For a candidate set whose CE scores are effectively tied that
-# manufactures the full boost out of noise, which is what stopped any bounded
-# recency term from ever deciding between two equivalent records.  Scaling the
-# boost by the observed spread keeps the reranker's full authority when it
-# genuinely discriminates and silences it when it does not.  Calibrated in
-# docs/ranking-calibration.md.
-CE_SPREAD_FULL_SCALE = float(os.environ.get("OMEGA_CE_SPREAD_FULL_SCALE", "1.0"))
+# actually are*.  For a candidate set whose scores are effectively tied that
+# manufactures a full-strength boost out of noise, which is what stopped any
+# bounded recency term from deciding between two equivalent records.
+#
+# The fix scales the boost by the observed spread.  The scale CANNOT be a single
+# global constant: `cross_encoder_score` returns raw logits and their range is a
+# property of the model.  Measured on the same pairs (see
+# docs/ranking-calibration.md):
+#
+#     model                     tied-pair spread   genuinely-separated spread
+#     ms-marco-MiniLM-L-6-v2    <= 0.045           >= 0.712
+#     bge-reranker-v2-m3        <= 0.385           >= 2.487
+#
+# The confidence factor is the ratio `spread / full_scale`, so a single global
+# scale F would have to satisfy 0.385/F < 0.227 (a bge tie must not decide) and
+# 0.712/F > 0.5 (an ms-marco separation must still count) at the same time --
+# F > 1.698 and F < 1.424.  No such F exists, which is why the single constant
+# 1.0 looked plausible while silently failing bge.  Two scale-free
+# transforms were measured and rejected (see docs/ranking-calibration.md):
+# under sigmoid the regimes invert -- bge's tied spread 2.6e-3 exceeds
+# ms-marco's genuinely-separated spread 8.8e-5 by 29x -- and relative spread
+# leaves only a 2% window between bge-tied 0.0744 and ms-marco-separated
+# 0.0760, which no ratio-based confidence can exploit.
+#
+# So the scale is calibrated per model identity.  Two constraints bound it:
+# a tied pair must earn confidence below _CE_DECISIVE_CONFIDENCE, and a
+# genuinely separated pair must earn more than 0.5 so the reranker keeps its
+# authority.  Those give a window per model, and the chosen value sits inside
+# it, deliberately toward the recency-favouring end:
+#
+#     model                     evidence window   chosen
+#     ms-marco-MiniLM-L-6-v2    (0.198, 1.424)    1.0
+#     bge-reranker-v2-m3        (1.698, 4.973)    3.5
+#
+# _CE_TARGET_TIED_CONFIDENCE is the design target used to pick within the
+# window: below half of _CE_DECISIVE_CONFIDENCE, so recency still decides a
+# genuine tie with better than a factor-of-two margin.  3.5 realises that
+# target for bge almost exactly (0.385 / 0.11 = 3.504); 1.0 is a round value
+# that holds a tied ms-marco pair an order of magnitude below it.
+#
+# _CE_DECISIVE_CONFIDENCE is the confidence at which a top-3 rerank boost
+# (ce_w 0.15) would overpower the recency span
+# (RECENCY_MAX_ADDITIVE * (1 - decay floor) = 0.0425).
+_CE_DECISIVE_CONFIDENCE = 0.227
+_CE_TARGET_TIED_CONFIDENCE = 0.11
+_CE_SPREAD_FULL_SCALE_BY_MODEL = {
+    "ms-marco-MiniLM-L-6-v2": 1.0,
+    "bge-reranker-v2-m3": 3.5,
+}
+
+# Precision variants (OMEGA_RERANKER_PRECISION) keep their model's name and so
+# inherit its scale.  Both entries above were measured at fp32; int8 is assumed
+# to emit logits in the same units, which is not verified here because the
+# quantised model is not present locally and fetching it is a network action.
+# The assumption is bounded: confidence is clamped to [0, 1], so the worst case
+# is the unscaled full-strength boost that every 1.5.12 install already applied.
+# Measuring int8 and giving it its own entry is recorded as follow-up work.
+
+# An explicit override applies to whichever model is resolved.  Unset means
+# "use the calibration for the resolved model".
+_CE_SPREAD_ENV = os.environ.get("OMEGA_CE_SPREAD_FULL_SCALE")
+CE_SPREAD_FULL_SCALE = float(_CE_SPREAD_ENV) if _CE_SPREAD_ENV else None
+
+
+def _ce_full_scale(model_name: Optional[str]) -> Optional[float]:
+    """Calibrated spread scale for ``model_name``; None if uncalibrated.
+
+    Returning None disables the magnitude-based boost entirely rather than
+    guessing a scale for a model we have never measured.  Applying an
+    uncalibrated scale is the exact failure this function exists to prevent.
+    """
+    if CE_SPREAD_FULL_SCALE is not None:
+        return CE_SPREAD_FULL_SCALE if CE_SPREAD_FULL_SCALE > 0 else None
+    if not model_name:
+        return None
+    return _CE_SPREAD_FULL_SCALE_BY_MODEL.get(model_name)
+
+
+def _ce_confidence(ce_range: float, full_scale: Optional[float]) -> float:
+    """How much of the rerank boost the observed spread has earned, in [0, 1].
+
+    Zero for an uncalibrated model, a non-finite spread, or scores that are
+    effectively tied — in each case the reranker has expressed no usable
+    preference and must not reorder anything.
+    """
+    if full_scale is None or not math.isfinite(full_scale) or full_scale <= 0:
+        return 0.0
+    if not math.isfinite(ce_range) or ce_range <= 0:
+        return 0.0
+    return min(1.0, ce_range / full_scale)
 
 
 def _score_bounded_metadata(
@@ -953,6 +1036,7 @@ class QueryMixin:
             reasons["quality_contribution"] = round(quality_contribution, 6)
             reasons["decay_factor"] = round(decay_factor, 6)
             reasons["recency_contribution"] = round(recency_contribution, 6)
+            reasons["scored_by"] = "fusion"
             reasons["_pending_metadata_contribution"] = metadata_contribution
             node.metadata["_ranking_reasons"] = reasons
             node_scores[nid] = score
@@ -1390,7 +1474,10 @@ class QueryMixin:
         _RERANK_CANDIDATES = 10
         if node_scores and len(node_scores) > 1:
             try:
-                from omega.reranker import cross_encoder_score
+                from omega.reranker import (
+                    _RERANKER_MODEL_NAME,
+                    cross_encoder_score,
+                )
 
                 top_ids_for_rerank = sorted(
                     node_scores, key=node_scores.get, reverse=True
@@ -1403,7 +1490,13 @@ class QueryMixin:
                     date_str = node.metadata.get("referenced_date", "")
                     if not date_str and node.created_at:
                         date_str = node.created_at.isoformat() if hasattr(node.created_at, "isoformat") else str(node.created_at)
-                    temporal_meta.append(date_str or "")
+                    # Day granularity only.  This is a date signal, and the
+                    # reranker reads it as text: sub-second digits are not
+                    # information, they are noise that retokenises the passage
+                    # and moves the logits.  Two records stored moments apart
+                    # were scoring differently on identical content, which is
+                    # the same order of magnitude as the recency term.
+                    temporal_meta.append((date_str or "")[:10])
                 ce_scores = cross_encoder_score(
                     query_text, passages, temporal_metadata=temporal_meta,
                 )
@@ -1418,8 +1511,14 @@ class QueryMixin:
                         ce_norm = [0.5] * len(ce_scores)
                     # Down-weight the whole rerank when the candidates are
                     # effectively tied, so normalisation cannot turn a
-                    # negligible score gap into a full-strength boost.
-                    ce_confidence = min(1.0, ce_range / CE_SPREAD_FULL_SCALE) if CE_SPREAD_FULL_SCALE > 0 else 1.0
+                    # negligible score gap into a full-strength boost.  The
+                    # scale is calibrated per model because the spread is in
+                    # the model's own logit units.
+                    # At zero confidence every multiplier below is exactly
+                    # 1.0, so the rerank leaves the ordering untouched.
+                    ce_confidence = _ce_confidence(
+                        ce_range, _ce_full_scale(_RERANKER_MODEL_NAME)
+                    )
 
                     # Position-aware CE boost (QMD-inspired): top RRF results
                     # are already high-confidence from multi-channel fusion, so
@@ -1563,8 +1662,13 @@ class QueryMixin:
                     ),
                     "access_contribution": 0.0,
                     "quality_contribution": 0.0,
-                    "decay_factor": 1.0,
+                    # This candidate never went through fusion, so no decay was
+                    # computed for it.  Reporting decay_factor 1.0 next to a
+                    # zero recency contribution would be self-contradictory:
+                    # 1.0 is the value that earns the *maximum* contribution.
+                    "decay_factor": None,
                     "recency_contribution": 0.0,
+                    "scored_by": "post_fusion_fallback",
                 }
                 pending = 0.0
             pre_metadata_final = float(node_scores[nid])
