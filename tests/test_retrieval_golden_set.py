@@ -237,18 +237,20 @@ class TestDecayCurves:
 
         The two records must be semantically equivalent for this to isolate
         decay.  The original pair here ("optimizes read performance" versus
-        "provides fast lookup") is not: the cross-encoder scores the second
-        wording 0.71 higher for this query, and that preference follows the
-        wording rather than the age -- swapping which record is aged leaves the
-        same wording on top.  The pair below differs only by a trailing
-        reference token, measuring ~0.007 of cross-encoder spread, so age is
-        genuinely the only signal separating them.
+        "provides fast lookup") is not, and the two supported rerankers do not
+        even agree on which of them is the better match: ms-marco prefers
+        "provides fast lookup" by 0.712, while bge prefers "optimizes read
+        performance" by 2.487.  Both spreads sit in their model's genuinely
+        separated regime.  The original fixture therefore measured wording, not
+        age, and its outcome turned on which reranker happened to be installed
+        -- under bge it passes with recency switched off entirely, and under
+        ms-marco it needs OMEGA_RECENCY_MAX_ADDITIVE >= 0.18 to overturn a real
+        relevance difference.
 
-        The previous pair passed before 1.5.13 only because decay was a large
-        multiplicative penalty that buried a real relevance difference.  Making
-        recency strong enough to reproduce that outcome would require
-        OMEGA_RECENCY_MAX_ADDITIVE ~0.20, which measurably degrades LongMemEval
-        ranking (see docs/ranking-calibration.md).
+        The pair below instead differs only by a trailing reference token,
+        which both models place in their tied regime (0.007 and 0.073), so age
+        is genuinely the only signal separating them.  See
+        docs/ranking-calibration.md.
         """
         store = _get_store()
         old_date = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()

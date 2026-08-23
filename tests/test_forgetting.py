@@ -181,11 +181,37 @@ def test_prune_forgetting_log():
     assert len(entries) == 0
 
 
-def test_historical_access_cannot_shield_old_memory_from_strength_decay():
-    """Decay eligibility depends on age and strength, not access history."""
+def test_historical_access_does_not_slow_decay_rate():
+    """Access history must not make a record decay more slowly.
+
+    This is the half of "access is audit data" that the 1.5.13 design does
+    authorise: access cannot dominate ranking or the decay *rate*.
+    """
+    store = _get_store()
+    created = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+
+    unaccessed = store._compute_decay_factor("memory", created, created, access_count=0)
+    heavily_accessed = store._compute_decay_factor(
+        "memory", datetime.now(timezone.utc).isoformat(), created, access_count=500
+    )
+
+    assert heavily_accessed == pytest.approx(unaccessed), (
+        "access history must not buy a slower decay curve"
+    )
+
+
+def test_recently_accessed_record_is_not_an_automatic_forgetting_candidate():
+    """A record the user actually used must not silently vanish from search.
+
+    Eligibility for automatic forgetting is a different question from decay
+    rate. Widening the scan to every aged record made auto-consolidation
+    supersede records that had been used, which is user-visible data loss from
+    normal search and is not authorised by the release design — "bulk rewriting
+    ... supersede records" is an explicit non-goal.
+    """
     store = _get_store()
     node_id = store.store(
-        content="Old accessed lifecycle record must remain eligible for decay",
+        content="Old but actively used record must survive automatic forgetting",
         metadata={"event_type": "memory"},
         skip_inference=True,
     )
@@ -201,7 +227,29 @@ def test_historical_access_cannot_shield_old_memory_from_strength_decay():
     stats = store.apply_strength_decay(min_strength=2.0, min_age_days=30)
 
     metadata = store.get_node(node_id, track_access=False).metadata
-    assert stats["scanned"] == 1
+    assert stats["decayed"] == 0, "an actively used record was auto-superseded"
+    assert not metadata.get("superseded"), metadata
+
+
+def test_never_accessed_weak_old_record_is_still_forgotten():
+    """The contrast case, so the guard above cannot disable forgetting entirely."""
+    store = _get_store()
+    node_id = store.store(
+        content="Old unaccessed weak record remains a forgetting candidate",
+        metadata={"event_type": "memory"},
+        skip_inference=True,
+    )
+    old = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    store._conn.execute(
+        """UPDATE memories SET created_at = ?, last_accessed = NULL, access_count = 0
+           WHERE node_id = ?""",
+        (old, node_id),
+    )
+    store._conn.commit()
+
+    stats = store.apply_strength_decay(min_strength=2.0, min_age_days=30)
+
+    metadata = store.get_node(node_id, track_access=False).metadata
     assert stats["decayed"] == 1
     assert metadata["superseded_reason"] == "strength_decay"
 

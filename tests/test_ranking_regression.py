@@ -11,15 +11,22 @@ Pure-function tests of the scoring helpers still live in
 them.
 
 The paired records below share a base sentence and differ only by a trailing
-reference token.  That keeps them semantically equivalent to the reranker
-(measured cross-encoder spread ~0.007, versus ~0.71 for the near-paraphrases
-that motivated this file) so the signal under test is the only thing separating
-them.
+reference token.  That keeps them semantically equivalent under every supported
+reranker, which the near-paraphrases that motivated this file are not:
+
+    model                   ref-1/ref-2   near-paraphrase
+    ms-marco-MiniLM-L-6-v2  0.007         0.712
+    bge-reranker-v2-m3      0.073         2.487
+
+Both models place the reference-token pair in their tied regime and the
+near-paraphrase pair in their separated regime, so the signal under test is the
+only thing separating the records here.
 """
 
 import pytest
 from datetime import datetime, timedelta, timezone
 
+from omega.sqlite_store._query import _CE_DECISIVE_CONFIDENCE
 from test_retrieval_golden_set import (
     _get_store,
     _insert_memory,
@@ -155,7 +162,45 @@ class TestSemanticRelevanceStillWins:
             f"irrelevant one, got {ids}"
         )
 
+    def test_stronger_near_paraphrase_beats_fresher_weaker_one(self):
+        """The genuine converse: a real relevance gap, not an obvious mismatch.
+
+        Which of these two near-paraphrases is "stronger" is a property of the
+        resolved reranker, not a constant — ms-marco prefers "provides fast
+        lookup" while bge prefers "optimizes read performance". The preference
+        is therefore measured at runtime and the preferred record is the one
+        aged, so this asserts the invariant rather than one model's opinion.
+        """
+        from omega.reranker import cross_encoder_score
+
+        alternative = "Database indexing strategy for user queries provides fast lookup"
+        scores = cross_encoder_score(QUERY, [BASE, alternative])
+        if scores is None:
+            pytest.skip("reranker unavailable; this test is about its preference")
+        preferred, weaker = (
+            (BASE, alternative) if scores[0] >= scores[1] else (alternative, BASE)
+        )
+
+        store = _get_store()
+        stronger_old = _insert_memory(store, preferred, "decision")
+        _age(store, stronger_old, 60)
+        weaker_fresh = _insert_memory(store, weaker, "decision")
+
+        ids = _query_ids(store, QUERY)
+
+        assert stronger_old in ids and weaker_fresh in ids, f"both expected, got {ids}"
+        assert ids.index(stronger_old) < ids.index(weaker_fresh), (
+            "a materially stronger semantic match must beat a fresher weaker one"
+        )
+
     def test_recency_cannot_promote_an_unrelated_record(self):
+        """A fresh unrelated record must not be retrieved at all for this query.
+
+        Asserted directly rather than behind an ``if unrelated_id in ids``
+        guard.  The guarded form never executed — abstention filters the
+        unrelated record out before ranking — so it asserted nothing in any
+        configuration.
+        """
         store = _get_store()
         relevant_id = _insert_memory(store, BASE, "decision")
         _age(store, relevant_id, 365)
@@ -163,8 +208,10 @@ class TestSemanticRelevanceStillWins:
 
         ids = _query_ids(store, QUERY)
 
-        if unrelated_id in ids:
-            assert ids.index(relevant_id) < ids.index(unrelated_id)
+        assert relevant_id in ids, f"the relevant record must survive, got {ids}"
+        assert unrelated_id not in ids, (
+            f"a fresh unrelated record must not be promoted into results, got {ids}"
+        )
 
 
 class TestPriorityStaysBounded:
@@ -262,3 +309,173 @@ class TestRerankerCannotManufactureConfidence:
         assert ids.index(fresh_id) < ids.index(old_id), (
             "a negligible reranker preference must not outweigh a 60-day age gap"
         )
+
+
+class TestCrossEncoderConfidenceCalibration:
+    """The rerank boost must be earned, and comparably so across models.
+
+    ``cross_encoder_score`` returns raw logits, so a spread is only meaningful
+    relative to the model that produced it.  The two supported models' regimes
+    sit an order of magnitude apart, and because confidence is a ratio rather
+    than a threshold, no single global scale satisfies both at once -- see
+    docs/ranking-calibration.md.  Hence these tests are keyed to model identity.
+    """
+
+    # Measured maxima over five tied pairs and minima over five genuinely
+    # separated pairs, per model. See docs/ranking-calibration.md.
+    MEASURED_TIED_MAX = {
+        "ms-marco-MiniLM-L-6-v2": 0.04495,
+        "bge-reranker-v2-m3": 0.38548,
+    }
+    MEASURED_SEPARATED_MIN = {
+        "ms-marco-MiniLM-L-6-v2": 0.71181,
+        "bge-reranker-v2-m3": 2.48673,
+    }
+    # A top-3 boost (ce_w 0.15) overpowers the recency span
+    # (RECENCY_MAX_ADDITIVE * (1 - decay floor) = 0.0425) at this confidence,
+    # so a tied pair must stay well below it.  Taken from the module so the
+    # guard cannot drift away from the value the calibration was derived under.
+    DECISIVE_CONFIDENCE = _CE_DECISIVE_CONFIDENCE
+
+    def test_every_supported_model_is_calibrated(self):
+        from omega.reranker import _AVAILABLE_MODELS
+        from omega.sqlite_store._query import _CE_SPREAD_FULL_SCALE_BY_MODEL
+
+        missing = set(_AVAILABLE_MODELS) - set(_CE_SPREAD_FULL_SCALE_BY_MODEL)
+        assert not missing, (
+            f"reranker(s) selectable but uncalibrated: {sorted(missing)}. "
+            "An uncalibrated scale is the defect this calibration exists to stop."
+        )
+
+    @pytest.mark.parametrize("model", sorted(MEASURED_TIED_MAX))
+    def test_tied_spread_cannot_outweigh_recency(self, model):
+        """Guards against a mis-scaled constant, per model."""
+        from omega.sqlite_store._query import _ce_confidence, _ce_full_scale
+
+        confidence = _ce_confidence(self.MEASURED_TIED_MAX[model], _ce_full_scale(model))
+
+        assert confidence < self.DECISIVE_CONFIDENCE, (
+            f"{model}: a tied pair earns confidence {confidence}, enough to "
+            "overpower recency. The calibrated scale is too small."
+        )
+
+    @pytest.mark.parametrize("model", sorted(MEASURED_SEPARATED_MIN))
+    def test_genuinely_separated_spread_keeps_reranker_useful(self, model):
+        """The other half: scaling must not silence a real preference."""
+        from omega.sqlite_store._query import _ce_confidence, _ce_full_scale
+
+        confidence = _ce_confidence(
+            self.MEASURED_SEPARATED_MIN[model], _ce_full_scale(model)
+        )
+
+        assert confidence > 0.5, (
+            f"{model}: a genuinely separated pair earns only {confidence}. "
+            "The calibrated scale is too large and suppresses the reranker."
+        )
+
+    @pytest.mark.parametrize("precision", ["fp32", "int8"])
+    def test_every_selectable_precision_resolves_to_a_calibrated_scale(
+        self, precision, monkeypatch
+    ):
+        """``_resolve_reranker_model`` can select a precision, not just a name.
+
+        The scale is keyed on model identity, and a precision variant keeps its
+        model's name, so it inherits that model's scale.  This pins the
+        inheritance deliberately rather than leaving it to coincidence: a new
+        variant that reported a different name would silently fall through to
+        the uncalibrated path and lose the rerank boost entirely.
+        """
+        from omega.reranker import _AVAILABLE_MODELS, _resolve_reranker_model
+        from omega.sqlite_store._query import _ce_full_scale
+
+        for name, config in _AVAILABLE_MODELS.items():
+            if precision != "fp32" and precision not in config.get("precisions", {}):
+                continue
+            monkeypatch.setenv("OMEGA_RERANKER_MODEL", name)
+            monkeypatch.setenv("OMEGA_RERANKER_PRECISION", precision)
+
+            resolved_name, _ = _resolve_reranker_model()
+
+            assert _ce_full_scale(resolved_name) is not None, (
+                f"{name} at {precision} resolves to '{resolved_name}', which has "
+                "no calibrated scale and would run with the rerank boost off."
+            )
+
+    def test_uncalibrated_model_disables_the_boost(self):
+        """An unknown reranker gets no magnitude boost rather than a guess."""
+        from omega.sqlite_store._query import _ce_confidence, _ce_full_scale
+
+        assert _ce_full_scale("some-unmeasured-reranker") is None
+        assert _ce_full_scale(None) is None
+        assert _ce_confidence(5.0, _ce_full_scale("some-unmeasured-reranker")) == 0.0
+
+    @pytest.mark.parametrize(
+        "ce_range",
+        [0.0, -1.0, float("nan"), float("inf"), float("-inf")],
+    )
+    def test_degenerate_spreads_earn_no_boost(self, ce_range):
+        """Equal, malformed, and non-finite spreads must not reorder anything."""
+        from omega.sqlite_store._query import _ce_confidence
+
+        assert _ce_confidence(ce_range, 1.0) == 0.0
+
+    @pytest.mark.parametrize("full_scale", [0.0, -1.0, float("nan"), float("inf")])
+    def test_degenerate_scales_earn_no_boost(self, full_scale):
+        from omega.sqlite_store._query import _ce_confidence
+
+        assert _ce_confidence(1.0, full_scale) == 0.0
+
+    def test_confidence_is_bounded_and_monotonic(self):
+        from omega.sqlite_store._query import _ce_confidence
+
+        values = [_ce_confidence(r, 1.0) for r in (0.1, 0.5, 1.0, 10.0)]
+
+        assert values == sorted(values)
+        assert all(0.0 <= v <= 1.0 for v in values)
+        assert values[-1] == 1.0
+
+    def test_single_candidate_is_never_reranked(self):
+        """One candidate has no spread, so the reranker cannot act on it."""
+        store = _get_store()
+        only_id = _insert_memory(store, BASE, "decision")
+
+        ids = _query_ids(store, QUERY)
+
+        assert ids == [only_id]
+
+
+class TestProtectedTypesAreExemptFromDecay:
+    """Types with decay lambda 0 never age, so recency cannot order them.
+
+    This is intended behaviour, not a defect: constraints and preferences are
+    meant to persist. It is asserted here because it is a real limit on the
+    recency invariant, and because nothing else covers these types end to end.
+    """
+
+    PROTECTED = ["constraint", "user_preference", "error_pattern", "reminder"]
+
+    @pytest.mark.parametrize("event_type", PROTECTED)
+    def test_protected_type_receives_full_recency_credit_at_any_age(self, event_type):
+        from omega.sqlite_store._query import RECENCY_MAX_ADDITIVE
+
+        store = _get_store()
+        fresh_id, old_id = _equivalent_pair(store, event_type=event_type)
+        _age(store, old_id, 3 * 365)
+
+        reasons = _reasons(store)
+
+        for node_id in (fresh_id, old_id):
+            assert reasons[node_id]["decay_factor"] == 1.0
+            assert reasons[node_id]["recency_contribution"] == pytest.approx(
+                RECENCY_MAX_ADDITIVE
+            )
+
+    def test_decaying_type_still_ages(self):
+        """Contrast case, so the exemption above cannot silently become global."""
+        store = _get_store()
+        fresh_id, old_id = _equivalent_pair(store, event_type="decision")
+        _age(store, old_id, 3 * 365)
+
+        reasons = _reasons(store)
+
+        assert reasons[old_id]["decay_factor"] < reasons[fresh_id]["decay_factor"]
