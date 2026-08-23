@@ -16,11 +16,16 @@ reranker, which the near-paraphrases that motivated this file are not:
 
     model                   ref-1/ref-2   near-paraphrase
     ms-marco-MiniLM-L-6-v2  0.007         0.712
-    bge-reranker-v2-m3      0.073         2.487
+    bge-reranker-v2-m3      0.267         2.487
 
 Both models place the reference-token pair in their tied regime and the
 near-paraphrase pair in their separated regime, so the signal under test is the
 only thing separating the records here.
+
+Caveat, recorded because it is a known open defect: these are raw-logit spreads
+measured on bare passages.  The shipped pipeline prepends "[Date: ...]" to every
+passage before scoring, which moves the logits.  See the open-defects banner in
+docs/ranking-calibration.md.
 """
 
 import pytest
