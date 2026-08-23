@@ -14,30 +14,32 @@ measuring. Independent review disproved several of its claims. The withdrawn
 claims are listed below rather than quietly dropped; the original text remains
 in git history at commit `d6e2f56`.
 
-> ## OPEN DEFECTS — this calibration is NOT final
+> ## Third version: the calibration is now measured on the production path
 >
-> A second independent re-review found two defects that this document does not
-> yet resolve. They are recorded here rather than left for a reader to discover.
+> The second version of this document recorded two open defects found in
+> re-review. Both are now fixed, and the numbers below are re-derived rather
+> than patched.
 >
-> **1. The per-model scales were measured off the production path.** Every pair
-> measurement below calls `cross_encoder_score(query, passages)` with no
-> temporal metadata. The shipped pipeline always passes day-granular dates, so
-> the reranker actually scores `"[Date: YYYY-MM-DD] {passage}"`. Re-measured
-> through the production path, the `bge-reranker-v2-m3` window narrows to
-> roughly (1.82, 2.70) and the shipped scale of **3.5 falls outside it**: a
-> genuinely separated pair earns confidence 0.386, below the 0.5 the scale was
-> chosen to guarantee. `ms-marco-MiniLM-L-6-v2` at 1.0 remains inside its
-> production window. This is the failure the "Gate for future ranking changes"
-> section below forbids, committed by this document itself.
+> **1. The scales were measured off the production path.** Every pair
+> measurement previously called `cross_encoder_score(query, passages)` with no
+> temporal metadata, while the shipped pipeline always passes day-granular
+> dates, so the reranker scores `"[Date: YYYY-MM-DD] {passage}"`. The date
+> prefix retokenises the passage and moves the logits. The bge scale of 3.5 was
+> therefore outside its own production window: a genuinely separated pair earned
+> 0.386 where the scale existed to guarantee more than 0.5. All ten pairs per
+> model have been re-measured through the production representation, in three
+> date configurations, and both scales re-derived.
 >
-> **2. A non-finite cross-encoder logit propagates NaN.** `ce_range` is tested
-> with `> 0`, which `inf` satisfies, so `ce_norm` becomes NaN before the
-> confidence factor is applied, and `NaN * 0.0` is NaN. The claim in
-> `_query.py` that zero confidence leaves the ordering untouched does not hold
-> for non-finite scores.
+> **2. A non-finite cross-encoder logit propagated NaN.** `ce_range` was tested
+> with `> 0`, which `inf` satisfies, so `ce_norm` acquired NaN before the
+> confidence factor was applied, and `NaN * 0.0` is NaN — collapsing every
+> returned record to zero relevance without raising. Normalisation and
+> confidence are now computed together in `_ce_normalise`, with a deterministic
+> neutral fallback.
 >
-> Both are being handed to the owner as required corrective work. Treat the
-> per-model scale table below as provisional.
+> **3. The previous guard tests proved nothing about production.** They fed
+> stored constants into a pure helper. One guard now runs a real
+> `store.query()` and reads the spread and confidence the pipeline computed.
 
 ## Withdrawn claims
 
@@ -67,7 +69,7 @@ long; the exact prior text is at `d6e2f56`.
 | `ACCESS_SCORING_CAP` | 3 | access count beyond which scoring stops counting |
 | `QUALITY_MAX_ADDITIVE` | 0.0025 | maximum bundled type/feedback/Thompson contribution |
 | `RECENCY_MAX_ADDITIVE` | 0.05 | maximum recency contribution, applied to every candidate |
-| `_CE_SPREAD_FULL_SCALE_BY_MODEL` | 1.0 / 3.5 | per-reranker cross-encoder spread, in that model's own raw units, at which the rerank boost reaches full strength |
+| `_CE_SPREAD_FULL_SCALE_BY_MODEL` | 0.65 / 2.22 | per-reranker cross-encoder spread, in that model's own raw units, at which the rerank boost reaches full strength |
 
 ## Method, and two corrections to it
 
@@ -177,7 +179,8 @@ read as interchangeable:
   this, and mostly not even that.
 - **Non-regression** — configurations that score identically, so the evidence
   shows no harm and nothing more. The 1.7/3.5/5.0 cross-encoder scales are
-  non-regressions with respect to each other.
+  non-regressions with respect to each other, and the chosen 2.22 is bracketed
+  by two of them rather than measured directly.
 
 **The interior of the sweep is not separable.** 0.02, 0.05 and 0.10 differ by at
 most 2 questions out of 116, against 12 discordant questions for the comparison
@@ -219,21 +222,29 @@ raw logits, whose range is a property of the model, so the scale cannot be one
 global constant. Measured over five tied pairs and five genuinely separated
 pairs per model, on the same pairs for both:
 
+Measured through the production representation — the date-prefixed passage the
+query path builds — over three date configurations (both records same day, a
+60-day gap, a 365-day gap), taking the worst case across all of them:
+
 | Reranker | max tied spread | min separated spread | ratio |
 | --- | --- | --- | --- |
-| `ms-marco-MiniLM-L-6-v2` | 0.04495 | 0.71181 | 15.8x |
-| `bge-reranker-v2-m3` | 0.38548 | 2.48673 | 6.5x |
+| `ms-marco-MiniLM-L-6-v2` | 0.07318 | 0.64687 | 8.8x |
+| `bge-reranker-v2-m3` | 0.41323 | 1.35221 | 3.3x |
+
+Both regimes are narrower on the production path than they appeared on bare
+passages, and the separated regime narrows most. That is exactly why the earlier
+bare-passage measurement produced a scale that was too large.
 
 Each model separates its own two regimes cleanly, and the two models' regimes
 are an order of magnitude apart from each other. A bare threshold could still be
-placed between bge's largest tie (0.385) and ms-marco's smallest genuine
-separation (0.712) — but the confidence factor is not a threshold. It is the
+placed between bge's largest tie (0.413) and ms-marco's smallest genuine
+separation (0.647) — but the confidence factor is not a threshold. It is the
 ratio `spread / full_scale`, so a single global `F` would have to satisfy both
-`0.38548 / F < 0.227` (a bge tie must not decide the ranking) and
-`0.71181 / F > 0.5` (an ms-marco separation must still count), that is
-`F > 1.698` and `F < 1.424` simultaneously. No such `F` exists. The two
-requirements are only 19% apart, which is why the single constant 1.0 looked
-plausible while silently failing bge.
+`0.41323 / F < 0.227` (a bge tie must not decide the ranking) and
+`0.64687 / F > 0.5` (an ms-marco separation must still count), that is
+`F > 1.820` and `F < 1.294` simultaneously. No such `F` exists, and on the
+production path the two requirements are contradictory by a wider margin than
+they appeared on bare passages.
 
 **Two scale-free transforms were tested and rejected**, rather than assumed to
 work:
@@ -257,15 +268,21 @@ Two constraints bound the scale for each model:
 - a genuinely separated pair must earn more than 0.5, so the reranker keeps its
   authority where it has a real preference.
 
-| Reranker | evidence window | chosen | tied confidence | separated confidence |
+| Reranker | production window | chosen | tied confidence | separated confidence |
 | --- | --- | --- | --- | --- |
-| `ms-marco-MiniLM-L-6-v2` | (0.198, 1.424) | 1.0 | 0.045 | 0.712 |
-| `bge-reranker-v2-m3` | (1.698, 4.973) | 3.5 | 0.110 | 0.710 |
+| `ms-marco-MiniLM-L-6-v2` | (0.3224, 1.2937) | 0.65 | 0.113 | 0.995 |
+| `bge-reranker-v2-m3` | (1.8204, 2.7044) | 2.22 | 0.186 | 0.609 |
 
-Both chosen values sit inside their window, deliberately toward the
-recency-favouring end. 3.5 realises the `_CE_TARGET_TIED_CONFIDENCE = 0.11`
-design target for bge almost exactly (0.38548 / 0.11 = 3.504); 1.0 is a round
-value that holds a tied ms-marco pair an order of magnitude below it.
+Each chosen value is the **geometric centre of its model's window**, rounded to
+two places. That is one rule applied uniformly rather than per-model taste, and
+it is the point at which both constraints carry equal proportional margin:
+ms-marco consumes 0.496 and 0.502 of its two budgets, bge 0.820 and 0.821. bge's
+margins are tighter because its window is genuinely narrower — a property of the
+model, not of the choice.
+
+The scales were **not** carried over from the preliminary re-measurement that
+first exposed the defect. They are derived from the complete reproduced
+evidence: ten pairs per model, three date configurations, worst case taken.
 
 **An unmeasured reranker gets no boost at all.** `_ce_full_scale` returns `None`
 for a model not in the table, which zeroes the confidence factor. Guessing a
@@ -283,7 +300,7 @@ magnitude boost entirely.
 | --- | --- | --- | --- |
 | 0 (boost disabled) | 0.8811 | 95/116 (81.9%) | 1.58 |
 | 1.7 (window floor) | 0.9085 | 99/116 (85.3%) | 1.41 |
-| **3.5 (chosen)** | **0.9085** | **99/116 (85.3%)** | **1.41** |
+| 3.5 (previously chosen) | 0.9085 | 99/116 (85.3%) | 1.41 |
 | 5.0 (just above window ceiling) | 0.9085 | 99/116 (85.3%) | 1.41 |
 
 Two things follow, and the second corrects the first version of this document.
@@ -299,12 +316,17 @@ holds *within* the evidence window, not at zero.
 **Inside the window the benchmark is flat.** 1.7, 3.5 and 5.0 are
 indistinguishable — identical to four decimal places on every metric. That is
 the expected result, because LongMemEval's candidate sets are large and their
-cross-encoder scores genuinely spread out, so confidence saturates near 1.0 at
-any of these scales and the reranker keeps full authority. The benchmark
-therefore confirms that the window is safe but cannot choose within it. The
-choice is made by the pair measurements above and by the behavioural invariant,
-which is what the degenerate near-tie case — absent from this benchmark — turns
-on.
+cross-encoder scores genuinely spread out, so confidence saturates at any of
+these scales and the reranker keeps full authority. The benchmark therefore
+confirms that the window is safe but cannot choose within it. The choice is made
+by the production-path pair measurements and by the behavioural invariant, which
+is what the degenerate near-tie case — absent from this benchmark — turns on.
+
+**The chosen bge scale of 2.22 was not itself swept.** It lies between 1.7 and
+3.5, two swept points that are identical on every metric, so it is bracketed
+rather than directly measured. That is stated rather than glossed: the honest
+claim is that the benchmark cannot distinguish anything in this range, and 2.22
+is inside it.
 
 ## The original `test_fresh_ranks_above_old` fixture
 
@@ -362,9 +384,26 @@ scale and interference, not time decay.
 - Retrieval-only evaluation measures ranking, which is the right target here,
   but it does not measure end-to-end answer quality.
 - The per-model cross-encoder scales rest on ten pairs per model, built around a
-  single query. They are enough to establish that the two regimes are separable
-  and that a global constant cannot serve both; they are not a broad
-  characterisation of either model.
+  single query and a single anchor passage. They are enough to establish that
+  the two regimes are separable and that a global constant cannot serve both;
+  they are not a broad characterisation of either model.
+- **`bge-reranker-v2-m3` at int8 precision is UNVERIFIED but bounded.**
+  `OMEGA_RERANKER_PRECISION=int8` selects a quantised variant that keeps the
+  model's name and therefore inherits the fp32-measured scale. fp32/int8 score
+  scale equivalence has **not** been measured: the quantised model is not
+  present locally and fetching it is a network action. This is not a claim that
+  int8 is safe, only that its exposure is bounded — and bounded in both
+  directions. Confidence is clamped to [0, 1], so an expanded int8 scale can do
+  no worse than the unscaled boost every 1.5.12 install already applied; a
+  compressed one drives confidence toward zero and quietly silences the
+  reranker, which the clamp does not prevent. Measuring int8 is follow-up work.
+- A retrieval-layer property, found while writing the production-path guard: a
+  genuinely different aged record does not reliably enter the fusion candidate
+  set alongside its fresh counterpart unless the two share a trailing token. The
+  pipeline therefore never presented the separated calibration pairs to the
+  reranker together, which is why the separated-side guard scores through the
+  production representation rather than a full query. Not investigated further;
+  recorded so it is not rediscovered as a surprise.
 - The cross-encoder sweep exercises only the resolved reranker. The ms-marco
   scale is supported by pair measurements and by the ranking regression suite
   under that model, not by a LongMemEval sweep.
