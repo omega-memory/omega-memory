@@ -29,11 +29,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/omega-memory/omega"
-Repository = "https://github.com/omega-memory/omega"
-Documentation = "https://omega-memory.github.io/omega/"
-Changelog = "https://github.com/omega-memory/omega/blob/main/CHANGELOG.md"
-Issues = "https://github.com/omega-memory/omega/issues"
+Homepage = "https://omegamax.co"
+Repository = "https://github.com/omega-memory/omega-memory"
+Documentation = "https://github.com/omega-memory/omega-memory/tree/main/docs"
+Changelog = "https://github.com/omega-memory/omega-memory/blob/main/CHANGELOG.md"
+Issues = "https://github.com/omega-memory/omega-memory/issues"
 
 [project.optional-dependencies]
 server = ["mcp>=1.0.0,<2.0.0", "starlette>=0.36.0", "uvicorn>=0.27.0"]
