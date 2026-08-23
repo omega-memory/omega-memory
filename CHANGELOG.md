@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reranking no longer treats a negligible score difference as a confident
   preference. Confidence is calibrated per reranker model, so a model that emits
   larger-magnitude scores can no longer overpower other ranking signals.
+- A scoring glitch in the reranker can no longer corrupt results or memory.
+  If the reranker returned a non-numeric score, searches could report every
+  memory as equally irrelevant, and contradiction detection could record a
+  false contradiction against a memory at maximum confidence and store it
+  permanently. Both paths now fall back to their normal behaviour instead:
+  search keeps the order it already had, and contradiction detection uses word
+  overlap.
 - Repeated identical searches now return a stable order. Sub-second timestamp
   detail was being fed to the reranker as text and perturbing scores.
 - Made search-only retrieval safer by separating it from memory access history.
