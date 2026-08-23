@@ -7,13 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.5.13] - 2026-08-22
+## [1.5.13] - 2026-08-23
+
+### Changed
+
+- **`omega_memory` `action='supersede'` now takes two distinct IDs.**
+  `memory_id` is the outdated memory to retire and is required; the optional
+  `target_id` is the replacement, linked as replacement -> supersedes -> old.
+  Previously `target_id` named the record to retire and `memory_id` was accepted
+  as an alias for it. Callers that passed only `target_id` must now pass
+  `memory_id` instead. Omitting `target_id` still retires a memory with no
+  replacement, and the response now says explicitly whether a replacement was
+  linked.
+- Search results now expose machine-readable ranking reasons showing the
+  semantic, recency, priority and bounded-access contributions behind an order.
 
 ### Fixed
 
 - Improved memory replacement, priority correction, and search reliability so
-  the most relevant memory remains the strongest match.
+  the most relevant memory remains the strongest match. Among memories that are
+  equally good matches, a materially fresher one now ranks first; recency had
+  become a near-tie tiebreaker and a stale memory could outrank an equivalent
+  fresh one.
+- Reranking no longer treats a negligible score difference as a confident
+  preference. Confidence is calibrated per reranker model, so a model that emits
+  larger-magnitude scores can no longer overpower other ranking signals.
+- Repeated identical searches now return a stable order. Sub-second timestamp
+  detail was being fed to the reranker as text and perturbing scores.
 - Made search-only retrieval safer by separating it from memory access history.
+  Searching and listing no longer count as access. Access history also no longer
+  changes how quickly a memory decays. It does still protect a memory you have
+  actually used from automatic forgetting, unchanged from 1.5.12.
 
 ## [1.5.12] - 2026-08-20
 
