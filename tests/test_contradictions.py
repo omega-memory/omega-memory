@@ -512,3 +512,92 @@ class TestTemporalSupersession:
         old = vec_store.get_node(old_id)
         assert old is not None
         assert old.metadata.get("superseded") is not True
+
+
+# ---------------------------------------------------------------------------
+# TestNonFiniteSimilarityScores
+# ---------------------------------------------------------------------------
+
+
+class TestNonFiniteSimilarityScores:
+    """A reranker emitting NaN or infinity must not manufacture contradictions.
+
+    This is the write-path twin of the ranking fail-safe.  It is worse here
+    than on the read path: NaN loses every comparison, so ``sim`` slipped past
+    ``sim < similarity_threshold``, ``min(1.0, NaN)`` evaluates to ``1.0`` in
+    CPython, and ``confidence < contradiction_threshold`` was False too.  The
+    result was a maximum-confidence contradiction that the store writes to
+    durable metadata and a graph edge — permanent false state from a transient
+    scoring glitch.
+    """
+
+    NON_FINITE = [float("nan"), float("inf"), float("-inf")]
+
+    CONTRADICTORY = "I no longer use tabs for indentation"
+    CANDIDATE = "I always use tabs for indentation"
+
+    @pytest.mark.parametrize("bad", NON_FINITE)
+    def test_normalise_refuses_to_emit_non_finite_values(self, bad):
+        normalised = _normalize_scores([0.1, bad, 0.9])
+
+        assert all(math.isfinite(s) for s in normalised)
+        assert normalised == [0.0, 0.0, 0.0], (
+            "an unusable batch must fall below any similarity threshold "
+            "rather than normalising into the decidable range"
+        )
+
+    @pytest.mark.parametrize("bad", NON_FINITE)
+    def test_a_poisoned_score_cannot_reach_maximum_confidence(self, bad):
+        """The precise failure: garbage in, confidence 1.0 out."""
+        results = detect_contradictions(
+            self.CONTRADICTORY,
+            [self.CANDIDATE],
+            similarity_scores=[bad],
+        )
+
+        assert not any(r.confidence == 1.0 for r in results), (
+            f"a {bad} similarity produced a maximum-confidence contradiction"
+        )
+        for result in results:
+            assert math.isfinite(result.confidence)
+
+    @pytest.mark.parametrize("bad", NON_FINITE)
+    def test_the_reranker_falls_back_to_word_overlap(self, monkeypatch, bad):
+        """A non-finite cross-encoder counts as unavailable, not as similar.
+
+        Detection must degrade to the word-overlap path the module already
+        defines, not switch off and not fabricate: the outcome has to match
+        what an absent cross-encoder produces.
+        """
+        import omega.contradictions as contradictions_module
+
+        def poisoned(query, passages):
+            return [bad] * len(passages)
+
+        def absent(query, passages):
+            raise RuntimeError("reranker unavailable")
+
+        def detect_with(scorer):
+            monkeypatch.setattr(
+                contradictions_module, "cross_encoder_score", scorer, raising=False
+            )
+            monkeypatch.setitem(
+                sys.modules, "omega.reranker", _FakeReranker(scorer)
+            )
+            return detect_contradictions(self.CONTRADICTORY, [self.CANDIDATE])
+
+        poisoned_results = detect_with(poisoned)
+        fallback_results = detect_with(absent)
+
+        assert [(r.confidence, r.reason) for r in poisoned_results] == [
+            (r.confidence, r.reason) for r in fallback_results
+        ], "a poisoned reranker must behave exactly like an absent one"
+        for result in poisoned_results:
+            assert math.isfinite(result.confidence)
+
+
+class _FakeReranker:
+    """Stand-in for ``omega.reranker`` so the in-function import is patchable."""
+
+    def __init__(self, scorer):
+        self.cross_encoder_score = scorer

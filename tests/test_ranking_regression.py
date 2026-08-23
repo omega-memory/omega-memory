@@ -583,12 +583,15 @@ class TestNonFiniteCrossEncoderScores:
 
     ``_ce_confidence`` alone was not enough.  ``ce_norm`` used to be computed
     before, and independently of, the confidence, under a bare ``ce_range > 0``
-    guard that ``inf`` satisfies.  That produced NaN entries in ``ce_norm``
-    which survived a zero confidence, because ``NaN * 0.0`` is ``NaN``, and a
-    single NaN collapsed every returned record to zero relevance without
-    raising, so no error path caught it.  Normalisation and confidence are now
-    decided together, and the fallback is deterministic: a flat 0.5 at zero
-    confidence, which makes every multiplier at the call site exactly 1.0.
+    guard that ``inf`` satisfies.  The consequence depended on the value: an
+    ``inf`` poisoned one record's relevance because ``NaN * 0.0`` is ``NaN``;
+    a ``-inf`` made every ``ce_norm`` entry NaN and collapsed the entire result
+    set to 0.0 relevance downstream; a bare NaN past the first position slipped
+    past ``min``/``max`` and poisoned only its own record, at a confidence that
+    was not even zero.  Nothing raised, so no error path caught any of it.
+    Normalisation and confidence are now decided together, and the fallback is
+    deterministic: a flat 0.5 at zero confidence, which makes every multiplier
+    at the call site exactly 1.0.
     """
 
     NON_FINITE = [float("nan"), float("inf"), float("-inf")]
@@ -644,17 +647,37 @@ class TestNonFiniteCrossEncoderScores:
 
         def scorer(value):
             def score(query, passages, temporal_metadata=None):
-                scores = [1.0] * len(passages)
-                if scores and value is not None:
-                    scores[-1] = value
+                if value is None:
+                    # The control: no preference at all, so confidence is zero
+                    # and the pipeline must fall back to fusion's ordering.
+                    return [1.0] * len(passages)
+                # The poisoned run needs a real spread underneath the bad
+                # value.  With an all-equal base the pre-fix code was
+                # accidentally safe for NaN -- min and max both returned the
+                # same finite value, the range was 0.0, and the old
+                # `ce_range > 0` guard bailed before the division -- so a flat
+                # base proved nothing about the regression this test is named
+                # for.
+                scores = [1.0 + 0.1 * i for i in range(len(passages))]
+                # Middle, not either end.  ``min`` and ``max`` skip a NaN, so
+                # a NaN at an extreme of a two-element set leaves the range at
+                # 0.0 and the pre-fix guard bailed correctly.  Poisoning an
+                # interior position of a wider set is what actually reaches the
+                # division.
+                scores[len(scores) // 2] = value
                 return scores
 
             return score
 
         # One store for both runs, so record identity is stable and the only
-        # thing that differs is what the reranker returns.
+        # thing that differs is what the reranker returns.  The store needs
+        # enough candidates for an interior position to exist at all: the
+        # equivalent pair alone reranks two passages, and this regression
+        # cannot be reproduced end to end with two.
         store = _get_store()
         _equivalent_pair(store)
+        for index, alternative in enumerate(SEPARATED_ALTERNATIVES[:3]):
+            _insert_memory(store, f"{alternative} ref-{index}", "decision")
         _insert_memory(store, UNRELATED, "decision")
 
         def order_under(value):
