@@ -96,6 +96,15 @@ RECENCY_MAX_ADDITIVE = float(os.environ.get("OMEGA_RECENCY_MAX_ADDITIVE", "0.05"
 # bge's margins are tighter because its window is genuinely narrower, which is a
 # property of the model, not of the choice.
 #
+# SCOPE, because the two constraints above read like universal invariants and
+# are not: they are measured over ten pairs per model built around a single
+# query and a single anchor passage.  They hold on that corpus at the chosen
+# scales.  On other content families they can be exceeded -- under ms-marco a
+# short two-token pair reaches confidence 1.0 -- so the guarantee is that this
+# is strictly better than the unscaled boost 1.5.12 applied everywhere, not
+# that a tie can never decide.  Broadening the calibration corpus is follow-up
+# work; docs/ranking-calibration.md records the same limit.
+#
 # Two scale-free transforms were measured and rejected (see
 # docs/ranking-calibration.md): under sigmoid the regimes invert -- bge's tied
 # spread exceeds ms-marco's genuinely-separated spread by 29x -- and relative
@@ -158,11 +167,28 @@ def _ce_normalise(
     """Min-max normalise cross-encoder scores and weigh the result by confidence.
 
     Returns ``(ce_norm, ce_confidence)``.  The two are computed together
-    because they must agree about what counts as a usable spread: computing
-    the normalisation first and the confidence separately let a non-finite
-    score produce ``NaN`` in ``ce_norm`` that survived a zero confidence,
-    because ``NaN * 0.0`` is ``NaN``, and one NaN score collapsed the whole
-    result set to zero relevance.
+    because they must agree about what counts as a usable spread.  Computing
+    the normalisation first and the confidence separately, under a bare
+    ``ce_range > 0`` guard, produced three distinct failures depending on
+    which non-finite value arrived and where:
+
+      * ``inf`` anywhere: the range is ``inf``, which satisfies ``> 0``, so the
+        division ran and put ``NaN`` in ``ce_norm``.  The confidence was 0.0,
+        but ``NaN * 0.0`` is ``NaN``, so that record's relevance went NaN.
+      * ``-inf``: every ``ce_norm`` entry is ``NaN``, so every record was hit.
+      * a bare ``NaN`` past the first position: ``min``/``max`` skip it, so the
+        range stayed finite and the confidence was NOT zero -- the down-weight
+        that was supposed to contain this never engaged.  A NaN in first
+        position was harmless, because then the range itself is NaN and the
+        old guard did bail.
+
+    How far a poisoned record spread depended on what came after it.
+    ``_query_phase_assemble`` normalises by ``max_score`` and takes an
+    ``else 0.0`` branch when ``max_score > 0`` is False, which a NaN maximum
+    makes it -- so a single NaN reaching that step took the whole result set
+    to 0.0 relevance, while one that did not left its own record NaN.
+
+    None of it raised, so no error path caught any of it.
 
     A single non-finite score makes the entire spread meaningless, so the
     deterministic fallback is a flat ``0.5`` normalisation at zero confidence:

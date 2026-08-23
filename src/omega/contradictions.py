@@ -23,6 +23,7 @@ See also:
 """
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -324,15 +325,29 @@ def _check_temporal_override(new_lower: str, cand_lower: str) -> float:
 
 
 def _get_similarity_scores(query: str, passages: list[str]) -> Optional[list[float]]:
-    """Get cross-encoder similarity scores, or None if unavailable."""
+    """Get cross-encoder similarity scores, or None if unavailable.
+
+    A non-finite score counts as unavailable rather than as a similarity.
+    ``cross_encoder_score`` returns raw model logits with no finiteness
+    sanitation, and a single NaN reaching the caller is worse here than on the
+    read path: NaN loses every comparison, so it passes the similarity filter,
+    ``min(1.0, NaN)`` evaluates to ``1.0``, and the result is a
+    maximum-confidence contradiction written durably to the store.  Returning
+    None instead routes the whole batch through the word-overlap fallback the
+    module already defines, so detection degrades rather than fabricating.
+    """
     try:
         from omega.reranker import cross_encoder_score
-        return cross_encoder_score(query, passages)
+        scores = cross_encoder_score(query, passages)
     except ImportError:
         return None
     except Exception as e:
         logger.debug("Cross-encoder scoring failed: %s", e)
         return None
+    if scores is not None and not all(math.isfinite(s) for s in scores):
+        logger.debug("Cross-encoder returned a non-finite score; using word overlap")
+        return None
+    return scores
 
 
 def _word_overlap_similarity(text_a: str, candidates: list[str]) -> list[float]:
@@ -354,9 +369,18 @@ def _word_overlap_similarity(text_a: str, candidates: list[str]) -> list[float]:
 
 
 def _normalize_scores(scores: list[float]) -> list[float]:
-    """Normalize a list of scores to [0, 1] range."""
+    """Normalize a list of scores to [0, 1] range.
+
+    Scores arrive either from the cross-encoder or from a caller, so the
+    non-finite guard is repeated here for the caller-supplied case.  ``inf``
+    satisfies a bare ``rng <= 0`` test and NaN fails it, so both used to reach
+    the division and emit NaN.  An unusable batch normalises to 0.0, below any
+    similarity threshold, which suppresses detection rather than inventing it.
+    """
     if not scores:
         return []
+    if not all(math.isfinite(s) for s in scores):
+        return [0.0] * len(scores)
     min_s = min(scores)
     max_s = max(scores)
     rng = max_s - min_s
