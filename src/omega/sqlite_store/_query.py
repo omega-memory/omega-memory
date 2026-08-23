@@ -62,56 +62,60 @@ RECENCY_MAX_ADDITIVE = float(os.environ.get("OMEGA_RECENCY_MAX_ADDITIVE", "0.05"
 #
 # The fix scales the boost by the observed spread.  The scale CANNOT be a single
 # global constant: `cross_encoder_score` returns raw logits and their range is a
-# property of the model.  Measured on the same pairs (see
-# docs/ranking-calibration.md):
+# property of the model.
 #
-#     model                     tied-pair spread   genuinely-separated spread
-#     ms-marco-MiniLM-L-6-v2    <= 0.045           >= 0.712
-#     bge-reranker-v2-m3        <= 0.385           >= 2.487
+# CRITICAL, and the reason this block was rewritten: the scale must be measured
+# through the representation production actually scores.  The query path below
+# always passes day-granular temporal metadata, so the reranker sees
+# "[Date: YYYY-MM-DD] {passage}", not the bare passage.  The date prefix
+# retokenises the passage and moves the logits materially.  An earlier
+# calibration measured bare passages, and the bge scale it produced was outside
+# its own production window -- a genuinely separated pair earned 0.386 where the
+# scale existed to guarantee more than 0.5.
 #
-# The confidence factor is the ratio `spread / full_scale`, so a single global
-# scale F would have to satisfy 0.385/F < 0.227 (a bge tie must not decide) and
-# 0.712/F > 0.5 (an ms-marco separation must still count) at the same time --
-# F > 1.698 and F < 1.424.  No such F exists, which is why the single constant
-# 1.0 looked plausible while silently failing bge.  Two scale-free
-# transforms were measured and rejected (see docs/ranking-calibration.md):
-# under sigmoid the regimes invert -- bge's tied spread 2.6e-3 exceeds
-# ms-marco's genuinely-separated spread 8.8e-5 by 29x -- and relative spread
-# leaves only a 2% window between bge-tied 0.0744 and ms-marco-separated
-# 0.0760, which no ratio-based confidence can exploit.
+# Two constraints bound the scale for each model:
 #
-# So the scale is calibrated per model identity.  Two constraints bound it:
-# a tied pair must earn confidence below _CE_DECISIVE_CONFIDENCE, and a
-# genuinely separated pair must earn more than 0.5 so the reranker keeps its
-# authority.  Those give a window per model, and the chosen value sits inside
-# it, deliberately toward the recency-favouring end:
+#   * a tied pair must earn confidence below _CE_DECISIVE_CONFIDENCE, or the
+#     reranker decides rankings on noise;
+#   * a genuinely separated pair must earn more than _CE_SEPARATED_MIN_CONFIDENCE,
+#     or the reranker is silenced where it has a real preference.
 #
-#     model                     evidence window   chosen
-#     ms-marco-MiniLM-L-6-v2    (0.198, 1.424)    1.0
-#     bge-reranker-v2-m3        (1.698, 4.973)    3.5
+# Those give `(max_tied / decisive, min_genuine / separated_min)` per model.
+# Measured over five tied and five genuinely separated pairs per model, each
+# scored through the production path in three date configurations (same day, a
+# 60-day gap, a 365-day gap), taking the worst case across all of them:
 #
-# _CE_TARGET_TIED_CONFIDENCE is the design target used to pick within the
-# window: below half of _CE_DECISIVE_CONFIDENCE, so recency still decides a
-# genuine tie with better than a factor-of-two margin.  3.5 realises that
-# target for bge almost exactly (0.385 / 0.11 = 3.504); 1.0 is a round value
-# that holds a tied ms-marco pair an order of magnitude below it.
+#     model                     max_tied  min_genuine  window            chosen
+#     ms-marco-MiniLM-L-6-v2    0.07318   0.64687      (0.3224, 1.2937)  0.65
+#     bge-reranker-v2-m3        0.41323   1.35221      (1.8204, 2.7044)  2.22
 #
-# _CE_DECISIVE_CONFIDENCE is the confidence at which a top-3 rerank boost
-# (ce_w 0.15) would overpower the recency span
-# (RECENCY_MAX_ADDITIVE * (1 - decay floor) = 0.0425).
+# Each chosen value is the GEOMETRIC CENTRE of its model's window, rounded to
+# two places.  That is one rule applied uniformly rather than per-model taste,
+# and it is the point at which both constraints carry equal proportional
+# margin: ms-marco uses 0.496 and 0.502 of its two budgets, bge 0.820 and 0.821.
+# bge's margins are tighter because its window is genuinely narrower, which is a
+# property of the model, not of the choice.
+#
+# Two scale-free transforms were measured and rejected (see
+# docs/ranking-calibration.md): under sigmoid the regimes invert -- bge's tied
+# spread exceeds ms-marco's genuinely-separated spread by 29x -- and relative
+# spread leaves only a 2% window between the two models' regimes, which no
+# ratio-based confidence can exploit.
 _CE_DECISIVE_CONFIDENCE = 0.227
-_CE_TARGET_TIED_CONFIDENCE = 0.11
+_CE_SEPARATED_MIN_CONFIDENCE = 0.5
 _CE_SPREAD_FULL_SCALE_BY_MODEL = {
-    "ms-marco-MiniLM-L-6-v2": 1.0,
-    "bge-reranker-v2-m3": 3.5,
+    "ms-marco-MiniLM-L-6-v2": 0.65,
+    "bge-reranker-v2-m3": 2.22,
 }
 
 # Precision variants (OMEGA_RERANKER_PRECISION) keep their model's name and so
-# inherit its scale.  Both entries above were measured at fp32; int8 is assumed
-# to emit logits in the same units, which is not verified here because the
-# quantised model is not present locally and fetching it is a network action.
-# The assumption is bounded: confidence is clamped to [0, 1], so the worst case
-# is the unscaled full-strength boost that every 1.5.12 install already applied.
+# inherit its scale.  Both entries were measured at fp32.  int8 is UNVERIFIED:
+# the quantised model is not present locally and fetching it is a network
+# action, so fp32/int8 score-scale equivalence has NOT been measured and must
+# not be described as validated.  The exposure is bounded but in both
+# directions: confidence is clamped to [0, 1], so an expanded int8 scale can do
+# no worse than the unscaled boost every 1.5.12 install already applied, while a
+# compressed one drives confidence toward 0 and quietly silences the reranker.
 # Measuring int8 and giving it its own entry is recorded as follow-up work.
 
 # An explicit override applies to whichever model is resolved.  Unset means
@@ -146,6 +150,38 @@ def _ce_confidence(ce_range: float, full_scale: Optional[float]) -> float:
     if not math.isfinite(ce_range) or ce_range <= 0:
         return 0.0
     return min(1.0, ce_range / full_scale)
+
+
+def _ce_normalise(
+    ce_scores: List[float], full_scale: Optional[float]
+) -> Tuple[List[float], float]:
+    """Min-max normalise cross-encoder scores and weigh the result by confidence.
+
+    Returns ``(ce_norm, ce_confidence)``.  The two are computed together
+    because they must agree about what counts as a usable spread: computing
+    the normalisation first and the confidence separately let a non-finite
+    score produce ``NaN`` in ``ce_norm`` that survived a zero confidence,
+    because ``NaN * 0.0`` is ``NaN``, and one NaN score collapsed the whole
+    result set to zero relevance.
+
+    A single non-finite score makes the entire spread meaningless, so the
+    deterministic fallback is a flat ``0.5`` normalisation at zero confidence:
+    every multiplier at the call site becomes exactly ``1.0`` and the incoming
+    order is preserved untouched.  That is the same fallback used for a
+    genuinely tied candidate set, and for the same reason — the reranker has
+    expressed no usable preference.
+    """
+    neutral = ([0.5] * len(ce_scores), 0.0)
+    if not ce_scores or not all(math.isfinite(s) for s in ce_scores):
+        return neutral
+
+    ce_min, ce_max = min(ce_scores), max(ce_scores)
+    ce_range = ce_max - ce_min
+    confidence = _ce_confidence(ce_range, full_scale)
+    if confidence <= 0.0 or not math.isfinite(ce_range) or ce_range <= 0:
+        return neutral
+
+    return [(s - ce_min) / ce_range for s in ce_scores], confidence
 
 
 def _score_bounded_metadata(
@@ -1501,23 +1537,8 @@ class QueryMixin:
                     query_text, passages, temporal_metadata=temporal_meta,
                 )
                 if ce_scores is not None and len(ce_scores) == len(top_ids_for_rerank):
-                    # Normalize CE scores to [0, 1] range
-                    ce_min = min(ce_scores)
-                    ce_max = max(ce_scores)
-                    ce_range = ce_max - ce_min
-                    if ce_range > 0:
-                        ce_norm = [(s - ce_min) / ce_range for s in ce_scores]
-                    else:
-                        ce_norm = [0.5] * len(ce_scores)
-                    # Down-weight the whole rerank when the candidates are
-                    # effectively tied, so normalisation cannot turn a
-                    # negligible score gap into a full-strength boost.  The
-                    # scale is calibrated per model because the spread is in
-                    # the model's own logit units.
-                    # At zero confidence every multiplier below is exactly
-                    # 1.0, so the rerank leaves the ordering untouched.
-                    ce_confidence = _ce_confidence(
-                        ce_range, _ce_full_scale(_RERANKER_MODEL_NAME)
+                    ce_norm, ce_confidence = _ce_normalise(
+                        ce_scores, _ce_full_scale(_RERANKER_MODEL_NAME)
                     )
 
                     # Position-aware CE boost (QMD-inspired): top RRF results
