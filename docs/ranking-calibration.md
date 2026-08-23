@@ -11,8 +11,33 @@ boundary to come from an offline evaluation rather than from intuition.
 **This is the second version of this document.** The first version drew
 conclusions from a benchmark run that could not see the signal it claimed to be
 measuring. Independent review disproved several of its claims. The withdrawn
-claims are listed below in full rather than quietly dropped; the original text
-remains in git history at commit `d6e2f56`.
+claims are listed below rather than quietly dropped; the original text remains
+in git history at commit `d6e2f56`.
+
+> ## OPEN DEFECTS — this calibration is NOT final
+>
+> A second independent re-review found two defects that this document does not
+> yet resolve. They are recorded here rather than left for a reader to discover.
+>
+> **1. The per-model scales were measured off the production path.** Every pair
+> measurement below calls `cross_encoder_score(query, passages)` with no
+> temporal metadata. The shipped pipeline always passes day-granular dates, so
+> the reranker actually scores `"[Date: YYYY-MM-DD] {passage}"`. Re-measured
+> through the production path, the `bge-reranker-v2-m3` window narrows to
+> roughly (1.82, 2.70) and the shipped scale of **3.5 falls outside it**: a
+> genuinely separated pair earns confidence 0.386, below the 0.5 the scale was
+> chosen to guarantee. `ms-marco-MiniLM-L-6-v2` at 1.0 remains inside its
+> production window. This is the failure the "Gate for future ranking changes"
+> section below forbids, committed by this document itself.
+>
+> **2. A non-finite cross-encoder logit propagates NaN.** `ce_range` is tested
+> with `> 0`, which `inf` satisfies, so `ce_norm` becomes NaN before the
+> confidence factor is applied, and `NaN * 0.0` is NaN. The claim in
+> `_query.py` that zero confidence leaves the ordering untouched does not hold
+> for non-finite scores.
+>
+> Both are being handed to the owner as required corrective work. Treat the
+> per-model scale table below as provisional.
 
 ## Withdrawn claims
 
@@ -24,6 +49,13 @@ remains in git history at commit `d6e2f56`.
 | "The recency sweep evaluates freshness." | It did not. Every candidate scored `decay_factor ≈ 1.0`, so the sweep varied a constant that was multiplied by an effectively fixed number. |
 | "A single global `CE_SPREAD_FULL_SCALE` of 1.0 is correct." | Raw cross-encoder logits are model-scaled. One constant cannot satisfy both supported rerankers simultaneously. |
 | "MemoryStress has no dataset, no generator, and no driver." | Factually wrong. A generator and a driver both exist and both run; only the dataset artifact is genuinely uncommitted. Corrected in the release specification. |
+| "The scaling is benchmark-neutral, which is the expected and desired outcome." | Withdrawn. On the corrected harness, disabling the magnitude boost costs 4 questions of recall@1. Neutrality holds only within the evidence window. |
+| MemoryStress "metrics include `recall_at_age`, which is precisely the recency measurement this release needs". | Withdrawn. `recall_at_age` buckets by session index, not calendar time, and the OMEGA adapter never writes `created_at`, which is the field decay reads. |
+| "All runs used an isolated HOME." | False as written. The qualification environment deliberately retains the real HOME read-only so the production-preferred reranker is the one exercised; OMEGA state and TMPDIR are what is isolated. |
+| "The two recency-sensitive categories are deliberately over-weighted" offered as support for the sweep. | Withdrawn as support. Both over-weighted categories are largely inert to the swept constant because of the harness confound disclosed under Method. |
+
+The rows above paraphrase the withdrawn claims where the original wording was
+long; the exact prior text is at `d6e2f56`.
 
 ## What is being calibrated
 
@@ -63,18 +95,43 @@ record sits on the `_DECAY_FLOOR_NEVER_ACCESSED = 0.15` floor.
 
 The harness now backdates `created_at` to each session's own date **and** shifts
 the whole timeline so the question's "present" is now, preserving the relative
-spacing the dataset encodes. Decay factors across the sample then span 53
-distinct values from 0.58 to 0.996 — a live signal rather than a constant. Every
-number in the first version of this document was produced before this fix and
-should be treated as measuring something else.
+spacing the dataset encodes.
+
+Measured across the whole sample — 4999 haystack sessions over the 106 sampled
+questions that carry dates — decay then takes 2728 distinct values spanning the
+full 0.15 to 1.0 range, rather than sitting at a constant. It is a live signal.
+It is not a uniformly live one: **18.4% of sessions are pinned on the 0.15
+floor**, 4.8% sit at exactly 1.0 because they post-date the question, 3
+questions have their entire haystack on the floor and 22 more have over half of
+it there. An earlier version of this paragraph quoted "53 distinct values from
+0.58 to 0.996", which was a probe of a **single** question presented as a
+sample-wide property; that is corrected here rather than dropped.
+
+Every number in the first version of this document was produced before this fix
+and should be treated as measuring something else.
 
 Both harness changes live in `scripts/longmemeval_official.py`, which is not
 part of the published wheel.
 
+**A confound this document must disclose.** The harness contains its own
+recency mechanism, `_boost_recency` at `scripts/longmemeval_official.py:955`,
+enabled by default and applied to **every knowledge-update question**. It
+multiplies relevance by 1.0 to 1.5 by `referenced_date` and re-sorts. That
+dwarfs a `RECENCY_MAX_ADDITIVE` of 0.05, and it runs on `referenced_date`, which
+the harness fix deliberately leaves in 2023, rather than on the backdated
+`created_at` the store's decay reads. The consequence is visible in the
+per-category numbers: knowledge-update MRR moves by 0.0004 across the entire
+recency sweep and temporal-reasoning by 0.0056, while single-session-preference
+moves by 0.042. The sweep's signal comes from the categories the sample does
+*not* over-weight. The sweep below should be read with that in mind, and a
+re-run with `--no-recency-boost` is required before its shape is relied on.
+
 **Sample.** 116 questions, stratified and deterministic (no RNG): 30
 knowledge-update, 30 temporal-reasoning, 20 multi-session, and 12 each of
 single-session-assistant, single-session-preference, and single-session-user.
-The two recency-sensitive categories are deliberately over-weighted. All runs
+The two categories intended as recency-sensitive are over-weighted; per the
+confound above, they are also the two the harness's own boost renders least
+sensitive to the constant under test. All runs
 used isolated OMEGA state and TMPDIR, a fresh store per configuration, and the
 local ONNX embedding model, with reranker auto-download disabled so a missing
 model fails loudly instead of silently substituting a different one. No network
@@ -231,9 +288,12 @@ magnitude boost entirely.
 
 Two things follow, and the second corrects the first version of this document.
 
-**The boost is not optional.** Disabling it costs 4 questions of recall@1 and
-0.027 MRR. The earlier claim that this scaling is "benchmark-neutral at every
-value tested" was made on the decay-blind harness and is withdrawn: neutrality
+**Disabling the boost measurably degrades retrieval**, by 4 questions of
+recall@1 and 0.027 MRR. By this document's own taxonomy that is a *measured
+directional* result, not a significant one: it is a single run with no paired
+test, and the paired test is one rerun away now that `--retrieval-log` exists.
+It is not claimed at any greater strength than that. What it does settle is that
+the earlier "benchmark-neutral" framing was wrong — whatever neutrality exists
 holds *within* the evidence window, not at zero.
 
 **Inside the window the benchmark is flat.** 1.7, 3.5 and 5.0 are
@@ -268,7 +328,11 @@ relevance difference. Making that fixture pass under ms-marco is not a recency
 requirement; it is a request to let age outrank relevance.
 
 The fixture was replaced with a pair that differs only by a trailing reference
-token, which both models place in their tied regime (0.007 and 0.073). Its
+token, which both models place in their tied regime: 0.007 for ms-marco and
+0.267 for bge in raw logit units, 0.228 for bge as production scores it with the
+date prepended. An earlier version of this sentence gave bge as 0.073, which is
+its *relative*-spread figure, not the raw-logit units every other number in this
+document uses. Its
 converse — a genuinely better older match must not be buried by age — is now
 asserted deliberately in `test_stronger_match_wins_even_when_older`.
 
