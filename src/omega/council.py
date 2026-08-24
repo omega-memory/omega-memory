@@ -93,7 +93,7 @@ class Council:
 
             mgr = get_manager()
             with mgr._lock:
-                rows = mgr._conn.execute(
+                rows = mgr.get_read_connection().execute(
                     """SELECT tool_name, COUNT(*) as fail_count
                        FROM coord_audit
                        WHERE result_summary LIKE '%error%'
@@ -137,7 +137,7 @@ class Council:
 
             mgr = get_manager()
             with mgr._lock:
-                rows = mgr._conn.execute(
+                rows = mgr.get_read_connection().execute(
                     """SELECT action_type, action_target, status, created_at
                        FROM coord_external_actions
                        WHERE created_at > datetime('now', '-1 day')
@@ -160,7 +160,7 @@ class Council:
 
             mgr = get_manager()
             with mgr._lock:
-                rows = mgr._conn.execute(
+                rows = mgr.get_read_connection().execute(
                     """SELECT tool_name, COUNT(*) as calls
                        FROM coord_audit
                        WHERE created_at > datetime('now', '-7 days')

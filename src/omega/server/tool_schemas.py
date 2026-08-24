@@ -576,6 +576,90 @@ TOOL_CATEGORIES = {
     "omega_entity_add_relationship": "entity",
     "omega_entity_relationships": "entity",
     "omega_entity_tree": "entity",
+    # ------------------------------------------------------------------
+    # Pro-only tools. Classification is informational policy metadata so
+    # Core can answer "requires OMEGA Pro" instead of "Unknown tool";
+    # the implementations stay in the private omega_platform package and
+    # are never made available to Core-only users by these entries.
+    # Derived from the real Pro plugin/schema surface, not copied from
+    # the Pro repository's vendored Core registries.
+    # ------------------------------------------------------------------
+    # audit
+    "omega_audit_export": "audit",
+    "omega_audit_inclusion_proof": "audit",
+    "omega_audit_verify": "audit",
+    "omega_audit_verify_inclusion": "audit",
+    # coordination
+    "omega_dispatch": "coordination",
+    "omega_dispatch_template": "coordination",
+    "omega_global_pause": "coordination",
+    "omega_global_resume": "coordination",
+    "omega_message_show": "coordination",
+    "omega_objective_approve_gate": "coordination",
+    "omega_objective_cleanup": "coordination",
+    "omega_objective_complete": "coordination",
+    "omega_objective_create": "coordination",
+    "omega_objective_decompose": "coordination",
+    "omega_objective_dispatch_next": "coordination",
+    "omega_objective_get": "coordination",
+    "omega_objective_list": "coordination",
+    "omega_objective_replan_subtask": "coordination",
+    "omega_objective_tick": "coordination",
+    "omega_task_decompose": "coordination",
+    "omega_task_group_results": "coordination",
+    "omega_task_release": "coordination",
+    "omega_task_resolve": "coordination",
+    "omega_task_tree": "coordination",
+    "omega_trace_check": "coordination",
+    "omega_trace_deposit": "coordination",
+    "omega_worker_spawns": "coordination",
+    # dreaming
+    "omega_dream": "dreaming",
+    "omega_dream_apply": "dreaming",
+    "omega_dream_diff": "dreaming",
+    "omega_dream_discard": "dreaming",
+    "omega_dream_revert": "dreaming",
+    # entity
+    "omega_project_create": "entity",
+    "omega_project_delete": "entity",
+    "omega_project_get": "entity",
+    "omega_project_list": "entity",
+    "omega_project_update": "entity",
+    # federation
+    "omega_federation_export": "federation",
+    "omega_federation_import": "federation",
+    "omega_federation_trust_add": "federation",
+    "omega_federation_trust_list": "federation",
+    "omega_federation_trust_remove": "federation",
+    "omega_federation_verify": "federation",
+    # ingest
+    "omega_ingest_file": "ingest",
+    # oracle
+    "omega_oracle_abstain": "oracle",
+    "omega_oracle_aggregate": "oracle",
+    "omega_oracle_calibrate": "oracle",
+    "omega_oracle_cold_start_prior": "oracle",
+    "omega_oracle_forecastbench": "oracle",
+    "omega_oracle_murphy_decompose": "oracle",
+    "omega_oracle_predict": "oracle",
+    "omega_oracle_resolve_due": "oracle",
+    "omega_oracle_scenario": "oracle",
+    "omega_oracle_score_quantile": "oracle",
+    "omega_oracle_track_record": "oracle",
+    # profile
+    "omega_profile_delete": "profile",
+    # router
+    "omega_ask": "router",
+    # stores
+    "omega_store_archive": "stores",
+    "omega_store_attach": "stores",
+    "omega_store_create": "stores",
+    "omega_store_list": "stores",
+    "omega_store_sync": "stores",
+    # typed
+    "omega_typed_query": "typed",
+    "omega_typed_schemas": "typed",
+    "omega_typed_store": "typed",
 }
 
 CONDENSED_TOOL_SCHEMAS = [

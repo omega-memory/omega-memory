@@ -148,7 +148,7 @@ def _lookup_session_tasks(results: list) -> dict:
         from omega_platform.orchestrator.coordination import get_manager
         mgr = get_manager()
         placeholders = ",".join("?" for _ in session_ids)
-        cursor = mgr._conn.execute(
+        cursor = mgr.get_read_connection().execute(
             f"SELECT session_id, task FROM coord_sessions WHERE session_id IN ({placeholders})",
             list(session_ids),
         )

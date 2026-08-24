@@ -288,6 +288,51 @@ _WRITE_TOOLS = frozenset({
     "omega_track_statement", "omega_resolve_outcome",
     # Condensed mode meta-tool (rate-limited by inner tool name in call_tool)
     "omega_call",
+    # Pro-only mutating tools. Each verdict was taken from the real Pro
+    # handler's primary operation; incidental audit/telemetry writes do
+    # NOT qualify a tool as a write.
+    # coordination
+    "omega_dispatch",
+    "omega_dispatch_template",
+    "omega_global_pause",
+    "omega_global_resume",
+    "omega_objective_approve_gate",
+    "omega_objective_cleanup",
+    "omega_objective_complete",
+    "omega_objective_create",
+    "omega_objective_decompose",
+    "omega_objective_dispatch_next",
+    "omega_objective_replan_subtask",
+    "omega_objective_tick",
+    "omega_task_decompose",
+    "omega_task_release",
+    "omega_task_resolve",
+    "omega_trace_deposit",
+    "omega_worker_spawns",
+    # dreaming
+    "omega_dream",
+    "omega_dream_apply",
+    "omega_dream_discard",
+    "omega_dream_revert",
+    # entity
+    "omega_project_create",
+    "omega_project_delete",
+    "omega_project_update",
+    # federation
+    "omega_federation_import",
+    "omega_federation_trust_add",
+    "omega_federation_trust_remove",
+    # ingest
+    "omega_ingest_file",
+    # profile
+    "omega_profile_delete",
+    # stores
+    "omega_store_archive",
+    "omega_store_attach",
+    "omega_store_create",
+    "omega_store_sync",
+    # typed
+    "omega_typed_store",
 })
 
 

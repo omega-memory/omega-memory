@@ -3116,7 +3116,7 @@ def distill_trajectory(session_id: str) -> Optional[str]:
             from omega_platform.orchestrator.coordination import get_manager
             mgr = get_manager()
             if mgr:
-                audit_rows = mgr._conn.execute(
+                audit_rows = mgr.get_read_connection().execute(
                     "SELECT tool_name, result_status FROM coord_audit "
                     "WHERE session_id = ? ORDER BY call_index ASC LIMIT 30",
                     (session_id,),
@@ -4694,7 +4694,7 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
         mgr = get_manager()
         if mgr:
             # Top 20 tools by call count
-            top_rows = mgr._conn.execute(
+            top_rows = mgr.get_read_connection().execute(
                 """SELECT tool_name, COUNT(*) as calls,
                           AVG(latency_ms) as avg_latency
                    FROM coord_audit
@@ -4708,7 +4708,7 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
             ]
 
             # Total call count
-            total_row = mgr._conn.execute(
+            total_row = mgr.get_read_connection().execute(
                 """SELECT COUNT(*) FROM coord_audit
                    WHERE created_at > datetime('now', '-' || ? || ' days')""",
                 (days,),
@@ -4716,7 +4716,7 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
             tool_usage["total_calls"] = total_row[0] if total_row else 0
 
             # OMEGA-specific tools
-            omega_rows = mgr._conn.execute(
+            omega_rows = mgr.get_read_connection().execute(
                 """SELECT tool_name, COUNT(*) FROM coord_audit
                    WHERE tool_name LIKE 'mcp__omega%'
                      AND created_at > datetime('now', '-' || ? || ' days')
@@ -4735,7 +4735,7 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
         from omega_platform.orchestrator.coordination import get_manager
         mgr = get_manager()
         if mgr:
-            sess_row = mgr._conn.execute(
+            sess_row = mgr.get_read_connection().execute(
                 """SELECT
                      COUNT(*),
                      SUM(CASE WHEN started_at > datetime('now', '-7 days') THEN 1 ELSE 0 END),
