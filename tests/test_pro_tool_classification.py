@@ -141,12 +141,56 @@ def test_the_known_stale_write_entries_have_not_grown():
         )
 
 
-def test_classification_does_not_make_pro_implementations_available():
-    """Categories are policy metadata only -- never an implementation path."""
+def test_every_category_value_is_selectable_via_omega_tools():
+    """A category string nobody can filter on is a category that lies.
+
+    handle_omega_tools filters on the raw string, so a value missing from the
+    published enum works at runtime but is rejected by input-schema
+    validation on a strict MCP client.
+    """
+    from omega.server import tool_schemas as ts
+
+    schema = next(
+        s
+        for group in (ts.CONDENSED_TOOL_SCHEMAS, ts.TOOL_SCHEMAS)
+        for s in group
+        if s["name"] == "omega_tools"
+    )
+    selectable = set(schema["inputSchema"]["properties"]["category"]["enum"])
+    used = set(TOOL_CATEGORIES.values())
+    assert used <= selectable, f"categories not selectable: {sorted(used - selectable)}"
+
+
+def test_dispatch_consults_handlers_before_categories():
+    """Classification must never be an implementation path.
+
+    The real invariant: call_tool resolves HANDLERS first and only consults
+    TOOL_CATEGORIES when no handler exists. So a category can change the
+    MESSAGE an unlicensed caller sees, never whether code runs.
+    """
+    import asyncio
+
     from omega.server import mcp_server
 
-    for name in PRO_TOOLS_REQUIRING_A_CATEGORY:
-        if name in mcp_server.HANDLERS:
-            # Only legitimate when private Pro is actually installed.
-            pytest.skip("omega_platform is installed in this environment")
-    assert True
+    pro_only = [n for n in PRO_TOOLS_REQUIRING_A_CATEGORY
+                if n not in mcp_server.HANDLERS]
+    if not pro_only:
+        pytest.skip("omega_platform is installed; nothing is Pro-gated here")
+
+    call_tool = getattr(mcp_server.call_tool, "__wrapped__", mcp_server.call_tool)
+    for name in pro_only:
+        result = asyncio.run(call_tool(name, {}))
+        text = result[0].text
+        assert "requires OMEGA Pro" in text, (name, text[:80])
+        assert "Unknown tool" not in text, (name, text[:80])
+
+
+def test_a_nonexistent_name_is_still_an_unknown_tool():
+    """The other half: categorisation must not swallow genuine typos."""
+    import asyncio
+
+    from omega.server import mcp_server
+
+    call_tool = getattr(mcp_server.call_tool, "__wrapped__", mcp_server.call_tool)
+    result = asyncio.run(call_tool("omega_definitely_not_a_tool", {}))
+    assert "Unknown tool" in result[0].text

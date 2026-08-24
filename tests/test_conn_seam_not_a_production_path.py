@@ -30,6 +30,14 @@ def _manager_conn_uses(path: pathlib.Path) -> list[str]:
         base = node.value
         if isinstance(base, ast.Name) and base.id in MANAGER_NAMES:
             hits.append(f"{path.relative_to(SRC)}:{node.lineno} {base.id}._conn")
+        elif isinstance(base, ast.Attribute) and base.attr in MANAGER_NAMES:
+            hits.append(f"{path.relative_to(SRC)}:{node.lineno} .{base.attr}._conn")
+        elif isinstance(base, ast.Call):
+            # get_manager()._conn -- the exact chained form bridge.py used
+            # before this migration, which a name-only check would miss.
+            fn = base.func
+            if (getattr(fn, "id", None) or getattr(fn, "attr", None)) == "get_manager":
+                hits.append(f"{path.relative_to(SRC)}:{node.lineno} get_manager()._conn")
     return hits
 
 
