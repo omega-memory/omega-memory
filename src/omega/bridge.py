@@ -3591,6 +3591,24 @@ def _check_graduation(memory_id: str) -> Optional[str]:
 
         return None
     except Exception as e:
+        # The UPDATE above runs directly on the store's long-lived primary
+        # connection, which is opened isolation_level="IMMEDIATE": the first
+        # DML takes a RESERVED lock held until commit or rollback. If the
+        # commit itself fails -- "database is locked" under contention is the
+        # realistic case -- this handler used to swallow the error and return,
+        # stranding an open write transaction on a connection that then sits
+        # idle. Every other writer against omega.db blocks behind it, and
+        # because the holder is idle it has no SQLite stack frame, so neither
+        # stack sampling nor transaction diagnostics on other owners can name
+        # it. Observed live 2026-08-25 as a ~30-minute total write stall.
+        #
+        # Success semantics are unchanged: the commit above still owns the
+        # commit. This only guarantees the failure path cannot leak.
+        try:
+            if db._conn.in_transaction:
+                db._conn.rollback()
+        except Exception:  # cleanup must never mask the original failure
+            logger.debug("_check_graduation rollback failed for %s", memory_id[:12])
         logger.debug("_check_graduation failed for %s: %s", memory_id[:12], e)
         return None
 
