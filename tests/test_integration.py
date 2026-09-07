@@ -161,3 +161,35 @@ class TestCLIDoctor:
         # Doctor may exit 0 or 1 depending on environment, but should not crash
         assert result.returncode in (0, 1)
         assert "OMEGA Doctor" in result.stdout
+
+
+class TestFrameworkAdapters:
+    """The CrewAI adapter must reference APIs that actually exist on the store.
+
+    Regression: the adapter imported ``OmegaSQLiteStore``, a name the store has
+    never exported, so constructing the backend raised ImportError. Its search
+    path then called ``search_by_embedding`` behind a ``hasattr`` guard, which
+    turned a second missing-API bug into a silent empty result set.
+    """
+
+    def test_store_exposes_the_names_the_adapter_uses(self):
+        from omega.sqlite_store import SQLiteStore
+
+        assert hasattr(SQLiteStore, "find_similar")
+        assert hasattr(SQLiteStore, "delete_node")
+
+    def test_adapter_does_not_reference_absent_store_apis(self):
+        from pathlib import Path as _Path
+
+        import omega.integrations.crewai as crewai_adapter
+        from omega.sqlite_store import SQLiteStore
+
+        source = _Path(crewai_adapter.__file__).read_text()
+        # Call/import sites only -- the names may still appear in comments that
+        # explain the historical bug.
+        for absent, call_site in (
+            ("OmegaSQLiteStore", "import OmegaSQLiteStore"),
+            ("search_by_embedding", "self._db.search_by_embedding"),
+        ):
+            assert not hasattr(SQLiteStore, absent)
+            assert call_site not in source

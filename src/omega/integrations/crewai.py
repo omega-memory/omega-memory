@@ -62,12 +62,12 @@ class OmegaStorageBackend:
             status as omega_status,
             store as omega_store,
         )
-        from omega.sqlite_store import OmegaSQLiteStore
+        from omega.sqlite_store import SQLiteStore
 
         self._store_fn = omega_store
         self._query_fn = omega_query
         self._status_fn = omega_status
-        self._db = OmegaSQLiteStore._instance or OmegaSQLiteStore()
+        self._db = SQLiteStore()
         self._project = project
         self._user_id = user_id or "default"
 
@@ -126,6 +126,25 @@ class OmegaStorageBackend:
             private=bool(meta.get("private", False)),
         )
 
+    def _memory_result_to_omega_result(self, result: Any) -> dict[str, Any]:
+        """Normalize a SQLiteStore MemoryResult into this adapter's dict shape."""
+        created_at = getattr(result, "created_at", None)
+        if hasattr(created_at, "isoformat"):
+            created_at_value = created_at.isoformat()
+        else:
+            created_at_value = created_at or ""
+
+        omega_result = {
+            "node_id": getattr(result, "id", str(uuid4())),
+            "content": getattr(result, "content", ""),
+            "metadata": getattr(result, "metadata", {}) or {},
+            "created_at": created_at_value,
+        }
+        relevance = getattr(result, "relevance", None)
+        if relevance is not None:
+            omega_result["score"] = float(relevance)
+        return omega_result
+
     # -- Required StorageBackend methods --
 
     def save(self, records: list) -> None:
@@ -162,14 +181,16 @@ class OmegaStorageBackend:
     ) -> list[tuple]:
         """Search OMEGA memories by semantic similarity."""
         _ensure_crewai_types()
-        # Use OMEGA's semantic search (it handles embeddings internally)
-        # We reconstruct a text query from the embedding context
-        results = self._db.search_by_embedding(
-            embedding=query_embedding,
-            limit=limit * 2,  # oversample for filtering
-        ) if hasattr(self._db, 'search_by_embedding') else []
+        if not query_embedding:
+            return []
 
-        # Fall back to text-based search if embedding search unavailable
+        # SQLiteStore.find_similar takes an embedding vector directly and
+        # returns MemoryResult objects, so normalize them to the dict shape the
+        # filtering below expects. The previous call named a search_by_embedding
+        # method that SQLiteStore has never had; the hasattr guard turned that
+        # into a silent empty result instead of an error.
+        raw_results = self._db.find_similar(query_embedding, limit=limit * 2)
+        results = [self._memory_result_to_omega_result(r) for r in raw_results]
         if not results:
             return []
 
