@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 _RELEASE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "release.py"
 _SPEC = importlib.util.spec_from_file_location("omega_release", _RELEASE_PATH)
 assert _SPEC and _SPEC.loader
@@ -145,7 +146,7 @@ def test_boundary_rejects_private_distribution_dependency(tmp_path, artifact):
         ("omega/cache.sqlite", ""),
         ("logs/hooks.log", ""),
         ("results/audit.json", ""),
-        ("omega/private.py", "/Users/singularityjason/.omega/omega.db"),
+        ("omega/private.py", "/Users/maintainer/.omega/omega.db"),
         ("omega/private.py", "/Users/another-user/.omega/omega.db"),
         ("omega/private.py", "/home/private-user/.omega/omega.db"),
         ("omega/private.py", r"C:\Users\private-user\.omega\omega.db"),
@@ -156,7 +157,7 @@ def test_boundary_rejects_private_distribution_dependency(tmp_path, artifact):
         ("omega/private.py", "customer_name: Private Person"),
         ("omega/private.py", "api_key = super-secret-value-123"),
         ("omega/token.txt", ""),
-        ("omega/settings.yaml", "data_path: /Users/singularityjason/.omega/omega.db"),
+        ("omega/settings.yaml", "data_path: /Users/maintainer/.omega/omega.db"),
         ("omega/settings.yaml", "api_key: super-secret-value-123"),
         ("omega/credentials.pem", "-----BEGIN PRIVATE KEY-----\nprivate material\n-----END PRIVATE KEY-----"),
     ],
@@ -281,3 +282,27 @@ def test_core_artifact_verifier_rejects_plugin_and_unexpected_entry_points(tmp_p
 
     assert result.returncode == 1
     assert "entry" in result.stderr.lower()
+
+
+def test_no_source_file_embeds_the_current_users_home_path():
+    """No shipped file may contain the path of whoever is running the tests.
+
+    Real home paths reach the sdist when a developer pastes one into a fixture
+    or docstring. Two of them shipped this way, disclosing a macOS username.
+    Deriving the name at runtime keeps this check honest without hardcoding
+    anyone's identity here.
+    """
+    home = Path.home()
+    username = home.name
+    if not username or len(username) < 3:
+        pytest.skip("home directory name too short to match reliably")
+
+    needles = (str(home), f"/Users/{username}", f"/home/{username}")
+    offenders = []
+    for path in list(_REPO_ROOT.glob("src/**/*.py")) + list(_REPO_ROOT.glob("tests/**/*.py")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for needle in needles:
+            if needle in text:
+                offenders.append(f"{path.relative_to(_REPO_ROOT)}: {needle}")
+
+    assert not offenders, "real home path embedded in shipped files:\n  " + "\n  ".join(offenders)

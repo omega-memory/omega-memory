@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.15] - 2026-09-07
+
+### Security
+
+- **Exports could be written in plaintext while encryption appeared to be on.**
+  `cryptography` is an optional extra (`pip install 'omega-memory[encrypt]'`)
+  but `OMEGA_ENCRYPT` defaults to on, so on a default install encryption is
+  nominally enabled with no backend behind it. `encrypt()` returned the
+  plaintext unchanged and the export was written as-is. When `OMEGA_ENCRYPT` is
+  set explicitly and the backend is unavailable, `encrypt()` now raises rather
+  than writing plaintext. Leaving the setting at its default still falls back
+  to plaintext -- the layer is documented as optional -- but that is now
+  visible rather than silent.
+- **`export_to_file` always reports whether it encrypted.** The `encrypted`
+  field was only present when encryption succeeded, so a plaintext export was
+  indistinguishable from an encrypted one to any caller that checked for the
+  key. It is now always a boolean. Added `crypto.is_encryption_active()` for
+  callers that need to know before writing.
+
+### Fixed
+
+- Removed a real home-directory path from two test fixtures, which disclosed a
+  username in the published sdist. A test now fails if any shipped file
+  contains the path of whoever runs the suite.
+
 ## [1.5.14] - 2026-09-07
 
 ### Fixed
