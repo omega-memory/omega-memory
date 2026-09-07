@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from ._types import (
     MemoryResult,
+    coerce_priority,
     SurfacingContext,
     QueryIntent,
     _SURFACING_THRESHOLDS,
@@ -1046,7 +1047,7 @@ class QueryMixin:
                 type_weight *= self._PERSPECTIVE_BOOSTS[perspective].get(event_type, 1.0)
             fb_score = node.metadata.get("feedback_score", 0)
             fb_factor = self._compute_fb_factor(fb_score)
-            priority = node.metadata.get("priority", 3)
+            priority = coerce_priority(node.metadata.get("priority"))
             _la = node.last_accessed.isoformat() if node.last_accessed else None
             _ca = node.created_at.isoformat() if node.created_at else None
             decay_factor = self._compute_decay_factor(event_type, _la, _ca, node.access_count or 0)
@@ -1696,7 +1697,7 @@ class QueryMixin:
                 pending = reasons.pop("_pending_metadata_contribution", None)
             if pending is None:
                 raw = float(node_scores[nid])
-                priority = node.metadata.get("priority", 3)
+                priority = coerce_priority(node.metadata.get("priority"))
                 reasons = {
                     "semantic": round(raw, 6),
                     "semantic_best": round(raw, 6),

@@ -216,3 +216,44 @@ class TestRetrievalTypeWeights:
         weights = SQLiteStore._TYPE_WEIGHTS
         for event_type in ("memory", "user_fact", "project_context", "behavioral_pattern"):
             assert event_type in weights, f"{event_type} falls through to the 1.0 default"
+
+
+class TestPriorityCoercion:
+    """A non-numeric metadata priority must not fail the query.
+
+    Regression: the near-tie scorer called int(priority) on a free-form
+    metadata value. A memory stored with metadata {"priority": "high"} -- or a
+    JSON null, which .get("priority", 3) does not defend against -- raised out
+    of the scorer and failed the whole query.
+    """
+
+    def test_scorer_survives_non_numeric_priority(self):
+        from omega.sqlite_store._query import _score_bounded_metadata
+        from omega.sqlite_store._types import coerce_priority
+
+        for raw in ("high", None, [3], "nonsense", True):
+            score, reasons = _score_bounded_metadata(
+                semantic_score=0.9,
+                best_semantic_score=0.9,
+                priority=coerce_priority(raw),
+                access_count=1,
+            )
+            assert 1 <= reasons["priority"] <= 5
+
+    def test_coerce_priority_maps_labels_and_clamps(self):
+        from omega.sqlite_store._types import coerce_priority
+
+        assert coerce_priority("high") == 4
+        assert coerce_priority("critical") == 5
+        assert coerce_priority(7) == 5
+        assert coerce_priority(0) == 1
+        assert coerce_priority(None) == 3
+        assert coerce_priority(True) == 3
+
+    def test_query_read_sites_use_the_coercion(self):
+        from pathlib import Path as _Path
+
+        import omega.sqlite_store._query as query_module
+
+        source = _Path(query_module.__file__).read_text()
+        assert 'node.metadata.get("priority", 3)' not in source

@@ -38,6 +38,30 @@ _TRIGRAM_FINGERPRINT_CHARS = 200  # Max chars for trigram fingerprint (#1)
 _FAST_PATH_MIN_OVERLAP = 0.60  # Minimum trigram Jaccard for fast-path match (#1)
 _RRF_K = 60  # Reciprocal Rank Fusion constant (Cormack et al., 2009)
 
+# Priority is documented as an int in [1, 5], but `metadata` is free-form: a
+# caller can store a label ("high"), a JSON null, or a list, and the scoring
+# path does int(priority) with no guard -- which raises and fails the whole
+# query. Coerce at the read sites instead.
+_PRIORITY_LABEL_MAP = {
+    "low": 2,
+    "normal": 3,
+    "medium": 3,
+    "high": 4,
+    "critical": 5,
+}
+
+
+def coerce_priority(value: Any, default: int = 3) -> int:
+    """Normalize a metadata ``priority`` value to an int in [1, 5]."""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return max(1, min(5, int(value)))
+    if isinstance(value, str):
+        return _PRIORITY_LABEL_MAP.get(value.strip().lower(), default)
+    return default
+
+
 # Regex for content canonicalization (#6)
 _MARKDOWN_STRIP_RE = re.compile(r'[*#`~\[\]()>|_]')
 _WHITESPACE_COLLAPSE_RE = re.compile(r'\s+')
