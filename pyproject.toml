@@ -56,6 +56,20 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/omega"]
 
+[tool.hatch.build.targets.sdist]
+# Without this, hatchling packages the repository's VCS metadata. In a git
+# worktree `.git` is a FILE containing an absolute `gitdir:` path, so every
+# sdist from 1.5.11 onward shipped the maintainer's home directory and the
+# internal worktree name. Releases are cut from worktrees, so exclude these
+# explicitly rather than relying on where the build happens to run.
+exclude = [
+  "/.git",
+  "/.worktrees",
+  "/dist",
+  "/build",
+  "/.venv",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

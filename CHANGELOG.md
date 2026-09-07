@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Source distributions no longer ship VCS metadata.** Releases are built from
+  git worktrees, where `.git` is a file containing an absolute `gitdir:` path.
+  Hatchling packaged it, so every sdist from 1.5.11 through 1.5.15 contained a
+  maintainer's home directory and internal worktree names. The sdist build now
+  excludes it, and the release blocks if it reappears. Wheels were never
+  affected.
+
+### Changed
+
+- **Release artifacts are scanned before publishing.** The privacy scanner
+  checked wheels only and was pinned to version 1.5.13, so it rejected every
+  release after that one and was never wired into the release path. It now
+  derives the version from the artifact, inspects the sdist as well, and runs
+  from `release.py` where it cannot be skipped.
+- Added `scripts/preflight.py` and `docs/RELEASING.md`, covering version
+  policy, branch hygiene, personal-path and secret scanning, the free-tier
+  memory cap and the Pro capability boundary.
+- The Windows installer workflow names its artifact after the release version
+  instead of a hardcoded `1.5.4`.
+
 ## [1.5.15] - 2026-09-07
 
 ### Security

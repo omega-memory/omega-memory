@@ -14,6 +14,16 @@ import pytest
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_verifier():
+    """Import the verifier script by path; scripts/ is not an importable package."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_omega_core_verifier", _VERIFIER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 _RELEASE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "release.py"
 _SPEC = importlib.util.spec_from_file_location("omega_release", _RELEASE_PATH)
 assert _SPEC and _SPEC.loader
@@ -69,13 +79,33 @@ def _write_exact_core_wheel(
 
 
 def _write_wheel(path: Path, *, extra_members: dict[str, str] | None = None, dependency: str | None = None) -> None:
-    metadata = "Metadata-Version: 2.4\nName: omega-memory\nVersion: 9.9.9\n"
+    """A complete, valid Core wheel.
+
+    release.py now runs the full artifact scan, which checks distribution
+    metadata as well as the namespace and dependency rules these tests target.
+    A stub METADATA block would fail on the metadata rules and obscure what is
+    actually under test, so the fixture emits the real shape.
+    """
+    classifier_lines = "".join(f"Classifier: {classifier}\n" for classifier in _CORE_CLASSIFIERS)
+    metadata = (
+        "Metadata-Version: 2.4\n"
+        "Name: omega-memory\n"
+        "Version: 9.9.9\n"
+        "License-Expression: Apache-2.0\n"
+        f"{classifier_lines}"
+        "Requires-Python: >=3.11\n"
+    )
     if dependency:
         metadata += f"Requires-Dist: {dependency}\n"
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("omega/__init__.py", "")
         archive.writestr("omega/server/mcp_server.py", "import omega_platform  # optional integration\n")
         archive.writestr("omega_memory-9.9.9.dist-info/METADATA", metadata)
+        archive.writestr(
+            "omega_memory-9.9.9.dist-info/entry_points.txt",
+            "[console_scripts]\nomega = omega.cli:main\n",
+        )
+        archive.writestr("omega_memory-9.9.9.dist-info/WHEEL", "Wheel-Version: 1.0\n")
         for name, content in (extra_members or {}).items():
             archive.writestr(name, content)
 
@@ -187,7 +217,7 @@ def test_core_artifact_verifier_accepts_core_members_without_executing_them(tmp_
     )
 
     assert result.returncode == 0, result.stderr
-    assert "OK: inspected" in result.stdout
+    assert result.stdout.startswith("OK: ")
 
 
 @pytest.mark.parametrize(
@@ -242,7 +272,7 @@ def test_core_artifact_verifier_requires_exact_candidate_filename(tmp_path):
     result = subprocess.run([sys.executable, str(_VERIFIER), str(wheel)], capture_output=True, text=True)
 
     assert result.returncode == 1
-    assert "release candidate" in result.stderr
+    assert "not a recognizable Core wheel" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -306,3 +336,92 @@ def test_no_source_file_embeds_the_current_users_home_path():
                 offenders.append(f"{path.relative_to(_REPO_ROOT)}: {needle}")
 
     assert not offenders, "real home path embedded in shipped files:\n  " + "\n  ".join(offenders)
+
+
+# ---------------------------------------------------------------------------
+# sdist verification
+#
+# The wheel was the only artifact ever scanned for content, so the sdist -- the
+# wider one, carrying tests and docs -- went unchecked. Every release from
+# 1.5.11 to 1.5.15 shipped a `.git` file holding an absolute home path, because
+# releases are cut from git worktrees where `.git` is a file, not a directory.
+# ---------------------------------------------------------------------------
+
+
+# Assembled at runtime. A literal look-alike home path here would itself ship
+# in the sdist -- exactly what these tests exist to detect.
+_FAKE_ACCOUNT = "real" + "person"
+
+
+def _write_core_sdist(path: Path, members: dict[str, str], version: str = "1.5.13") -> None:
+    import io
+    import tarfile
+
+    root = f"omega_memory-{version}"
+    with tarfile.open(path, "w:gz") as archive:
+        for name, content in members.items():
+            payload = content.encode("utf-8")
+            info = tarfile.TarInfo(f"{root}/{name}")
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+
+
+def test_sdist_verifier_accepts_a_clean_source_distribution(tmp_path):
+    verify_core_sdist = _load_verifier().verify_core_sdist
+
+    sdist = tmp_path / "omega_memory-1.5.13.tar.gz"
+    _write_core_sdist(sdist, {
+        "PKG-INFO": "Name: omega-memory\n",
+        "src/omega/__init__.py": '__version__ = "1.5.13"\n',
+        "docs/guide.md": "Run it from /Users/me/Projects/app\n",
+        "tests/test_thing.py": 'api_key = "test-secret-value-not-real"\n',
+    })
+
+    assert verify_core_sdist(sdist) == []
+
+
+def test_sdist_verifier_rejects_vcs_metadata_holding_a_home_path(tmp_path):
+    verify_core_sdist = _load_verifier().verify_core_sdist
+
+    sdist = tmp_path / "omega_memory-1.5.13.tar.gz"
+    _write_core_sdist(sdist, {
+        ".git": f"gitdir: /Users/{_FAKE_ACCOUNT}/Projects/omega-public/.git/worktrees/wt\n",
+    })
+
+    violations = verify_core_sdist(sdist)
+
+    assert any(_FAKE_ACCOUNT in v for v in violations), violations
+
+
+def test_sdist_verifier_rejects_a_real_home_path_inside_tests(tmp_path):
+    verify_core_sdist = _load_verifier().verify_core_sdist
+
+    sdist = tmp_path / "omega_memory-1.5.13.tar.gz"
+    _write_core_sdist(sdist, {
+        "tests/test_fixture.py": f'DB = "/Users/{_FAKE_ACCOUNT}/.omega/omega.db"\n',
+    })
+
+    violations = verify_core_sdist(sdist)
+
+    assert any(_FAKE_ACCOUNT in v for v in violations), violations
+
+
+def test_sdist_verifier_allows_documented_placeholder_homes(tmp_path):
+    verify_core_sdist = _load_verifier().verify_core_sdist
+
+    sdist = tmp_path / "omega_memory-1.5.13.tar.gz"
+    _write_core_sdist(sdist, {
+        "docs/a.md": "/Users/me/x /Users/test/y /home/dev/z /Users/maintainer/w\n",
+    })
+
+    assert verify_core_sdist(sdist) == []
+
+
+def test_verifier_is_not_pinned_to_one_version(tmp_path):
+    """A pinned version made this verifier reject every release after 1.5.13."""
+    verify_core_sdist = _load_verifier().verify_core_sdist
+
+    sdist = tmp_path / "omega_memory-9.9.9.tar.gz"
+    _write_core_sdist(sdist, {"PKG-INFO": "Name: omega-memory\n"}, version="9.9.9")
+
+    assert verify_core_sdist(sdist) == []

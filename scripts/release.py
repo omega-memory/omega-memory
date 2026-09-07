@@ -195,10 +195,27 @@ def verify_public_artifact_boundary(wheel: Path, sdist: Path) -> None:
                 metadata = metadata_file.read().decode("utf-8", errors="replace")
                 violations.extend(f"sdist dependency: {line}" for line in _private_dependencies(metadata))
 
+    # Deep content scan of BOTH artifacts: personal home paths, secret values,
+    # private keys, internal product markers. This lives in its own script so it
+    # can run standalone, but it is called from here so it cannot be skipped --
+    # it previously existed, pinned to one version, and was never invoked, so
+    # every release from 1.5.11 to 1.5.15 shipped a home path in the sdist.
+    import importlib.util
+
+    verifier_path = REPO / "scripts" / "verify_core_release_artifact.py"
+    spec = importlib.util.spec_from_file_location("_core_artifact_verifier", verifier_path)
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    for artifact in (wheel, sdist):
+        violations.extend(
+            f"{artifact.name}: {item}" for item in verifier.verify_core_artifact(artifact)
+        )
+
     if violations:
         detail = "\n  ".join(violations)
         sys.exit(f"Public artifact boundary violation:\n  {detail}")
-    print("  OK: Core-only archives; no private namespace, bundled wheel, or Pro dependency")
+    print("  OK: Core-only archives; no private namespace, bundled wheel, Pro dependency,")
+    print("      personal path, secret value, or internal marker")
 
 
 def verify(wheel: Path, expected_version: str) -> None:
