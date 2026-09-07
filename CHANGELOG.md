@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so all four fell through to the `1.0` default while `decision` and
   `lesson_learned` scored `2.0`. `memory` is the type assigned when a caller
   omits `event_type`, which makes it the most common type in a typical store.
+  These types are now also classified explicitly in `_MEMORY_TYPE_MAP`. That is
+  a no-op for `memory`, `user_fact` and `project_context`, which already fell
+  to the `semantic` default, but newly stored `behavioral_pattern` memories are
+  now classified `procedural` rather than `semantic`, so they surface under a
+  different `memory_type` filter. Existing rows keep the class they were
+  stored with.
 - **A non-numeric `priority` in metadata failed the whole query.** The near-tie
   scorer called `int(priority)` on a free-form metadata value, so a memory
   stored with `{"priority": "high"}` raised `ValueError` and `{"priority":

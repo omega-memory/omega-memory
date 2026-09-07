@@ -140,6 +140,7 @@ class SQLiteStoreBase:
         "outcome_evaluation": "procedural",
         "reminder": "procedural",
         "skill_template": "procedural",
+        "behavioral_pattern": "procedural",
         # Semantic: extracted facts and stable knowledge (everything else)
         "constraint": "semantic",
         "checkpoint": "semantic",
@@ -158,6 +159,9 @@ class SQLiteStoreBase:
         "advisor_action_outcome": "semantic",
         "advisor_insight": "semantic",
         "test": "semantic",
+        "memory": "semantic",
+        "user_fact": "semantic",
+        "project_context": "semantic",
     }
 
     # Perspective-based type weight multipliers (behavioral diversity).
