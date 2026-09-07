@@ -98,6 +98,41 @@ def preflight(version: str) -> None:
     print(f"  OK: version={version}, branch=main, clean, no tag {tag}")
 
 
+def _load_preflight():
+    """Import preflight.py by path; scripts/ is not an importable package."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_omega_preflight", REPO / "scripts" / "preflight.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def gate_before_bump(preflight_module, version: str) -> None:
+    """Version policy, changelog, tag and branch hygiene.
+
+    Run before bump_version, while the tree is still clean -- bumping writes to
+    pyproject.toml and __init__.py, which would trip the clean-tree gate.
+    """
+    step("Preflight: version policy and branch hygiene")
+    preflight_module.reset_results()
+    preflight_module.check_version(version)
+    preflight_module.check_git()
+    failed = preflight_module.failures()
+    if failed:
+        sys.exit("Preflight failed:\n  " + "\n  ".join(failed))
+
+
+def gate_after_build(preflight_module, wheel: Path) -> None:
+    """Free-tier cap and Pro paywall, checked against the wheel about to ship."""
+    step("Preflight: free-tier cap and Pro paywall")
+    preflight_module.reset_results()
+    preflight_module.check_paywall(wheel)
+    failed = preflight_module.failures()
+    if failed:
+        sys.exit("Preflight failed:\n  " + "\n  ".join(failed))
+
+
 def bump_version(version: str) -> None:
     step(f"Bumping version to {version}")
     for path, pattern, replacement in [
@@ -274,11 +309,15 @@ def main() -> int:
     ap.add_argument("--skip-confirm", action="store_true", help="Skip interactive confirmation")
     args = ap.parse_args()
 
+    preflight_module = _load_preflight()
+
     preflight(args.version)
+    gate_before_bump(preflight_module, args.version)
     bump_version(args.version)
     wheel, sdist = build()
     verify_public_artifact_boundary(wheel, sdist)
     verify(wheel, args.version)
+    gate_after_build(preflight_module, wheel)
 
     if args.dry_run:
         print(f"\nDRY RUN: would publish {wheel.name} + {sdist.name} and push v{args.version}")

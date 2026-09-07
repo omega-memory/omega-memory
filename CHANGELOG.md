@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release after that one and was never wired into the release path. It now
   derives the version from the artifact, inspects the sdist as well, and runs
   from `release.py` where it cannot be skipped.
+- **`release.py` now runs every preflight gate itself.** Version policy, the
+  changelog entry, tag availability and branch hygiene are checked before the
+  version is bumped; the free-tier cap and Pro capability boundary are checked
+  against the wheel that is about to ship. A failing gate stops the release
+  rather than relying on someone remembering to run the script.
 - Added `scripts/preflight.py` and `docs/RELEASING.md`, covering version
   policy, branch hygiene, personal-path and secret scanning, the free-tier
   memory cap and the Pro capability boundary.

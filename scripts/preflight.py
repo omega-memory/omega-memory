@@ -39,6 +39,16 @@ CORE_VERSION_CEILING = (1, 6)
 _results: list[tuple[str, bool, str]] = []
 
 
+def reset_results() -> None:
+    """Clear collected gate results so a caller can run groups independently."""
+    _results.clear()
+
+
+def failures() -> list[str]:
+    """Names of gates that failed since the last reset."""
+    return [name for name, ok, _ in _results if not ok]
+
+
 def gate(name: str, ok: bool, detail: str = "") -> bool:
     _results.append((name, ok, detail))
     print(f"  {'PASS' if ok else 'FAIL'}  {name}" + (f" -- {detail}" if detail else ""))
