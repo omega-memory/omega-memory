@@ -46,6 +46,18 @@ def is_enabled() -> bool:
     return True  # Default: enabled
 
 
+def is_explicitly_enabled() -> bool:
+    """True when the caller asked for encryption, rather than inheriting it.
+
+    ``cryptography`` is an optional extra (``pip install omega-memory[encrypt]``)
+    while ``is_enabled()`` defaults to True, so on a default install encryption
+    is nominally on but has no backend. That distinction decides what happens
+    when the backend is missing: a caller who explicitly asked gets an error, a
+    caller who merely inherited the default gets a warning and plaintext.
+    """
+    return os.environ.get("OMEGA_ENCRYPT", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def reset_crypto_state() -> None:
     """Reset module state for test isolation."""
     global _fernet_instance, _checked
@@ -106,17 +118,38 @@ def _get_fernet():
 def encrypt(plaintext: str) -> str:
     """Encrypt a string. Returns base64-encoded ciphertext.
 
-    If encryption is disabled or unavailable, returns plaintext unchanged.
+    Returns the plaintext unchanged when encryption is disabled
+    (``OMEGA_ENCRYPT=0``), or when it is merely on by default and the optional
+    ``cryptography`` backend is not installed -- the layer is documented as
+    optional, so a default install without the extra is not an error state.
+    Callers must check :func:`is_encryption_active` (or the ``encrypted`` field
+    the export writes) rather than assuming a return value is ciphertext.
+
+    Raises RuntimeError when the caller set OMEGA_ENCRYPT explicitly and the
+    backend is unavailable. Writing plaintext in that case would leave data
+    unprotected while the caller believed otherwise.
     """
     if not is_enabled():
         return plaintext
 
     f = _get_fernet()
     if f is None:
+        if is_explicitly_enabled():
+            raise RuntimeError(
+                "OMEGA_ENCRYPT is set but the encryption backend is unavailable. "
+                "Install it with: pip install 'omega-memory[encrypt]' -- or set "
+                "OMEGA_ENCRYPT=0 to disable encryption explicitly. "
+                "Refusing to write plaintext."
+            )
         return plaintext
 
     token = f.encrypt(plaintext.encode("utf-8"))
     return "ENC:" + token.decode("ascii")
+
+
+def is_encryption_active() -> bool:
+    """True when encryption is enabled *and* the backend can actually encrypt."""
+    return is_enabled() and _get_fernet() is not None
 
 
 def decrypt(data: str) -> str:

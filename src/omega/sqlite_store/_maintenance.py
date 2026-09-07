@@ -1276,7 +1276,9 @@ class MaintenanceMixin:
         export_json = json.dumps(export_data, indent=2)
         encrypted = False
 
-        # Encrypt export if OMEGA_ENCRYPT is enabled
+        # Encrypt export if OMEGA_ENCRYPT is enabled. crypto_encrypt returns the
+        # plaintext unchanged when the optional backend is absent, so compare to
+        # find out what actually happened rather than assuming.
         from omega.crypto import is_enabled as crypto_enabled, encrypt as crypto_encrypt
         if crypto_enabled():
             encrypted_content = crypto_encrypt(export_json)
@@ -1305,8 +1307,10 @@ class MaintenanceMixin:
             "file_size_kb": filepath.stat().st_size / 1024,
             "exported_at": export_data["exported_at"],
         }
-        if encrypted:
-            result["encrypted"] = True
+        # Always report it. Omitting the field when False let a plaintext export
+        # look identical to an encrypted one to any caller that only checked for
+        # the key's presence.
+        result["encrypted"] = encrypted
         return result
 
     def import_from_file(self, filepath: Path, clear_existing: bool = True) -> Dict[str, Any]:

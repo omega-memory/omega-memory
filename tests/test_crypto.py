@@ -176,3 +176,57 @@ class TestResetCryptoState:
         reset_crypto_state()
         encrypted2 = encrypt("test2")
         assert encrypted2.startswith("ENC:")
+
+
+class TestMissingBackendBehaviour:
+    """What happens when encryption is on but `cryptography` is unavailable.
+
+    `cryptography` is an optional extra while `is_enabled()` defaults to True,
+    so on a default install encryption is nominally on with no backend behind
+    it. Exports were then written in plaintext with no signal, leaving data
+    unprotected while the caller believed otherwise.
+    """
+
+    @staticmethod
+    def _without_backend(monkeypatch):
+        import omega.crypto as crypto
+
+        monkeypatch.setattr(crypto, "_get_fernet", lambda: None)
+
+    def test_explicit_opt_in_refuses_to_write_plaintext(self, monkeypatch):
+        from omega.crypto import encrypt as _encrypt
+
+        monkeypatch.setenv("OMEGA_ENCRYPT", "1")
+        self._without_backend(monkeypatch)
+
+        with pytest.raises(RuntimeError, match="backend is unavailable"):
+            _encrypt("sensitive")
+
+    def test_inherited_default_falls_back_to_plaintext(self, monkeypatch):
+        from omega.crypto import encrypt as _encrypt
+
+        monkeypatch.delenv("OMEGA_ENCRYPT", raising=False)
+        self._without_backend(monkeypatch)
+
+        # The layer is documented as optional, so a default install without the
+        # extra is not an error state -- but it must be visible, which is what
+        # is_encryption_active and the export's `encrypted` field are for.
+        assert _encrypt("sensitive") == "sensitive"
+
+    def test_explicitly_disabled_never_raises(self, monkeypatch):
+        from omega.crypto import encrypt as _encrypt
+
+        monkeypatch.setenv("OMEGA_ENCRYPT", "0")
+        self._without_backend(monkeypatch)
+
+        assert _encrypt("sensitive") == "sensitive"
+
+    def test_is_encryption_active_reports_the_truth(self, monkeypatch):
+        from omega.crypto import is_encryption_active
+
+        monkeypatch.delenv("OMEGA_ENCRYPT", raising=False)
+        self._without_backend(monkeypatch)
+        assert is_encryption_active() is False
+
+        monkeypatch.setenv("OMEGA_ENCRYPT", "0")
+        assert is_encryption_active() is False

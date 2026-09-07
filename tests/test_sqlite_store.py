@@ -1264,6 +1264,23 @@ class TestMaintenanceComprehensive:
 class TestExportImportComprehensive:
     """Thorough export/import round-trip coverage."""
 
+    def test_export_always_reports_whether_it_encrypted(self, store, tmp_omega_dir, monkeypatch):
+        """A plaintext export must not look like an encrypted one.
+
+        The `encrypted` key was only set when encryption succeeded, so a caller
+        checking for its presence could not tell a plaintext export apart from
+        an encrypted one.
+        """
+        import omega.crypto as crypto
+
+        monkeypatch.delenv("OMEGA_ENCRYPT", raising=False)
+        monkeypatch.setattr(crypto, "_get_fernet", lambda: None)
+        store.store(content="Export encryption reporting check")
+
+        result = store.export_to_file(tmp_omega_dir / "export_plain.json")
+
+        assert result["encrypted"] is False
+
     def test_export_creates_valid_json(self, store, tmp_omega_dir):
         store.store(content="OAuth2 PKCE flow implementation for mobile clients", metadata={"event_type": "decision"})
         store.store(content="Sentry error tracking integration with source maps", session_id="s-exp")
