@@ -257,3 +257,50 @@ class TestPriorityCoercion:
 
         source = _Path(query_module.__file__).read_text()
         assert 'node.metadata.get("priority", 3)' not in source
+
+
+class TestLikeWildcardEscaping:
+    """Caller-supplied text must match literally in LIKE fallbacks.
+
+    Regression: query words, exact-search phrases and filename stems were
+    interpolated straight into LIKE patterns. A query containing % matched
+    everything, _ matched any single character, and a pathological pattern
+    could be used to force a full scan.
+    """
+
+    def test_escape_makes_wildcards_literal(self):
+        import sqlite3
+
+        from omega.sqlite_store._search import _like_escape
+
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE t(content TEXT)")
+        conn.executemany(
+            "INSERT INTO t VALUES (?)",
+            [("100% cotton",), ("alpha beta",), ("my_file.py",), ("myXfile.py",)],
+        )
+
+        def search(term):
+            return [
+                row[0]
+                for row in conn.execute(
+                    "SELECT content FROM t WHERE LOWER(content) LIKE ? ESCAPE '\\'",
+                    (f"%{_like_escape(term)}%",),
+                )
+            ]
+
+        # A bare % used to match every row; now only the row containing one.
+        assert search("%") == ["100% cotton"]
+        assert search("100%") == ["100% cotton"]
+        # _ used to match any character, so my_file also matched myXfile.
+        assert search("my_file") == ["my_file.py"]
+
+    def test_every_like_site_declares_an_escape_clause(self):
+        from pathlib import Path as _Path
+
+        import omega.sqlite_store._search as search_module
+
+        source = _Path(search_module.__file__).read_text()
+        for line in source.splitlines():
+            if "LIKE ?" in line and "ESCAPE" not in line:
+                raise AssertionError(f"unescaped LIKE pattern: {line.strip()}")

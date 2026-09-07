@@ -24,6 +24,16 @@ from . import _types as _types_mod
 logger = logging.getLogger("omega.sqlite_store")
 
 
+def _like_escape(text: str) -> str:
+    """Escape LIKE wildcards (``%``, ``_``, ``\\``) in caller-supplied text.
+
+    Pairs with an ``ESCAPE '\\'`` clause so query text, phrases and filename
+    stems match literally instead of acting as wildcards. Escapes the
+    backslash first so the later substitutions don't double-escape the marker.
+    """
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class SearchMixin:
     """Search, retrieval, and caching methods extracted from SQLiteStore."""
 
@@ -233,8 +243,8 @@ class SearchMixin:
                         logger.warning(f"FTS5 rebuild also failed: {rebuild_err} — falling back to LIKE")
 
         # Fallback: LIKE-based search (O(n))
-        conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in words])
-        params = [f"%{w}%" for w in words]
+        conditions = " OR ".join(["LOWER(content) LIKE ? ESCAPE '\\'" for _ in words])
+        params = [f"%{_like_escape(w)}%" for w in words]
         params.append(limit * 3)
 
         rows = self._conn.execute(
@@ -496,8 +506,8 @@ class SearchMixin:
         if not words:
             return self.get_by_type(event_type, limit)
 
-        conditions = " AND ".join(["LOWER(content) LIKE ?" for _ in words[:3]])
-        params = [event_type] + [f"%{w}%" for w in words[:3]]
+        conditions = " AND ".join(["LOWER(content) LIKE ? ESCAPE '\\'" for _ in words[:3]])
+        params = [event_type] + [f"%{_like_escape(w)}%" for w in words[:3]]
         params.append(limit)
 
         rows = self._conn.execute(
@@ -746,11 +756,11 @@ class SearchMixin:
         params = []
 
         if case_sensitive:
-            conditions.append("content LIKE ?")
-            params.append(f"%{phrase}%")
+            conditions.append("content LIKE ? ESCAPE '\\'")
+            params.append(f"%{_like_escape(phrase)}%")
         else:
-            conditions.append("LOWER(content) LIKE ?")
-            params.append(f"%{phrase.lower()}%")
+            conditions.append("LOWER(content) LIKE ? ESCAPE '\\'")
+            params.append(f"%{_like_escape(phrase.lower())}%")
 
         if event_type:
             conditions.append("event_type = ?")
@@ -872,8 +882,8 @@ class SearchMixin:
                 query_lower = query_text.lower()
                 words = [w for w in query_lower.split() if len(w) > 2]
                 if words:
-                    conditions = " AND ".join(["LOWER(content) LIKE ?" for _ in words[:3]])
-                    params = [f"%{w}%" for w in words[:3]]
+                    conditions = " AND ".join(["LOWER(content) LIKE ? ESCAPE '\\'" for _ in words[:3]])
+                    params = [f"%{_like_escape(w)}%" for w in words[:3]]
                     params.append(limit * 3)
                     rows = self._conn.execute(
                         f"""SELECT node_id, content, metadata, created_at,
@@ -989,10 +999,10 @@ class SearchMixin:
                 rows = self._conn.execute(
                     """SELECT node_id, content, metadata, created_at,
                               access_count, last_accessed, ttl_seconds
-                       FROM memories WHERE LOWER(content) LIKE ?
+                       FROM memories WHERE LOWER(content) LIKE ? ESCAPE '\\'
                        AND (project = ? OR project IS NULL)
                        ORDER BY created_at DESC LIMIT 10""",
-                    (f"%{stem.lower()}%", project_path),
+                    (f"%{_like_escape(stem.lower())}%", project_path),
                 ).fetchall()
                 results = []
                 for row in rows:
