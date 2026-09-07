@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.14] - 2026-09-07
+
+### Fixed
+
+- **`omega status` reported the wrong version.** It printed a `version` field
+  that `omega setup` wrote once into `~/.omega/config.json` as a hardcoded
+  `0.1.0` and that nothing ever updated, so every install on every release
+  reported `0.1.0`. Status now reads the installed package, and reports Core
+  and Pro as separate lines rather than one ambiguous number. `omega setup` no
+  longer writes the field. Thanks to @AlterMighty for the report.
+- **Added `omega --version`.** The flag did not exist; `omega --version`
+  previously exited with `unrecognized arguments`.
+- **The CrewAI adapter could not be constructed.** `OmegaStorageBackend`
+  imported `OmegaSQLiteStore`, a name the store has never exported, so creating
+  the backend raised `ImportError`. Its search path then called a
+  `search_by_embedding` method that does not exist, behind a `hasattr` guard
+  that turned the missing API into a silently empty result set. It now uses
+  `find_similar`.
+- **Common memory types were outranked in retrieval.** `_TYPE_WEIGHTS` had no
+  entry for `memory`, `user_fact`, `project_context` or `behavioral_pattern`,
+  so all four fell through to the `1.0` default while `decision` and
+  `lesson_learned` scored `2.0`. `memory` is the type assigned when a caller
+  omits `event_type`, which makes it the most common type in a typical store.
+- **A non-numeric `priority` in metadata failed the whole query.** The near-tie
+  scorer called `int(priority)` on a free-form metadata value, so a memory
+  stored with `{"priority": "high"}` raised `ValueError` and `{"priority":
+  null}` raised `TypeError`. Values are now coerced to `[1, 5]`.
+- **`%` and `_` in query text acted as LIKE wildcards.** Query words, exact
+  search phrases and filename stems were interpolated straight into `LIKE`
+  patterns, so a query containing `%` matched every row and `_` matched any
+  character -- including in `search_exact`, whose contract is a literal
+  substring match. All six sites now escape and pair with `ESCAPE '\'`.
+
 ## [1.5.13] - 2026-08-23
 
 ### Changed
