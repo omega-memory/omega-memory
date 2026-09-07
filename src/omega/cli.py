@@ -10,6 +10,8 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 logger = logging.getLogger("omega.cli")
@@ -1072,7 +1074,6 @@ def cmd_setup(args):
         config = {
             "storage_path": str(OMEGA_DIR),
             "model_dir": str(ONNX_MODEL_DIR),
-            "version": "0.1.0",
             "entity_scoping": {"enabled": False},
         }
         config_path.write_text(json.dumps(config, indent=2))
@@ -1256,14 +1257,21 @@ def cmd_status(args):
     profile_path = OMEGA_DIR / "profile.json"
     data["has_profile"] = profile_path.exists()
 
-    # Config version
-    config_path = OMEGA_DIR / "config.json"
-    if config_path.exists():
-        try:
-            config = json.loads(config_path.read_text())
-            data["version"] = config.get("version", "unknown")
-        except Exception:
-            pass
+    # Product versions. These are independent axes -- never infer one from the
+    # other, and never read a version out of config.json: that field was written
+    # once at setup time and no code has ever updated it, so it reported 0.1.0
+    # for every user on every release.
+    import omega as _omega_pkg
+
+    data["version"] = _omega_pkg.__version__
+    data["core_version"] = _omega_pkg.__version__
+
+    # Pro ships as a separate wheel installed alongside Core. Ask packaging
+    # metadata rather than importing omega_platform, so Core stays self-contained.
+    try:
+        data["platform_version"] = _pkg_version("omega-platform")
+    except PackageNotFoundError:
+        pass
 
     # Cloud
     secrets_path = OMEGA_DIR / "secrets.json"
@@ -1330,8 +1338,10 @@ def cmd_status(args):
     if data.get("has_profile"):
         kv.append(("Profile", str(OMEGA_DIR / "profile.json")))
 
-    if data.get("version"):
-        kv.append(("Version", data["version"]))
+    if data.get("core_version"):
+        kv.append(("Core version", data["core_version"]))
+    if data.get("platform_version"):
+        kv.append(("Pro version", data["platform_version"]))
 
     print_kv(kv)
 
@@ -3598,10 +3608,18 @@ def cmd_eval_retrieval(args):
 
 
 def main():
+    from omega import __version__ as _core_version
+
     parser = argparse.ArgumentParser(
         prog="omega",
         description="OMEGA — Persistent memory for AI coding agents",
         epilog="Pro: 98 more tools (coordination, routing, knowledge base). Run 'omega upgrade' for details.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"omega-memory {_core_version}",
+        help="Show the installed OMEGA Core version and exit",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

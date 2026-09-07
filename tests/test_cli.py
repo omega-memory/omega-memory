@@ -761,6 +761,39 @@ class TestCmdStatus:
         assert parsed["memories"] == 1
         assert "size_mb" in parsed
 
+    def test_reports_installed_package_version(self, capsys, tmp_path, monkeypatch):
+        """Version must come from the installed package, not ~/.omega/config.json.
+
+        Regression: setup wrote a hardcoded "version": "0.1.0" into config.json
+        and status printed that field back, so every user on every release saw
+        0.1.0. The config value is deliberately wrong here to prove it is unused.
+        """
+        import omega
+
+        (tmp_path / "config.json").write_text(json.dumps({"version": "0.1.0"}))
+        monkeypatch.setattr("omega.cli.OMEGA_DIR", tmp_path)
+        monkeypatch.setattr("omega.cli.BGE_MODEL_DIR", tmp_path / "no-model")
+        monkeypatch.setattr("omega.cli.MINILM_MODEL_DIR", tmp_path / "no-model")
+
+        cmd_status(argparse.Namespace(json=True))
+        parsed = json.loads(capsys.readouterr().out)
+
+        assert parsed["version"] == omega.__version__
+        assert parsed["core_version"] == omega.__version__
+        assert parsed["version"] != "0.1.0"
+
+    def test_setup_config_carries_no_version_field(self):
+        """setup must not write a version field: nothing reads it and it goes stale.
+
+        The field was written once at install time and never updated afterwards,
+        so it could only ever drift away from the truth.
+        """
+        import inspect
+
+        from omega import cli
+
+        assert '"version": "0.1.0"' not in inspect.getsource(cli.cmd_setup)
+
     def test_json_via_env_var(self, capsys, tmp_path, monkeypatch):
         """OMEGA_JSON=1 should trigger JSON output."""
         import sqlite3
