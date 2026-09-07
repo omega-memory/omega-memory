@@ -106,6 +106,15 @@ class SQLiteStoreBase:
         "entity_profile_update": 1.0,
         # Experiential memory: distilled trajectories
         "skill_template": 2.0,
+        # Content anchors. These were absent, so they fell through to the 1.0
+        # default and were systematically outranked by decision/lesson_learned
+        # (2.0) -- including "memory", which is the type omega_store assigns
+        # when the caller omits event_type, and therefore the most common type
+        # in a typical store.
+        "memory": 2.0,
+        "user_fact": 2.0,
+        "project_context": 2.0,
+        "behavioral_pattern": 1.5,
     }
 
     # Memory type classification: maps event_type -> cognitive category

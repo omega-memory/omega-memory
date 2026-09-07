@@ -193,3 +193,26 @@ class TestFrameworkAdapters:
         ):
             assert not hasattr(SQLiteStore, absent)
             assert call_site not in source
+
+
+class TestRetrievalTypeWeights:
+    """Common content types must carry a ranking weight.
+
+    Regression: _TYPE_WEIGHTS had no entry for "memory" -- the type
+    omega_store assigns when event_type is omitted -- so the most common type
+    in a typical store fell through to the 1.0 default while decision and
+    lesson_learned scored 2.0, systematically outranking it.
+    """
+
+    def test_default_store_type_is_weighted(self):
+        from omega.sqlite_store.manager import SQLiteStore
+
+        weights = SQLiteStore._TYPE_WEIGHTS
+        assert weights.get("memory") == weights["decision"]
+
+    def test_common_content_types_are_not_left_at_the_default(self):
+        from omega.sqlite_store.manager import SQLiteStore
+
+        weights = SQLiteStore._TYPE_WEIGHTS
+        for event_type in ("memory", "user_fact", "project_context", "behavioral_pattern"):
+            assert event_type in weights, f"{event_type} falls through to the 1.0 default"
