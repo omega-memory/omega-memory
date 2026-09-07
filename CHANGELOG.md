@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `scripts/preflight.py` and `docs/RELEASING.md`, covering version
   policy, branch hygiene, personal-path and secret scanning, the free-tier
   memory cap and the Pro capability boundary.
+- **Internal working documents and non-project contact addresses now block a
+  release.** Planning, GTM, audit, outreach and grant material under `docs/`
+  is rejected from the sdist, as is any email address on a domain the project
+  does not publish. Two early releases shipped this material; it has since been
+  removed from the repository, and the scanner now prevents its return.
 - The Windows installer workflow names its artifact after the release version
   instead of a hardcoded `1.5.4`.
 

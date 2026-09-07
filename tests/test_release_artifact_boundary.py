@@ -425,3 +425,48 @@ def test_verifier_is_not_pinned_to_one_version(tmp_path):
     _write_core_sdist(sdist, {"PKG-INFO": "Name: omega-memory\n"}, version="9.9.9")
 
     assert verify_core_sdist(sdist) == []
+
+
+def test_sdist_verifier_rejects_internal_working_documents(tmp_path):
+    """1.3.0 and 1.3.1 published GTM strategy, grant drafts and planning docs.
+
+    Those sdists were cut from the private monorepo before the extraction was
+    scrubbed, so the material never appeared in this repository's history --
+    PyPI was the only place it was public.
+    """
+    verify_core_sdist = _load_verifier().verify_core_sdist
+
+    sdist = tmp_path / "omega_memory-1.5.13.tar.gz"
+    _write_core_sdist(sdist, {
+        "docs/gtm/GTM-STRATEGY.md": "internal\n",
+        "docs/plans/2026-02-15-design.md": "internal\n",
+        "docs/grant-pipeline.md": "internal\n",
+    })
+
+    violations = verify_core_sdist(sdist)
+
+    assert len(violations) == 3, violations
+    assert all("internal working document" in v for v in violations), violations
+
+
+def test_sdist_verifier_rejects_a_contact_on_a_foreign_domain(tmp_path):
+    verify_core_sdist = _load_verifier().verify_core_sdist
+
+    sdist = tmp_path / "omega_memory-1.5.13.tar.gz"
+    _write_core_sdist(sdist, {"docs/pitch.md": "reach me at someone@some-other-company.io\n"})
+
+    violations = verify_core_sdist(sdist)
+
+    assert any("non-project email" in v for v in violations), violations
+
+
+def test_sdist_verifier_allows_project_and_example_addresses(tmp_path):
+    verify_core_sdist = _load_verifier().verify_core_sdist
+
+    sdist = tmp_path / "omega_memory-1.5.13.tar.gz"
+    _write_core_sdist(sdist, {
+        "docs/contact.md": "hello@omegamax.co and user@example.com\n",
+        "tests/test_x.py": "contact = 'anyone@whatever.test'\n",  # tests are exempt
+    })
+
+    assert verify_core_sdist(sdist) == []

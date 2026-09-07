@@ -79,6 +79,39 @@ _INTERNAL_PRODUCT_MARKER = re.compile(r"(?i)\bsynaptic\b")
 # This scanner and its test necessarily contain the marker they search for.
 # Exempt those two files from the marker rule only; every other rule, including
 # the home-path rule, still applies to them.
+# Directories that are internal working material and must never be published.
+# 1.3.0 and 1.3.1 shipped 62 planning documents this way, because those sdists
+# were cut from the private monorepo before the extraction was scrubbed.
+_INTERNAL_ONLY_DIRS = (
+    "docs/plans/",     # design and implementation planning
+    "docs/audits/",    # internal audit write-ups
+    "docs/gtm/",       # go-to-market strategy, brand guide, prepared social posts
+    "docs/growth/",
+    "docs/marketing/",
+    "docs/outreach/",  # pitches, and the contacts they name
+    "docs/drafts/",
+    "docs/prompts/",
+    "docs/internal/",
+)
+# Individual internal documents that have lived at the top of docs/. Grant
+# applications and funding pipelines name funders and personal contacts.
+_INTERNAL_ONLY_FILES = (
+    "docs/goose-grant-draft.md",
+    "docs/nlnet-draft.md",
+    "docs/grant-pipeline.md",
+)
+
+# Email domains the project legitimately publishes. Anything else outside
+# tests/ is treated as a personal or third-party contact that should not ship:
+# the same two releases carried outreach addresses at three other companies and
+# a maintainer address on a domain no longer in use.
+_PUBLISHABLE_EMAIL_DOMAINS = frozenset(
+    {"omegamax.co", "omega-memory.dev", "example.com", "example.org", "domain.com",
+     "test.com", "paid.invalid", "github.com", "anthropic.com", "python.org"}
+)
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+
+
 _MARKER_RULE_EXEMPT = frozenset(
     {"scripts/verify_core_release_artifact.py", "tests/test_release_artifact_boundary.py"}
 )
@@ -190,6 +223,15 @@ def _metadata_violations(archive: zipfile.ZipFile, names: list[str], version: st
     return violations
 
 
+def _foreign_email_violation(text: str) -> str | None:
+    """Flag a contact address on a domain this project does not publish."""
+    for match in _EMAIL_RE.finditer(text):
+        domain = match.group(1).lower()
+        if domain not in _PUBLISHABLE_EMAIL_DOMAINS:
+            return f"non-project email address in payload: {match.group(0)}"
+    return None
+
+
 def _real_home_path_violation(text: str) -> str | None:
     """Flag a home directory that looks like a real person's, not a placeholder."""
     for match in _HOME_PATH_RE.finditer(text):
@@ -217,6 +259,9 @@ def _sdist_member_violation(name: str, is_dir: bool, is_link: bool) -> str | Non
         return "symbolic link"
     if any(part in {".omega", "omega_platform", "synaptic", "logs", "results"} for part in parts):
         return "private, personal, log, or results path"
+    lowered = normalized.lower().lstrip("/")
+    if any(lowered.startswith(d) for d in _INTERNAL_ONLY_DIRS) or lowered in _INTERNAL_ONLY_FILES:
+        return "internal working document that must not be published"
     filename = parts[-1]
     if is_dir:
         return None
@@ -281,6 +326,7 @@ def verify_core_sdist(sdist: str | Path) -> list[str]:
                     pass
                 elif not relative.startswith("tests/"):
                     checks.append(_content_violation_text(text))
+                    checks.append(_foreign_email_violation(text))
                 else:
                     checks.append(
                         "internal-only product marker in payload"
