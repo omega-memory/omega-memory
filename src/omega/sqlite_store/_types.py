@@ -14,6 +14,38 @@ from omega.schema import SCHEMA_VERSION  # noqa: F401 -- re-exported
 # vec0 tables were created with; SQLiteStore validates that on open.
 EMBEDDING_DIM = get_embedding_config().dim
 
+# Priority is meant to be an int in 1..5, but callers — especially LLM agents
+# driving omega_store — can place arbitrary values in metadata["priority"]
+# (string labels like "high", tuples, None). The query fusion path multiplies
+# it (`priority * 0.08`) and other read sites use it arithmetically, both of
+# which TypeError on a non-numeric ("can't multiply sequence by non-int of type
+# 'float'"). Coerce defensively at every read/write site. See issue #66.
+_PRIORITY_LABEL_MAP = {
+    "low": 2, "normal": 3, "medium": 3, "high": 4, "critical": 5,
+}
+
+
+def coerce_priority(value: Any, default: int = 3) -> int:
+    """Normalize a metadata ``priority`` value to an int in [1, 5].
+
+    Accepts ints/floats (clamped), label strings ("high", "low", ...), and
+    numeric strings ("4"). Anything else falls back to ``default``. Never raises.
+    """
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return max(1, min(5, int(value)))
+    if isinstance(value, str):
+        label = value.strip().lower()
+        if label in _PRIORITY_LABEL_MAP:
+            return _PRIORITY_LABEL_MAP[label]
+        try:
+            return max(1, min(5, int(float(label))))
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
 # Pre-compiled regex for query deduplication (strip trailing git hashes)
 _TRAILING_HASH_RE = re.compile(r"\s*-\s*[0-9a-f]{6,40}\s*$")
 
@@ -37,30 +69,6 @@ _PREFETCH_CACHE_MAX = 32  # Max stem entries in prefetch cache
 _TRIGRAM_FINGERPRINT_CHARS = 200  # Max chars for trigram fingerprint (#1)
 _FAST_PATH_MIN_OVERLAP = 0.60  # Minimum trigram Jaccard for fast-path match (#1)
 _RRF_K = 60  # Reciprocal Rank Fusion constant (Cormack et al., 2009)
-
-# Priority is documented as an int in [1, 5], but `metadata` is free-form: a
-# caller can store a label ("high"), a JSON null, or a list, and the scoring
-# path does int(priority) with no guard -- which raises and fails the whole
-# query. Coerce at the read sites instead.
-_PRIORITY_LABEL_MAP = {
-    "low": 2,
-    "normal": 3,
-    "medium": 3,
-    "high": 4,
-    "critical": 5,
-}
-
-
-def coerce_priority(value: Any, default: int = 3) -> int:
-    """Normalize a metadata ``priority`` value to an int in [1, 5]."""
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, (int, float)):
-        return max(1, min(5, int(value)))
-    if isinstance(value, str):
-        return _PRIORITY_LABEL_MAP.get(value.strip().lower(), default)
-    return default
-
 
 # Regex for content canonicalization (#6)
 _MARKDOWN_STRIP_RE = re.compile(r'[*#`~\[\]()>|_]')

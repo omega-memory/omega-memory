@@ -8,6 +8,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from omega.types import TTLCategory, AutoCaptureEventType, EVENT_TYPE_TTL
 
+# Tests here populate the bridge store singleton via bridge.store(); reset it
+# per test so permanent constraint memories don't leak into later test files
+# (e.g. test_context_packet's empty-store assertions).
+pytestmark = pytest.mark.usefixtures("_reset_bridge")
+
 
 # ---------------------------------------------------------------------------
 # Change 1: Registration

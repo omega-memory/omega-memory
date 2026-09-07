@@ -22,6 +22,7 @@ from ._types import (
     _CLAUSE_STARTS,
     _deserialize_f32,
     _cosine_similarity,
+    coerce_priority,
 )
 
 logger = logging.getLogger("omega.sqlite_store")
