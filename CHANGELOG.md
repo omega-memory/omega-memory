@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0.1.0` and that nothing ever updated, so every install on every release
   reported `0.1.0`. Status now reads the installed package, and reports Core
   and Pro as separate lines rather than one ambiguous number. `omega setup` no
-  longer writes the field. Thanks to @AlterMighty for the report.
+  longer writes the field. Thanks to @phanvuliem for the report.
 - **Added `omega --version`.** The flag did not exist; `omega --version`
   previously exited with `unrecognized arguments`.
 - **The CrewAI adapter could not be constructed.** `OmegaStorageBackend`
