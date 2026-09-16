@@ -3,6 +3,7 @@
 import gc
 import logging
 import os
+import sqlite3
 import time as _time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1235,9 +1236,14 @@ class MaintenanceMixin:
     # Export / Import
     # ------------------------------------------------------------------
 
-    def export_to_file(self, filepath: Path) -> Dict[str, Any]:
-        """Export all memories to a JSON file."""
-        rows = self._conn.execute(
+    def export_to_file(self, filepath: Path, conn: Optional[sqlite3.Connection] = None) -> Dict[str, Any]:
+        """Export all memories to a JSON file.
+
+        ``conn`` selects the connection to read from; the primary connection
+        by default. The deferred-startup thread passes its own so the export
+        never shares a connection with the store's callers.
+        """
+        rows = (conn or self._conn).execute(
             """SELECT node_id, content, metadata, created_at,
                       access_count, last_accessed, ttl_seconds
                FROM memories ORDER BY created_at"""

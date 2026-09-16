@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   doctor` prints the same socket state. The troubleshooting page no longer
   tells users to run `omega hooks restart` and `omega hooks start`, which never
   existed (#78).
+- **Startup no longer races callers on the store's primary connection.** The
+  deferred integrity check, WAL checkpoint, and auto-backup ran on the same
+  connection that bridge code and tests write to directly, so a commit could
+  land while the PRAGMA was still mid-statement (`cannot commit transaction -
+  SQL statements in progress`), and the first tool call could wait behind a
+  long integrity check. Startup work now reads through its own connection and
+  holds no store lock.
 
 ### Removed
 
