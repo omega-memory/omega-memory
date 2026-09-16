@@ -273,10 +273,12 @@ def download_model(
                 filename=repo_path,
                 local_dir=str(target_path),
             )
-            # hf_hub_download may place the file in a subdirectory;
-            # move it to the expected location if needed
+            # hf_hub_download may place the file in a subdirectory; move it to
+            # the expected location if needed. Compare resolved paths: the hub
+            # returns a canonical path, and a target under a symlink (macOS
+            # /tmp, a linked ~/.cache) would otherwise be copied onto itself.
             downloaded_path = Path(downloaded)
-            if downloaded_path != dest and downloaded_path.exists():
+            if downloaded_path.resolve() != dest.resolve() and downloaded_path.exists():
                 import shutil
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(downloaded_path), str(dest))

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Fresh installs ran without semantic search.** `omega setup` fetched the
+  all-MiniLM-L6-v2 tokenizer from the `onnx/` folder on Hugging Face, where
+  only the weights live, so setup ended with `HTTP Error 404` and the model
+  could never load; every new Core install since 1.0 silently used hash
+  pseudo-embeddings. The tokenizer and config files now come from the
+  repository root, and setup only reports the model as installed when both
+  the weights and the tokenizer are present. Run `omega setup` again (or
+  `omega setup --download-model`) to repair an existing install.
+- **`omega doctor` reported "Embedding generation works" on hash fallback.**
+  It now fails when the ONNX model is not actually loaded and says what to run.
+- **First memory capture no longer downloads the reranker mid-session.**
+  `omega setup` pre-fetches the default cross-encoder (~90 MB) so the first
+  `lesson_learned` capture of a fresh install does not stall past the Stop
+  hook timeout (#81). A failed download is a skipped step, not an error.
+  The downloader also no longer fails with `SameFileError` when the model
+  directory sits behind a symlink (macOS `/tmp`, a linked `~/.cache`).
+- **Fresh installs logged eight "Behavioral extractor … failed" warnings on
+  the first session start.** Behavioral analysis needs the Pro coordination
+  database; without it the analyzer is now a quiet no-op (#80).
 - **`omega doctor` now checks the hook daemon.** It reports whether the daemon
   socket is listening, absent, or stale, fails outright when the daemon module
   cannot be imported, warns when an MCP server is running without a socket,

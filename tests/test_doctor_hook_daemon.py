@@ -133,6 +133,26 @@ def test_doctor_is_calm_when_nothing_is_running(tmp_path, monkeypatch, capsys):
     assert not any("hook socket" in m for m in _messages(report, "warn"))
 
 
+def test_doctor_treats_a_stale_socket_as_benign_when_no_server_runs(tmp_path, monkeypatch, capsys):
+    """`claude mcp list` (run by doctor itself) starts and kills a server, leaving a socket behind."""
+    monkeypatch.setattr(cli, "_probe_hook_daemon", lambda timeout=1.0: ("stale", "/x/hook.sock"))
+    monkeypatch.setattr(cli, "_mcp_servers_running", lambda: False)
+
+    report = _run_doctor_json(tmp_path, monkeypatch, capsys)
+
+    assert any(m.startswith("Hook socket is stale") for m in _messages(report, "ok"))
+    assert not any("hook socket" in m.lower() for m in _messages(report, "warn"))
+
+
+def test_doctor_warns_on_a_stale_socket_when_a_server_runs(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_probe_hook_daemon", lambda timeout=1.0: ("stale", "/x/hook.sock"))
+    monkeypatch.setattr(cli, "_mcp_servers_running", lambda: True)
+
+    report = _run_doctor_json(tmp_path, monkeypatch, capsys)
+
+    assert any("nothing answers on the hook socket" in m for m in _messages(report, "warn"))
+
+
 def test_doctor_fails_when_daemon_module_is_missing(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "_probe_hook_daemon", lambda timeout=1.0: ("unavailable", "No module named x"))
 

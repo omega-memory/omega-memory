@@ -130,8 +130,10 @@ and `surface_memories` are skipped.
 2. **Restart the session**: the daemon starts with the MCP server, so restart
    Claude Code (or whichever client launched the server).
 
-3. **Stale socket**: if the file exists but nothing answers, remove it and
-   restart the session:
+3. **Stale socket**: a socket file nobody answers on is normal after a server
+   was killed (`claude mcp list` does this while probing). The next server
+   replaces it. Only if `omega doctor` warns that a server is running *and*
+   nothing answers, remove the file and restart the session:
    ```bash
    rm ~/.omega/hook.sock
    ```
