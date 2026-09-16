@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""OMEGA Stop hook fallback — capture high-value assistant responses.
+"""OMEGA Stop hook — capture high-value assistant responses.
 
-Fires on every Stop event when the hook daemon is unavailable.
-Detects fix, decision, lesson, and recommendation patterns in
-``last_assistant_message`` and stores them via bridge.auto_capture.
+Fires on every Stop event. Detects fix, decision, lesson, and recommendation
+patterns in ``last_assistant_message`` and stores them via bridge.auto_capture.
 
-This is the cold-path fallback. The fast path routes through the hook
-daemon to ``handle_assistant_capture`` in the hook_server package.
+``run(payload)`` is the single implementation. The hook daemon calls it
+in-process; ``main()`` wraps it for the standalone fallback path.
 """
 import json
+import logging
 import re
 import sys
 
-# Patterns (mirrors assistant.py in hook_server)
+from omega.hooks._output import emit
+
+logger = logging.getLogger("omega.hooks.assistant_capture")
+
 FIX_PATTERNS = [
     r"the (?:fix|issue|problem|bug) was\b",
     r"root cause (?:was|is)\b",
@@ -46,8 +49,10 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 _INSIGHT_OPEN_RE = re.compile(r"[★✦]\s*Insight\s*─+", re.IGNORECASE)
 _INSIGHT_CLOSE_RE = re.compile(r"─{10,}")
 
-_captured_count = 0
+# Per-session capture cap. Keyed by session because the daemon serves many
+# sessions from one process.
 MAX_CAPTURES = 10
+_captures_by_session: dict[str, int] = {}
 
 
 def _clean(text):
@@ -85,50 +90,55 @@ def _extract_insight_blocks(text):
     return blocks
 
 
-def main(data=None):
-    global _captured_count
-    if _captured_count >= MAX_CAPTURES:
-        return
+def _store(content: str, event_type: str, metadata: dict, session_id: str, cwd: str) -> bool:
+    """Store one capture; return True when it counted against the session cap."""
+    try:
+        from omega.bridge import auto_capture
+    except ImportError:
+        return False
+    try:
+        auto_capture(
+            content=content,
+            event_type=event_type,
+            metadata=metadata,
+            session_id=session_id,
+            project=cwd,
+        )
+    except Exception:
+        logger.warning("assistant_capture hook failed to store a %s", event_type, exc_info=True)
+        return False
+    _captures_by_session[session_id] = _captures_by_session.get(session_id, 0) + 1
+    return True
 
-    if data is None:
-        try:
-            raw = sys.stdin.read()
-            if not raw.strip():
-                return
-            data = json.loads(raw)
-        except (json.JSONDecodeError, Exception):
-            return
 
-    message = data.get("last_assistant_message", "")
+def run(payload: dict) -> None:
+    """Capture insight blocks or fix/decision/lesson sentences from one Stop payload."""
+    message = payload.get("last_assistant_message", "")
     if not message or len(message) < MIN_MESSAGE_LENGTH:
         return
 
-    session_id = data.get("session_id", "")
-    cwd = data.get("cwd", data.get("project", ""))
+    session_id = payload.get("session_id", "")
+    cwd = payload.get("cwd") or payload.get("project") or ""
+
+    if _captures_by_session.get(session_id, 0) >= MAX_CAPTURES:
+        return
 
     # Pre-pass: detect ★ Insight delimited blocks
     insight_blocks = _extract_insight_blocks(message)
-    if insight_blocks and _captured_count < MAX_CAPTURES:
+    if insight_blocks:
         for block in insight_blocks:
-            if _captured_count >= MAX_CAPTURES:
+            if _captures_by_session.get(session_id, 0) >= MAX_CAPTURES:
                 break
-            try:
-                from omega.bridge import auto_capture
-
-                auto_capture(
-                    content=f"Insight: {block}",
-                    event_type="advisor_insight",
-                    metadata={"source": "assistant_capture_hook", "project": cwd, "capture_confidence": "high"},
-                    session_id=session_id,
-                    project=cwd,
-                )
-                _captured_count += 1
+            stored = _store(
+                f"Insight: {block}",
+                "advisor_insight",
+                {"source": "assistant_capture_hook", "project": cwd, "capture_confidence": "high"},
+                session_id,
+                cwd,
+            )
+            if stored:
                 preview = block[:80].replace("\n", " ").strip()
-                print(f"[LEARNED] insight: {preview}")
-            except ImportError:
-                pass
-            except Exception:
-                pass
+                emit(f"[LEARNED] insight: {preview}")
         return
 
     cleaned = _clean(message)
@@ -143,24 +153,30 @@ def main(data=None):
     ]:
         content = _find_match(cleaned, patterns)
         if content:
-            try:
-                from omega.bridge import auto_capture
-
-                auto_capture(
-                    content=f"Assistant {label}: {content[:500]}",
-                    event_type=event_type,
-                    metadata={"source": "assistant_capture_hook", "project": cwd},
-                    session_id=session_id,
-                    project=cwd,
-                )
-                _captured_count += 1
+            stored = _store(
+                f"Assistant {label}: {content[:500]}",
+                event_type,
+                {"source": "assistant_capture_hook", "project": cwd},
+                session_id,
+                cwd,
+            )
+            if stored:
                 preview = content[:80].replace("\n", " ").strip()
-                print(f"[LEARNED] {label}: {preview}")
-            except ImportError:
-                pass
-            except Exception:
-                pass
+                emit(f"[LEARNED] {label}: {preview}")
             return
+
+
+def main(data: dict | None = None) -> None:
+    """Standalone entry point: read the hook payload from stdin when not given."""
+    if data is None:
+        try:
+            raw = sys.stdin.read()
+            if not raw.strip():
+                return
+            data = json.loads(raw)
+        except (json.JSONDecodeError, OSError, ValueError):
+            return
+    run(data)
 
 
 if __name__ == "__main__":

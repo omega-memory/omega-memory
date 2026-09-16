@@ -2,11 +2,12 @@
 """OMEGA SessionStop hook — Generate and store session summary on exit."""
 import json
 import os
-import sys
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from omega.hooks._output import emit
 
 
 # Critical tools that agents SHOULD call at least once per session.
@@ -134,11 +135,11 @@ def _print_activity_report(session_id: str):
             parts.append(f"{n} {plural if n > 1 else singular}")
     if surfaced:
         parts.append(f"{surfaced} surfaced")
-    print(f"\n## Session complete — {' | '.join(parts)}")
+    emit(f"\n## Session complete — {' | '.join(parts)}")
 
     # Unique recall stats
     if surfaced_unique_ids > 0:
-        print(f"  Recalled: {surfaced_unique_ids} unique memories across {surfaced_unique_files} file{'s' if surfaced_unique_files != 1 else ''}")
+        emit(f"  Recalled: {surfaced_unique_ids} unique memories across {surfaced_unique_files} file{'s' if surfaced_unique_files != 1 else ''}")
 
     # Weekly recap
     try:
@@ -175,13 +176,13 @@ def _print_activity_report(session_id: str):
         if weekly_memories > 0:
             recap_parts.append(f"{weekly_memories} memories this week")
         recap_parts.append(f"{total} total")
-        print(f"  Recap: {', '.join(recap_parts)}")
+        emit(f"  Recap: {', '.join(recap_parts)}")
 
         # Week-over-week growth
         if prev_week_memories > 0 and weekly_memories > 0:
             growth_pct = ((weekly_memories - prev_week_memories) / prev_week_memories) * 100
             sign = "+" if growth_pct >= 0 else ""
-            print(f"  Growth: {sign}{growth_pct:.0f}% vs last week")
+            emit(f"  Growth: {sign}{growth_pct:.0f}% vs last week")
     except Exception:
         pass
 
@@ -190,8 +191,8 @@ def _print_activity_report(session_id: str):
         tool_names = _get_session_tool_names(session_id)
         report = _build_utilization_report(tool_names)
         if report["missed"]:
-            print(f"  Utilization: {report['score']}% ({report['hit']}/{report['total']} critical tools used)")
-            print(f"  Unused: {', '.join(report['missed'])}")
+            emit(f"  Utilization: {report['score']}% ({report['hit']}/{report['total']} critical tools used)")
+            emit(f"  Unused: {', '.join(report['missed'])}")
     except Exception:
         pass
 
@@ -220,20 +221,20 @@ def _print_activity_report(session_id: str):
             show = False
             if mem_count >= 1800:
                 show = True  # every session
-                print(f"  {mem_count:,}/2,000 memories -- approaching free tier limit")
-                print("  Search quality degrades at 2,000. Run 'omega upgrade' for unlimited.")
+                emit(f"  {mem_count:,}/2,000 memories -- approaching free tier limit")
+                emit("  Search quality degrades at 2,000. Run 'omega upgrade' for unlimited.")
             elif mem_count >= 1500:
                 show = session_total % 3 == 0  # every 3rd session
                 if show:
-                    print(f"  {mem_count:,}/2,000 memories (75%). Pro removes limits. Run 'omega upgrade'")
+                    emit(f"  {mem_count:,}/2,000 memories (75%). Pro removes limits. Run 'omega upgrade'")
             elif mem_count >= 1000:
                 show = session_total % 5 == 0  # every 5th session
                 if show:
-                    print(f"  {mem_count:,}/2,000 memories. Pro: unlimited + coordination + routing. Run 'omega upgrade'")
+                    emit(f"  {mem_count:,}/2,000 memories. Pro: unlimited + coordination + routing. Run 'omega upgrade'")
             elif mem_count >= 500:
                 show = session_total % 10 == 0  # every 10th session
                 if show:
-                    print("  Pro: coordination, routing, and 96 more tools. Run 'omega upgrade'")
+                    emit("  Pro: coordination, routing, and 96 more tools. Run 'omega upgrade'")
     except Exception:
         pass
 
@@ -559,9 +560,10 @@ def _build_project_status(session_id: str, project: str):
     return " | ".join(parts)[:600]
 
 
-def main():
-    session_id = os.environ.get("SESSION_ID", "")
-    project = os.environ.get("PROJECT_DIR", os.getcwd())
+def run(payload: dict) -> None:
+    """Report session activity and store the session summary for one Stop payload."""
+    session_id = payload.get("session_id", "")
+    project = payload.get("project") or payload.get("cwd") or os.getcwd()
 
     _capture_usage_to_supabase(session_id, project)
     _auto_feedback_on_surfaced(session_id)
@@ -571,7 +573,7 @@ def main():
     try:
         reflect_result = _auto_reflect(session_id, project)
         if reflect_result["contradictions_found"] > 0:
-            print(f"  Auto-reflect: {reflect_result['contradictions_found']} contradiction(s) detected. Check next session start.")
+            emit(f"  Auto-reflect: {reflect_result['contradictions_found']} contradiction(s) detected. Check next session start.")
     except Exception:
         pass
 
@@ -604,7 +606,7 @@ def main():
         pass
     except Exception as e:
         _log_hook_error("session_stop", e)
-        print(f"OMEGA session_stop failed: {e}", file=sys.stderr)
+        emit(f"OMEGA session_stop failed: {e}")
 
     # Auto-generate project_status (will evolve existing if present)
     project_status_text = _build_project_status(session_id, project)
@@ -622,6 +624,16 @@ def main():
             pass
         except Exception as e:
             _log_hook_error("session_stop_project_status", e)
+
+
+def main(payload: dict | None = None) -> None:
+    """Standalone entry point: build the payload from the hook env vars when not given."""
+    if payload is None:
+        payload = {
+            "session_id": os.environ.get("SESSION_ID", ""),
+            "project": os.environ.get("PROJECT_DIR", os.getcwd()),
+        }
+    run(payload)
 
 
 def _log_timing(hook_name, elapsed_ms):

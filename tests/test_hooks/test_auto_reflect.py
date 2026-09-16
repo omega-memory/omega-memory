@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 
 def test_auto_reflect_finds_contradictions():
     """Auto-reflect should call find_contradictions and store results."""
-    from hooks.session_stop import _auto_reflect
+    from omega.hooks.session_stop import _auto_reflect
 
     mock_store = MagicMock()
     mock_result = {
@@ -23,8 +23,8 @@ def test_auto_reflect_finds_contradictions():
         ],
     }
 
-    with patch("hooks.session_stop.find_contradictions", return_value=mock_result) as mock_find, \
-         patch("hooks.session_stop._get_reflect_store", return_value=mock_store):
+    with patch("omega.hooks.session_stop.find_contradictions", return_value=mock_result) as mock_find, \
+         patch("omega.hooks.session_stop._get_reflect_store", return_value=mock_store):
 
         result = _auto_reflect("test-session", "/test/project")
 
@@ -34,7 +34,7 @@ def test_auto_reflect_finds_contradictions():
 
 def test_auto_reflect_no_contradictions():
     """When no contradictions found, result shows 0."""
-    from hooks.session_stop import _auto_reflect
+    from omega.hooks.session_stop import _auto_reflect
 
     mock_store = MagicMock()
     mock_result = {
@@ -43,8 +43,8 @@ def test_auto_reflect_no_contradictions():
         "contradictions": [],
     }
 
-    with patch("hooks.session_stop.find_contradictions", return_value=mock_result), \
-         patch("hooks.session_stop._get_reflect_store", return_value=mock_store):
+    with patch("omega.hooks.session_stop.find_contradictions", return_value=mock_result), \
+         patch("omega.hooks.session_stop._get_reflect_store", return_value=mock_store):
 
         result = _auto_reflect("test-session", "/test/project")
 
@@ -53,8 +53,8 @@ def test_auto_reflect_no_contradictions():
 
 def test_auto_reflect_handles_import_error():
     """Auto-reflect should handle missing modules gracefully."""
-    from hooks.session_stop import _auto_reflect
+    from omega.hooks.session_stop import _auto_reflect
 
-    with patch("hooks.session_stop._get_reflect_store", side_effect=ImportError("no module")):
+    with patch("omega.hooks.session_stop._get_reflect_store", side_effect=ImportError("no module")):
         result = _auto_reflect("test-session", "/test/project")
         assert result["contradictions_found"] == 0

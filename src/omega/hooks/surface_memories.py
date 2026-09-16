@@ -9,11 +9,12 @@ Triggered on Edit/Write/NotebookEdit/Bash. Provides:
 import json
 import os
 import re
-import sys
 import time
 import traceback
 from datetime import datetime
 from pathlib import Path
+
+from omega.hooks._output import emit
 
 
 _MAX_LOG_BYTES = 5 * 1024 * 1024  # 5 MB cap
@@ -214,7 +215,7 @@ def _surface_for_edit(file_path: str, session_id: str, project: str, count_surfa
         # Look up session task descriptions for source attribution
         session_tasks = _lookup_session_tasks(results)
 
-        print(f"\n[MEMORY] Relevant context for {filename}:")
+        emit(f"\n[MEMORY] Relevant context for {filename}:")
         for r in results:
             score = r.get("relevance", 0.0)
             etype = r.get("event_type", "memory")
@@ -233,12 +234,12 @@ def _surface_for_edit(file_path: str, session_id: str, project: str, count_surfa
                 attr = f" (from \"{task_desc}\")"
             else:
                 attr = ""
-            print(f"  [{score:.0%}] {etype}{attr}: {preview} (id:{nid})")
+            emit(f"  [{score:.0%}] {etype}{attr}: {preview} (id:{nid})")
 
         # First-recall milestone
         try:
             if _check_milestone("first-recall"):
-                print("[OMEGA] First memory recalled! Past context is informing this edit.")
+                emit("[OMEGA] First memory recalled! Past context is informing this edit.")
         except Exception:
             pass
 
@@ -256,7 +257,7 @@ def _surface_for_edit(file_path: str, session_id: str, project: str, count_surfa
                         continue
                     etype = node.get("event_type", "memory")
                     preview = node.get("content", "")[:120].replace('\n', ' ')
-                    print(f"  [linked] {etype}: {preview}")
+                    emit(f"  [linked] {etype}: {preview}")
                     linked_count += 1
                     if linked_count >= 2:
                         break
@@ -275,7 +276,7 @@ def _surface_for_edit(file_path: str, session_id: str, project: str, count_surfa
                 if hid in shown_ids:
                     continue
                 preview = hit.get("content", "")[:120].replace('\n', ' ')
-                print(f"  [exact] error: {preview}")
+                emit(f"  [exact] error: {preview}")
         except Exception:
             pass
 
@@ -311,10 +312,10 @@ def _surface_lessons(file_path: str, session_id: str, project: str):
         )
         verified = [l for l in lessons if l.get("verified")]
         if verified:
-            print(f"\n[LESSON] Verified wisdom for {filename}:")
+            emit(f"\n[LESSON] Verified wisdom for {filename}:")
             for l in verified:
                 content = l.get("content", "")[:150]
-                print(f"  - {content}")
+                emit(f"  - {content}")
     except ImportError:
         pass
     except Exception as e:
@@ -322,10 +323,11 @@ def _surface_lessons(file_path: str, session_id: str, project: str):
 
 
 
-# Session-level error dedup cache
-_error_hashes: set = set()
-_error_count: int = 0
+# Session-level error dedup cache. Keyed by session because the daemon serves
+# many sessions from one process.
 _MAX_ERRORS_PER_SESSION = 5
+_error_hashes_by_session: dict[str, set] = {}
+_error_count_by_session: dict[str, int] = {}
 
 
 def _extract_error_summary(raw_output: str) -> str:
@@ -375,15 +377,13 @@ def _capture_error(tool_output: str, session_id: str, project: str):
     Session-level dedup: skip if same error pattern already captured.
     Cap at _MAX_ERRORS_PER_SESSION to prevent test-run floods.
     """
-    global _error_count
-
     if not tool_output:
         return
     if not isinstance(tool_output, str):
         tool_output = str(tool_output)
 
     # Cap errors per session
-    if _error_count >= _MAX_ERRORS_PER_SESSION:
+    if _error_count_by_session.get(session_id, 0) >= _MAX_ERRORS_PER_SESSION:
         return
 
     error_markers = [
@@ -406,10 +406,11 @@ def _capture_error(tool_output: str, session_id: str, project: str):
 
     # Session-level dedup: hash the first 100 chars (normalized)
     error_hash = re.sub(r'\s+', ' ', error_summary[:100].lower()).strip()
-    if error_hash in _error_hashes:
+    seen = _error_hashes_by_session.setdefault(session_id, set())
+    if error_hash in seen:
         return
-    _error_hashes.add(error_hash)
-    _error_count += 1
+    seen.add(error_hash)
+    _error_count_by_session[session_id] = _error_count_by_session.get(session_id, 0) + 1
 
     # --- "You've seen this before" — proactive error recall ---
     try:
@@ -430,11 +431,11 @@ def _capture_error(tool_output: str, session_id: str, project: str):
             if m.get("relevance", 0) >= 0.35 and m.get("session_id") != session_id:
                 past_matches.append(m)
         if past_matches:
-            print("\n[RECALL] You've seen this before:")
+            emit("\n[RECALL] You've seen this before:")
             for m in past_matches[:2]:
                 etype = m.get("event_type", "memory")
                 content = m.get("content", "")[:150].replace("\n", " ").strip()
-                print(f"  [{etype}] {content}")
+                emit(f"  [{etype}] {content}")
     except ImportError:
         pass
     except Exception as e:
@@ -456,9 +457,9 @@ def _capture_error(tool_output: str, session_id: str, project: str):
         if result and ("Stored" in result or "Evolved" in result):
             first_line = error_summary.split('\n')[0][:80]
             if "Evolved" in result:
-                print(f"[OMEGA] Evolved error pattern — {first_line}")
+                emit(f"[OMEGA] Evolved error pattern — {first_line}")
             else:
-                print(f"[OMEGA] Captured error — {first_line}")
+                emit(f"[OMEGA] Captured error — {first_line}")
     except ImportError:
         pass
     except Exception as e:
@@ -544,7 +545,7 @@ def _check_protocol_reminder(session_id: str):
 
         # Only remind after 3+ tool uses (give agent time to call it naturally)
         if tool_uses >= 3:
-            print("\n[PROTOCOL] Reminder: call `omega_protocol()` to load your coordination playbook. It was not called this session.")
+            emit("\n[PROTOCOL] Reminder: call `omega_protocol()` to load your coordination playbook. It was not called this session.")
             # Create marker so we only remind once
             protocol_marker.parent.mkdir(parents=True, exist_ok=True)
             protocol_marker.write_text("reminded")
@@ -567,12 +568,22 @@ def _get_session_tool_names_fast(session_id: str) -> list:
         return []
 
 
-def main():
-    tool_name = os.environ.get("TOOL_NAME", "")
-    tool_input = os.environ.get("TOOL_INPUT", "{}")
-    tool_output = os.environ.get("TOOL_OUTPUT", "")
-    session_id = os.environ.get("SESSION_ID", "")
-    project = os.environ.get("PROJECT_DIR", os.getcwd())
+def _as_json_text(value) -> str:
+    """Hook payloads carry tool_input as a JSON string; accept a parsed dict too."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value or {})
+
+
+def run(payload: dict) -> None:
+    """Surface memories and capture errors for one PostToolUse payload."""
+    tool_name = payload.get("tool_name", "")
+    tool_input = _as_json_text(payload.get("tool_input", "{}"))
+    tool_output = payload.get("tool_output", "")
+    if isinstance(tool_output, (dict, list)):
+        tool_output = json.dumps(tool_output)
+    session_id = payload.get("session_id", "")
+    project = payload.get("project") or payload.get("cwd") or os.getcwd()
 
     # Check if agent needs a protocol reminder
     _check_protocol_reminder(session_id)
@@ -608,7 +619,7 @@ def main():
             edit_count = sum(1 for t in tool_calls_list if t in ("Edit", "Write", "NotebookEdit"))
             nudge = _check_nudge(edit_count, tool_calls_list)
             if nudge:
-                print(nudge, file=sys.stderr)
+                emit(nudge)
                 nudge_marker.touch()  # Only nudge once per session
     except Exception:
         pass
@@ -618,6 +629,18 @@ def main():
         _capture_error(tool_output, session_id, project)
         _track_git_commit(tool_input, tool_output, session_id, project)
 
+
+def main(payload: dict | None = None) -> None:
+    """Standalone entry point: build the payload from the hook env vars when not given."""
+    if payload is None:
+        payload = {
+            "tool_name": os.environ.get("TOOL_NAME", ""),
+            "tool_input": os.environ.get("TOOL_INPUT", "{}"),
+            "tool_output": os.environ.get("TOOL_OUTPUT", ""),
+            "session_id": os.environ.get("SESSION_ID", ""),
+            "project": os.environ.get("PROJECT_DIR", os.getcwd()),
+        }
+    run(payload)
 
 
 if __name__ == "__main__":

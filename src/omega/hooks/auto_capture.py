@@ -4,10 +4,18 @@
 Fires on every user prompt. Detects decision and lesson patterns and stores them
 as 'decision' or 'lesson_learned' event type in OMEGA memory. Uses conservative
 matching to avoid noise.
+
+``run(payload)`` is the single implementation. The hook daemon calls it
+in-process; ``main()`` wraps it for the standalone fallback path.
 """
 import json
+import logging
 import re
 import sys
+
+from omega.hooks._output import emit
+
+logger = logging.getLogger("omega.hooks.auto_capture")
 
 
 # Decision indicators (case-insensitive patterns)
@@ -40,9 +48,10 @@ LESSON_PATTERNS = [
 # Minimum prompt length to avoid matching on short commands
 MIN_PROMPT_LENGTH = 20
 
-# Maximum prompts to process per session (avoid runaway storage)
-_captured_count = 0
+# Maximum prompts to store per session (avoid runaway storage). Keyed by
+# session because the daemon serves many sessions from one process.
 MAX_CAPTURES_PER_SESSION = 20
+_captures_by_session: dict[str, int] = {}
 
 
 def _summarize_content(prompt: str, max_len: int = 60) -> str:
@@ -56,27 +65,25 @@ def _summarize_content(prompt: str, max_len: int = 60) -> str:
     return first_sentence[:max_len].rsplit(" ", 1)[0] + "..."
 
 
-def _echo_capture(result: str, event_type: str, prompt: str):
-    """Print a 1-line capture confirmation visible to the user.
+def _echo_capture(result: str, event_type: str, prompt: str) -> None:
+    """Emit a 1-line capture confirmation visible to the user.
 
-    Parses bridge.auto_capture() return value to distinguish:
-    - New capture → [OMEGA] Captured: decision about X
-    - Evolution   → [OMEGA] Memory evolved: added insight to existing memory
-    - Dedup/Block → silent (no output)
+    bridge.auto_capture() reports what it did as a short string:
+    - "Stored <id> ..."        → [OMEGA] Captured: decision — X
+    - "Evolved <id> (#N)"      → [OMEGA] Memory evolved: decision updated (evolution #N) — X
+    - Deduped / Reconfirmed / Blocked → silent
     """
     if not result:
         return
 
     summary = _summarize_content(prompt)
 
-    if "Memory Evolved" in result:
-        # Extract evolution number from "Evolution #N"
-        evo_match = re.search(r"Evolution #(\d+)", result)
+    if result.startswith("Evolved"):
+        evo_match = re.search(r"\(#(\d+)\)", result)
         evo_num = evo_match.group(1) if evo_match else "?"
-        print(f"[OMEGA] Memory evolved: {event_type} updated (evolution #{evo_num}) — {summary}")
-    elif "Memory Captured" in result:
-        print(f"[OMEGA] Captured: {event_type} — {summary}")
-    # Dedup/Blocked → stay silent
+        emit(f"[OMEGA] Memory evolved: {event_type} updated (evolution #{evo_num}) — {summary}")
+    elif result.startswith("Stored"):
+        emit(f"[OMEGA] Captured: {event_type} — {summary}")
 
 
 def _detect_decision(prompt: str) -> bool:
@@ -95,44 +102,40 @@ def _detect_lesson(prompt: str) -> bool:
     return any(re.search(pat, prompt_lower) for pat in LESSON_PATTERNS)
 
 
-def main():
-    global _captured_count
-    if _captured_count >= MAX_CAPTURES_PER_SESSION:
-        return
-
-    # Read hook input from stdin
+def _capture(content: str, event_type: str, label: str, prompt: str, session_id: str, cwd: str) -> None:
     try:
-        raw = sys.stdin.read()
-        if not raw.strip():
-            return
-        data = json.loads(raw)
-    except (json.JSONDecodeError, Exception):
+        from omega.bridge import auto_capture
+    except ImportError:
         return
+    try:
+        result = auto_capture(
+            content=content,
+            event_type=event_type,
+            metadata={"source": "auto_capture_hook", "project": cwd},
+            session_id=session_id,
+            project=cwd,
+        )
+    except Exception:
+        logger.warning("auto_capture hook failed to store a %s", label, exc_info=True)
+        return
+    _captures_by_session[session_id] = _captures_by_session.get(session_id, 0) + 1
+    _echo_capture(result, label, prompt)
 
-    prompt = data.get("prompt", "")
-    session_id = data.get("session_id", "")
-    cwd = data.get("cwd", "")
+
+def run(payload: dict) -> None:
+    """Capture a decision or lesson from one UserPromptSubmit payload."""
+    prompt = payload.get("prompt", "")
+    session_id = payload.get("session_id", "")
+    cwd = payload.get("cwd") or payload.get("project") or ""
 
     if not prompt:
+        return
+    if _captures_by_session.get(session_id, 0) >= MAX_CAPTURES_PER_SESSION:
         return
 
     # Decision takes priority if both match
     if _detect_decision(prompt):
-        try:
-            from omega.bridge import auto_capture
-            result = auto_capture(
-                content=f"Decision: {prompt[:500]}",
-                event_type="decision",
-                metadata={"source": "auto_capture_hook", "project": cwd},
-                session_id=session_id,
-                project=cwd,
-            )
-            _captured_count += 1
-            _echo_capture(result, "decision", prompt)
-        except ImportError:
-            pass
-        except Exception:
-            pass
+        _capture(f"Decision: {prompt[:500]}", "decision", "decision", prompt, session_id, cwd)
         return
 
     if _detect_lesson(prompt):
@@ -142,22 +145,20 @@ def main():
         _tech_signals = ["/", "`", "Error", "error", ".py", ".js", ".ts", "import ", "def ", "class "]
         if len(prompt) < 100 and not any(s in prompt for s in _tech_signals):
             return
+        _capture(f"Lesson: {prompt[:500]}", "lesson_learned", "lesson", prompt, session_id, cwd)
 
+
+def main(payload: dict | None = None) -> None:
+    """Standalone entry point: read the hook payload from stdin when not given."""
+    if payload is None:
         try:
-            from omega.bridge import auto_capture
-            result = auto_capture(
-                content=f"Lesson: {prompt[:500]}",
-                event_type="lesson_learned",
-                metadata={"source": "auto_capture_hook", "project": cwd},
-                session_id=session_id,
-                project=cwd,
-            )
-            _captured_count += 1
-            _echo_capture(result, "lesson", prompt)
-        except ImportError:
-            pass
-        except Exception:
-            pass
+            raw = sys.stdin.read()
+            if not raw.strip():
+                return
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, OSError, ValueError):
+            return
+    run(payload)
 
 
 if __name__ == "__main__":

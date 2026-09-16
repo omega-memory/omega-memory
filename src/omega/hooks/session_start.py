@@ -6,6 +6,8 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
+from omega.hooks._output import emit
+
 try:
     import fcntl
 except ImportError:  # Windows: no fcntl, fall back to best-effort no-op locking.
@@ -168,9 +170,10 @@ def _maybe_analyze_behavior():
         _log_hook_error("behavioral_analysis", e)
 
 
-def main():
-    project = os.environ.get("PROJECT_DIR", os.getcwd())
-    session_id = os.environ.get("SESSION_ID", "")
+def run(payload: dict) -> None:
+    """Run periodic maintenance and emit the welcome briefing for one session."""
+    project = payload.get("project") or payload.get("cwd") or os.getcwd()
+    session_id = payload.get("session_id", "")
 
     # Auto-consolidation check (lightweight, max once per 3 days)
     _maybe_auto_consolidate()
@@ -188,32 +191,32 @@ def main():
         from omega.bridge import welcome
         result = welcome(session_id=session_id, project=project)
     except ImportError:
-        print("OMEGA not installed. Run: pip install omega-memory && omega setup")
+        emit("OMEGA not installed. Run: pip install omega-memory && omega setup")
         return
     except Exception as e:
         _log_hook_error("session_start", e)
-        print(f"OMEGA welcome failed: {e}")
+        emit(f"OMEGA welcome failed: {e}")
         return
 
     memory_count = result.get("memory_count", 0)
     recent = result.get("recent_memories", [])
 
-    print(f"## Welcome back! OMEGA ready — {memory_count} memories")
+    emit(f"## Welcome back! OMEGA ready — {memory_count} memories")
 
     # First-time user "Aha" moment
     if memory_count == 0:
-        print("")
-        print("OMEGA captures decisions, lessons, and errors automatically as you work.")
-        print("Next session, it surfaces relevant context when you edit the same files.")
-        print("")
-        print("**Quick start:**")
-        print('- Say "remember that we always use TypeScript strict mode" to store a preference')
-        print("- Make a decision and OMEGA captures it automatically")
-        print("- Encounter an error, and OMEGA stores the pattern for future recall")
-        print("")
-        print("After this session ends, you'll see exactly what was captured.")
+        emit("")
+        emit("OMEGA captures decisions, lessons, and errors automatically as you work.")
+        emit("Next session, it surfaces relevant context when you edit the same files.")
+        emit("")
+        emit("**Quick start:**")
+        emit('- Say "remember that we always use TypeScript strict mode" to store a preference')
+        emit("- Make a decision and OMEGA captures it automatically")
+        emit("- Encounter an error, and OMEGA stores the pattern for future recall")
+        emit("")
+        emit("After this session ends, you'll see exactly what was captured.")
     elif memory_count <= 10:
-        print(f"  OMEGA has {memory_count} memories from your first sessions. These will surface when you edit related files.")
+        emit(f"  OMEGA has {memory_count} memories from your first sessions. These will surface when you edit related files.")
         try:
             from omega.bridge import type_stats as _ts_first
             first_stats = _ts_first()
@@ -222,7 +225,7 @@ def main():
                 if v > 0 and k != "session_summary":
                     stat_parts.append(f"{v} {k.replace('_', ' ')}")
             if stat_parts:
-                print(f"  Captured so far: {', '.join(stat_parts[:4])}")
+                emit(f"  Captured so far: {', '.join(stat_parts[:4])}")
         except Exception:
             pass
 
@@ -255,7 +258,7 @@ def main():
             graph_info = f" | graph: {graph_label} ({edge_count:,} edges)"
         else:
             graph_info = ""
-        print(f"Health: {health_label} | Last capture: {ago}{graph_info}")
+        emit(f"Health: {health_label} | Last capture: {ago}{graph_info}")
     except Exception:
         pass
 
@@ -279,9 +282,9 @@ def main():
             if len(surfaced) >= 3:
                 break
         if surfaced:
-            print("\n[HABITS] Inferred from your behavior:")
+            emit("\n[HABITS] Inferred from your behavior:")
             for h, conf, status in surfaced:
-                print(f"  - {h.content} ({status}, {conf:.0%})")
+                emit(f"  - {h.content} ({status}, {conf:.0%})")
     except ImportError:
         pass
     except Exception as e:
@@ -308,11 +311,11 @@ def main():
         )
         cross_only = [l for l in cross_lessons if l.get("cross_project")]
         if cross_only:
-            print("\n[CROSS-PROJECT] Lessons from other codebases:")
+            emit("\n[CROSS-PROJECT] Lessons from other codebases:")
             for l in cross_only[:3]:
                 content = l.get("content", "")[:120]
                 source_proj = l.get("project", "unknown")
-                print(f"  - [{source_proj}] {content}")
+                emit(f"  - [{source_proj}] {content}")
     except ImportError:
         pass
     except Exception as e:
@@ -329,10 +332,10 @@ def main():
         )
         top_lessons = [l for l in project_lessons if (l.get("access_count", 0) or 0) > 0]
         if top_lessons:
-            print("\n[LESSONS] Top lessons for this project:")
+            emit("\n[LESSONS] Top lessons for this project:")
             for l in top_lessons[:3]:
                 content = l.get("content", "")[:120]
-                print(f"  - {content}")
+                emit(f"  - {content}")
     except ImportError:
         pass
     except Exception as e:
@@ -340,6 +343,16 @@ def main():
 
     # Weekly digest, type stats, preferences, recent memories available on-demand
     # via omega_weekly_digest, omega_type_stats, omega_list_preferences.
+
+
+def main(payload: dict | None = None) -> None:
+    """Standalone entry point: build the payload from the hook env vars when not given."""
+    if payload is None:
+        payload = {
+            "session_id": os.environ.get("SESSION_ID", ""),
+            "project": os.environ.get("PROJECT_DIR", os.getcwd()),
+        }
+    run(payload)
 
 
 def _log_timing(hook_name, elapsed_ms):
