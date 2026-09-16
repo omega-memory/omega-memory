@@ -1096,6 +1096,13 @@ class BehavioralAnalyzer:
 
         Returns summary dict with counts per extractor.
         """
+        empty = {"total_extracted": 0, "stored": 0, "updated": 0, "skipped_denied": 0, "skipped_confidence": 0}
+        if self._get_conn() is None:
+            # Every extractor reads the coordination tables, which only the Pro
+            # package creates. On a Core install there is nothing to analyze.
+            logger.debug("Behavioral analysis skipped: no coordination database (Pro feature)")
+            return empty
+
         all_patterns: List[Dict[str, Any]] = []
 
         for extractor_name, extractor_fn in [

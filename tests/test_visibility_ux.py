@@ -237,18 +237,12 @@ class TestActivityReport:
     def test_empty_session_id_skips_report(self, tmp_omega_dir):
         """Empty session_id should produce no output."""
         # Import the hook's function
-        hooks_dir = str(Path(__file__).parent.parent / "hooks")
-        sys.path.insert(0, hooks_dir)
-        try:
-            import importlib
-            import session_stop
-            importlib.reload(session_stop)
-            captured = StringIO()
-            with patch("sys.stdout", captured):
-                session_stop._print_activity_report("")
-            assert captured.getvalue() == ""
-        finally:
-            sys.path.remove(hooks_dir)
+        from omega.hooks import session_stop
+
+        captured = StringIO()
+        with patch("sys.stdout", captured):
+            session_stop._print_activity_report("")
+        assert captured.getvalue() == ""
 
 
 # ============================================================================
@@ -287,19 +281,13 @@ class TestSurfacingCounter:
         json_path = tmp_omega_dir / "session-s1.surfaced.json"
         json_path.write_text(json.dumps({"/foo.py": [nid]}))
 
-        hooks_dir = str(Path(__file__).parent.parent / "hooks")
-        sys.path.insert(0, hooks_dir)
-        try:
-            import importlib
-            import session_stop
-            importlib.reload(session_stop)
-            # Patch Path.home() so the function finds our tmp_omega_dir
-            with patch.object(Path, "home", return_value=tmp_omega_dir.parent):
-                session_stop._auto_feedback_on_surfaced("s1")
-            # File should be cleaned up
-            assert not json_path.exists()
-        finally:
-            sys.path.remove(hooks_dir)
+        from omega.hooks import session_stop
+
+        # Patch Path.home() so the function finds our tmp_omega_dir
+        with patch.object(Path, "home", return_value=tmp_omega_dir.parent):
+            session_stop._auto_feedback_on_surfaced("s1")
+        # File should be cleaned up
+        assert not json_path.exists()
 
 
 # ============================================================================

@@ -424,12 +424,22 @@ class SQLiteStoreBase:
         Includes integrity check, WAL checkpoint, and auto-backup.
         These previously blocked MCP server init for 30+ seconds on
         databases with 500+ memories.
+
+        Everything here reads through a private connection and never touches
+        ``self._conn``. The primary connection is shared with callers that run
+        statements on it directly, outside ``self._lock`` (bridge's graduation
+        update, for one), so a read on it from this thread could still be
+        mid-statement when such a caller commits: "cannot commit transaction -
+        SQL statements in progress". WAL mode lets a second connection read
+        concurrently, and not holding the lock keeps the first tool call from
+        waiting behind a long integrity check.
         """
         try:
-            # Integrity check: detect DB corruption
-            with self._lock:
+            conn = self._open_deferred_read_conn()
+            try:
+                # Integrity check: detect DB corruption
                 try:
-                    result = self._conn.execute("PRAGMA integrity_check").fetchone()
+                    result = conn.execute("PRAGMA integrity_check").fetchone()
                     if result and result[0] != "ok":
                         logger.critical(
                             "DATABASE INTEGRITY CHECK FAILED: %s — creating backup before proceeding",
@@ -441,21 +451,32 @@ class SQLiteStoreBase:
 
                 # WAL checkpoint: clear bloated WAL from multi-process contention
                 try:
-                    result = self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+                    result = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
                     if result and result[1] > 0:
                         logger.info("Startup WAL checkpoint: %d/%d pages checkpointed", result[1], result[2])
                 except Exception as e:
                     logger.debug("Startup WAL checkpoint failed (non-fatal): %s", e)
 
-            # Auto-backup (uses its own locking internally)
-            self._auto_backup_if_stale()
+                self._auto_backup_if_stale(conn)
+            finally:
+                conn.close()
         except Exception as e:
             logger.debug("Deferred startup failed (non-fatal): %s", e)
         finally:
             self._deferred_startup_done = True
 
-    def _auto_backup_if_stale(self) -> None:
-        """Create automatic backup if the most recent one is >24h old. Keeps max 5."""
+    def _open_deferred_read_conn(self) -> sqlite3.Connection:
+        """Open the read-only connection the deferred-startup thread works on."""
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
+
+    def _auto_backup_if_stale(self, conn: sqlite3.Connection) -> None:
+        """Create automatic backup if the most recent one is >24h old. Keeps max 5.
+
+        Reads through ``conn``, the deferred-startup thread's private
+        connection, never ``self._conn`` (see ``_deferred_startup``).
+        """
         try:
             backup_dir = self.db_path.parent / "backups"
             if not backup_dir.exists():
@@ -470,15 +491,15 @@ class SQLiteStoreBase:
                     return  # Recent backup exists
 
             # Check if store has any data worth backing up
-            count = self._conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
             if count == 0:
                 return  # Empty store, nothing to back up
 
             # Create backup
             ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
             backup_path = backup_dir / f"omega-auto-{ts}.json"
-            result = self.export_to_file(backup_path)
-            logger.info("Auto-backup created: %s (%d nodes)", backup_path.name, result.get("nodes", 0))
+            result = self.export_to_file(backup_path, conn=conn)
+            logger.info("Auto-backup created: %s (%d nodes)", backup_path.name, result["node_count"])
 
             # Rotate: keep max 5 auto-backups
             auto_backups = sorted(backup_dir.glob("omega-auto-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)

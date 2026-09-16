@@ -2,7 +2,7 @@
 
 
 def test_extracts_project_from_path():
-    from hooks.coord_session_stop import _extract_project_entity
+    from omega.hooks.coord_session_stop import _extract_project_entity
 
     assert _extract_project_entity("/Users/dev/Projects/omega/src/foo.py") == "omega"
     assert _extract_project_entity("/Users/dev/Projects/acme-app/lib/bar.ts") == "acme-app"
@@ -10,7 +10,7 @@ def test_extracts_project_from_path():
 
 
 def test_builds_relationships_from_claims():
-    from hooks.coord_session_stop import _build_entity_links
+    from omega.hooks.coord_session_stop import _build_entity_links
 
     claims = [
         {"file_path": "/Users/dev/Projects/omega/src/bridge.py"},
@@ -23,7 +23,7 @@ def test_builds_relationships_from_claims():
 
 
 def test_cross_project_link():
-    from hooks.coord_session_stop import _build_entity_links
+    from omega.hooks.coord_session_stop import _build_entity_links
 
     claims = [
         {"file_path": "/Users/dev/Projects/omega/src/bridge.py"},

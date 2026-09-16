@@ -4,9 +4,8 @@ import sys
 import pytest
 from pathlib import Path
 
-# Ensure omega package and hooks are importable
+# Ensure the omega package is importable from a source checkout
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
 
 
 @pytest.fixture

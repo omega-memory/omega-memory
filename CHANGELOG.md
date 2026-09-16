@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fresh installs ran without semantic search.** `omega setup` fetched the
+  all-MiniLM-L6-v2 tokenizer from the `onnx/` folder on Hugging Face, where
+  only the weights live, so setup ended with `HTTP Error 404` and the model
+  could never load; every new Core install since 1.0 silently used hash
+  pseudo-embeddings. The tokenizer and config files now come from the
+  repository root, and setup only reports the model as installed when both
+  the weights and the tokenizer are present. Run `omega setup` again (or
+  `omega setup --download-model`) to repair an existing install.
+- **`omega doctor` reported "Embedding generation works" on hash fallback.**
+  It now fails when the ONNX model is not actually loaded and says what to run.
+- **First memory capture no longer downloads the reranker mid-session.**
+  `omega setup` pre-fetches the default cross-encoder (~90 MB) so the first
+  `lesson_learned` capture of a fresh install does not stall past the Stop
+  hook timeout (#81). A failed download is a skipped step, not an error.
+  The downloader also no longer fails with `SameFileError` when the model
+  directory sits behind a symlink (macOS `/tmp`, a linked `~/.cache`).
+- **Fresh installs logged eight "Behavioral extractor … failed" warnings on
+  the first session start.** Behavioral analysis needs the Pro coordination
+  database; without it the analyzer is now a quiet no-op (#80).
+- **`omega doctor` now checks the hook daemon.** It reports whether the daemon
+  socket is listening, absent, or stale, fails outright when the daemon module
+  cannot be imported, warns when an MCP server is running without a socket,
+  and counts core hook runs that hooks.log shows as skipped. `omega hooks
+  doctor` prints the same socket state. The troubleshooting page no longer
+  tells users to run `omega hooks restart` and `omega hooks start`, which never
+  existed (#78).
+- **Startup no longer races callers on the store's primary connection.** The
+  deferred integrity check, WAL checkpoint, and auto-backup ran on the same
+  connection that bridge code and tests write to directly, so a commit could
+  land while the PRAGMA was still mid-statement (`cannot commit transaction -
+  SQL statements in progress`), and the first tool call could wait behind a
+  long integrity check. Startup work now reads through its own connection and
+  holds no store lock.
+
+### Removed
+
+- **The root `hooks/` directory.** It was a March copy of the shipped
+  `src/omega/hooks/` scripts that every file had drifted from, reachable only
+  through the test suite. Tests now import the shipped package; the CLI no
+  longer falls back to the root copy (#79).
+
 ## [1.5.16] - 2026-09-16
 
 ### Fixed

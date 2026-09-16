@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -320,6 +321,107 @@ def _download_file(url: str, target: Path) -> None:
             raise
 
 
+# Hugging Face keeps the ONNX weights under onnx/ and the tokenizer files at the
+# repository root. Fetching every file from onnx/ 404s on the tokenizer, which
+# leaves a model that cannot load and silently degrades search to hash
+# pseudo-embeddings (that was the fresh-install default from 1.0 to 1.5.16).
+_MINILM_HF_REPO = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main"
+_MINILM_MODEL_FILES = {
+    "model.onnx": f"{_MINILM_HF_REPO}/onnx/model.onnx",
+    "tokenizer.json": f"{_MINILM_HF_REPO}/tokenizer.json",
+    "config.json": f"{_MINILM_HF_REPO}/config.json",
+    "tokenizer_config.json": f"{_MINILM_HF_REPO}/tokenizer_config.json",
+    "vocab.txt": f"{_MINILM_HF_REPO}/vocab.txt",
+}
+# What omega.embedding actually opens; a download is only a success with both.
+_MODEL_LOAD_FILES = ("model.onnx", "tokenizer.json")
+
+
+def _missing_model_files(target_dir: Path) -> list[str]:
+    return [name for name in _MODEL_LOAD_FILES if not (target_dir / name).exists()]
+
+
+def _download_minilm_model(target_dir: Path, errors_ref: list) -> bool:
+    """Download the all-MiniLM-L6-v2 ONNX model. Returns True only if it can load."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    print("  Downloading ONNX embedding model (all-MiniLM-L6-v2, ~90MB)...")
+    try:
+        for fname, url in _MINILM_MODEL_FILES.items():
+            target = target_dir / fname
+            if not target.exists():
+                _download_file(url, target)
+    except Exception as e:
+        errors_ref.append(e)
+        print(f"  ERROR: Model download failed: {e}")
+        print(f"  Manually place model files in {target_dir}")
+        return False
+    missing = _missing_model_files(target_dir)
+    if missing:
+        errors_ref.append(f"{', '.join(missing)} not present after download")
+        print(f"  ERROR: {', '.join(missing)} still not present after download attempt")
+        return False
+    return True
+
+
+def _install_embedding_model(download_bge: bool, errors_ref: list, steps_done: list) -> None:
+    """Make sure a loadable embedding model is on disk.
+
+    "Present" means the weights *and* the tokenizer: installs made before
+    1.5.17 have `model.onnx` alone (the tokenizer download 404'd), and those
+    are completed here rather than reported as fine.
+    """
+    if download_bge:
+        if _download_bge_model(BGE_MODEL_DIR, errors_ref):
+            steps_done.append("Embedding model (bge-small-en-v1.5)")
+        return
+
+    if not _missing_model_files(BGE_MODEL_DIR):
+        print(f"  ONNX model: bge-small-en-v1.5 at {BGE_MODEL_DIR}")
+        steps_done.append("Embedding model (already present)")
+    elif (BGE_MODEL_DIR / "model.onnx").exists():
+        print("  bge-small-en-v1.5 is missing its tokenizer; completing the download...")
+        if _download_bge_model(BGE_MODEL_DIR, errors_ref):
+            steps_done.append("Embedding model (repaired)")
+    elif not _missing_model_files(MINILM_MODEL_DIR):
+        print(f"  ONNX model: all-MiniLM-L6-v2 at {MINILM_MODEL_DIR}")
+        print("  TIP: Run 'omega setup --download-model' to upgrade to bge-small-en-v1.5")
+        steps_done.append("Embedding model (already present)")
+    else:
+        repairing = (MINILM_MODEL_DIR / "model.onnx").exists()
+        if repairing:
+            print("  all-MiniLM-L6-v2 is missing its tokenizer; completing the download...")
+        if _download_minilm_model(MINILM_MODEL_DIR, errors_ref):
+            print("  TIP: Run 'omega setup --download-model' to upgrade to bge-small-en-v1.5")
+            steps_done.append("Embedding model (repaired)" if repairing else "Embedding model (downloaded)")
+
+
+def _download_reranker_model(steps_done: list, steps_skipped: list) -> None:
+    """Fetch the default cross-encoder now, so no hook ever has to download it mid-session.
+
+    Reranking is optional: a failed download is reported as a skipped step,
+    not a setup error, and the runtime retries on its own later.
+    """
+    try:
+        from omega import reranker
+    except ImportError as e:
+        steps_skipped.append(f"Reranker model ({e})")
+        return
+    if reranker._get_model_dir() is not None:
+        steps_done.append("Reranker model (already present)")
+        return
+    print(f"  Downloading reranker model ({reranker._RERANKER_MODEL_NAME}, ~90MB)...")
+    try:
+        downloaded = reranker.download_model()
+    except Exception as e:
+        logging.getLogger("omega.cli").debug("reranker download raised: %s", e, exc_info=True)
+        downloaded = None
+    if downloaded:
+        steps_done.append("Reranker model (downloaded)")
+    else:
+        print("  WARNING: reranker download failed; search works without it and will retry later")
+        steps_skipped.append("Reranker model (download failed)")
+
+
 def _download_bge_model(target_dir: Path, errors_ref: list) -> bool:
     """Download bge-small-en-v1.5 ONNX model from HuggingFace. Returns True on success."""
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -348,9 +450,10 @@ def _download_bge_model(target_dir: Path, errors_ref: list) -> bool:
         print(f"  Manually place model files in {target_dir}")
         return False
 
-    if not (target_dir / "model.onnx").exists():
-        errors_ref.append("model.onnx not present after download")
-        print("  ERROR: model.onnx still not present after download attempt")
+    missing = _missing_model_files(target_dir)
+    if missing:
+        errors_ref.append(f"{', '.join(missing)} not present after download")
+        print(f"  ERROR: {', '.join(missing)} still not present after download attempt")
         return False
     print(f"  bge-small-en-v1.5 model downloaded to {target_dir}")
     return True
@@ -675,19 +778,66 @@ def _setup_generic_mcp_client(client_name: str):
 
 
 def _resolve_hooks_src() -> Path:
-    """Resolve the hooks source directory.
+    """The hook scripts directory: ``omega/hooks`` inside the installed package."""
+    return Path(__file__).parent / "hooks"
 
-    Priority:
-    1. src/omega/hooks/ inside the installed package (pip install)
-    2. hooks/ at repo root (development checkout)
+
+_CORE_HOOK_NAMES = frozenset({"session_start", "session_stop", "auto_capture", "surface_memories", "assistant_capture"})
+_SKIPPED_HOOK_LINE = re.compile(r"fast_hook/(?P<hooks>[\w+]+): OK \(\d+ms, skipped\)")
+
+
+def _count_skipped_core_hooks(lines: list[str]) -> int:
+    """Count hooks.log lines where fast_hook skipped a core hook because no daemon answered."""
+    count = 0
+    for line in lines:
+        match = _SKIPPED_HOOK_LINE.search(line)
+        if match and _CORE_HOOK_NAMES & set(match.group("hooks").split("+")):
+            count += 1
+    return count
+
+
+def _probe_hook_daemon(timeout: float = 1.0) -> tuple[str, str]:
+    """Report the hook daemon's socket state.
+
+    Returns ``(state, detail)`` where state is ``listening``, ``absent`` (no
+    socket, the normal state when no MCP server is running), ``stale`` (a
+    socket file nobody answers on), or ``unavailable`` (the daemon module
+    itself cannot be imported, so hooks would be skipped even with a server).
     """
-    pkg_hooks = Path(__file__).parent / "hooks"
-    if pkg_hooks.exists() and (pkg_hooks / "fast_hook.py").exists():
-        return pkg_hooks
-    repo_hooks = Path(__file__).parent.parent.parent / "hooks"
-    if repo_hooks.exists() and (repo_hooks / "fast_hook.py").exists():
-        return repo_hooks
-    return pkg_hooks  # will fail gracefully downstream
+    try:
+        from omega.server.hook_server import HOOK_HOST, HOOK_PORT, SOCK_PATH
+    except ImportError as error:
+        return "unavailable", str(error)
+    if sys.platform == "win32":
+        target = f"{HOOK_HOST}:{HOOK_PORT}"
+        try:
+            with socket.create_connection((HOOK_HOST, HOOK_PORT), timeout=timeout):
+                return "listening", target
+        except OSError:
+            return "absent", target
+    if not SOCK_PATH.exists():
+        return "absent", str(SOCK_PATH)
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(timeout)
+    try:
+        probe.connect(str(SOCK_PATH))
+    except OSError as error:
+        return "stale", f"{SOCK_PATH}: {error.strerror or error}"
+    finally:
+        probe.close()
+    return "listening", str(SOCK_PATH)
+
+
+def _mcp_servers_running() -> bool:
+    """True when the PID registry lists a live MCP server process."""
+    try:
+        from omega.server.pid_registry import list_registered_pids
+
+        # Diagnostics must not clean the registry as a side effect.
+        return bool(list_registered_pids(clean_stale=False))
+    except (ImportError, OSError) as error:
+        logging.getLogger("omega.cli").debug("pid registry unavailable: %s", error)
+        return False
 
 
 def cmd_hooks(args):
@@ -773,6 +923,16 @@ def cmd_hooks(args):
         else:
             print("  settings:   NOT FOUND (~/.claude/settings.json)")
             print("\n  Fix with: omega hooks setup")
+
+        # The daemon runs inside the MCP server; without it core hooks are skipped
+        state, detail = _probe_hook_daemon()
+        daemon_labels = {
+            "listening": f"OK ({detail})",
+            "absent": f"not running ({detail}); it starts with the MCP server",
+            "stale": f"stale ({detail}); left by a previous server, replaced at next start",
+            "unavailable": f"MISSING ({detail}); reinstall with: pip install -U 'omega-memory[server]'",
+        }
+        print(f"  daemon:     {daemon_labels[state]}")
 
     else:
         print("Usage: omega hooks {setup|path|doctor}")
@@ -1020,43 +1180,7 @@ def cmd_setup(args):
     steps_done.append("Storage directory")
 
     # 2. Download ONNX model
-    if download_model:
-        _download_bge_model(BGE_MODEL_DIR, errors)
-        steps_done.append("Embedding model (bge-small-en-v1.5)")
-    else:
-        bge_model = BGE_MODEL_DIR / "model.onnx"
-        minilm_model = MINILM_MODEL_DIR / "model.onnx"
-        if bge_model.exists():
-            print(f"  ONNX model: bge-small-en-v1.5 at {BGE_MODEL_DIR}")
-            steps_done.append("Embedding model (already present)")
-        elif minilm_model.exists():
-            print(f"  ONNX model: all-MiniLM-L6-v2 at {MINILM_MODEL_DIR}")
-            print("  TIP: Run 'omega setup --download-model' to upgrade to bge-small-en-v1.5")
-            steps_done.append("Embedding model (already present)")
-        else:
-            MINILM_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-            model_path = MINILM_MODEL_DIR / "model.onnx"
-            print("  Downloading ONNX embedding model (all-MiniLM-L6-v2, ~90MB)...")
-            script = Path(__file__).parent.parent.parent / "scripts" / "download_model.py"
-            if script.exists():
-                subprocess.run([sys.executable, str(script), str(MINILM_MODEL_DIR)], check=True)
-            else:
-                try:
-                    hf_base = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx"
-                    for fname in ["model.onnx", "tokenizer.json", "config.json", "tokenizer_config.json", "vocab.txt"]:
-                        target = MINILM_MODEL_DIR / fname
-                        if not target.exists():
-                            _download_file(f"{hf_base}/{fname}", target)
-                except Exception as e:
-                    errors.append(e)
-                    print(f"  ERROR: Model download failed: {e}")
-                    print(f"  Manually place model files in {MINILM_MODEL_DIR}")
-            if not model_path.exists():
-                errors.append("model.onnx not present")
-                print("  ERROR: model.onnx still not present after download attempt")
-            else:
-                print("  TIP: Run 'omega setup --download-model' to upgrade to bge-small-en-v1.5")
-                steps_done.append("Embedding model (downloaded)")
+    _install_embedding_model(download_model, errors, steps_done)
 
     # 3. Check for existing MAGMA model and symlink
     gnosis_model = Path.home() / ".cache" / "gnosis" / "models" / "all-MiniLM-L6-v2-onnx"
@@ -1067,6 +1191,9 @@ def cmd_setup(args):
             shutil.rmtree(MINILM_MODEL_DIR)
         MINILM_MODEL_DIR.symlink_to(gnosis_model)
         print("  Symlinked to existing model")
+
+    # 3b. Reranker: fetch it now rather than during the first capture of a session
+    _download_reranker_model(steps_done, steps_skipped)
 
     # 4. Create default config
     config_path = OMEGA_DIR / "config.json"
@@ -2451,15 +2578,22 @@ def cmd_doctor(args):
 
         expected_dim = get_embedding_config().dim
         emb = generate_embedding("test embedding")
-        if len(emb) == expected_dim:
-            ok(
-                f"Embedding generation works ({expected_dim}-dim, "
-                f"backend={info.get('backend', 'unknown')})"
-            )
-        else:
+        info = get_embedding_info()  # generate_embedding loads the model lazily; re-read
+        if len(emb) != expected_dim:
             fail(
                 f"Embedding dimension wrong: {len(emb)} "
                 f"(expected {expected_dim} from OMEGA_EMBEDDING_DIM)"
+            )
+        elif not info.get("model_loaded"):
+            fail(
+                f"Embedding model did not load (backend={info.get('backend', 'unknown')}); "
+                "search is running on hash pseudo-embeddings with no semantic recall. "
+                "Run 'omega setup --download-model'"
+            )
+        else:
+            ok(
+                f"Embedding generation works ({expected_dim}-dim, "
+                f"backend={info.get('backend', 'unknown')})"
             )
     except Exception as e:
         fail(f"Embedding generation failed: {e}")
@@ -2684,10 +2818,39 @@ def cmd_doctor(args):
                         print(f"    {line[:120]}")
             else:
                 ok("No hook errors in log")
+            skipped = _count_skipped_core_hooks(lines[-500:])
+            if skipped:
+                warn(
+                    f"{skipped} core hook run(s) in the last {min(len(lines), 500)} log lines were skipped "
+                    "because the hook daemon was unreachable; nothing was captured or surfaced for them"
+                )
         except Exception as e:
             warn(f"Cannot read hooks.log: {e}")
     else:
         ok("No hooks.log (no errors recorded)")
+
+    # Hook daemon: runs inside the MCP server; without it the core hooks are skipped
+    state, detail = _probe_hook_daemon()
+    if state == "unavailable":
+        fail(
+            f"Hook daemon module not importable ({detail}); core hooks are skipped. "
+            "Reinstall with: pip install -U 'omega-memory[server]'"
+        )
+    elif state == "listening":
+        ok(f"Hook daemon listening ({detail})")
+    elif _mcp_servers_running():
+        # A live server with no answering socket means its hooks are being skipped.
+        problem = "nothing answers on the hook socket" if state == "stale" else "no hook socket exists"
+        warn(
+            f"An MCP server is running but {problem} ({detail}); core hooks are being skipped. "
+            "Restart Claude Code and run doctor again"
+        )
+    elif state == "stale":
+        # Left behind by a server that was killed (`claude mcp list` does this while
+        # probing). The next server unlinks and recreates it, so nothing to do.
+        ok("Hook socket is stale (left by a previous server); replaced automatically at next start")
+    else:
+        ok("Hook daemon not running (no MCP server active; it starts with Claude Code)")
 
     # 9. Hooks configuration (Claude Code-specific)
     check_hooks = client == "claude-code" or SETTINGS_JSON_PATH.exists()

@@ -175,7 +175,7 @@ class TestHookTiming:
 
     def test_hooks_import_time(self):
         """All hooks import the time module."""
-        hooks_dir = Path(__file__).parent.parent / "hooks"
+        hooks_dir = Path(__file__).parent.parent / "src" / "omega" / "hooks"
         hook_files = [
             "pre_edit_surface.py", "surface_memories.py", "coord_heartbeat.py",
             "coord_session_start.py", "coord_session_stop.py", "session_start.py",
