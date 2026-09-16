@@ -4,11 +4,10 @@ Every fresh Core install from 1.0 to 1.5.16 ended `omega setup` with an HTTP
 404, because the tokenizer was fetched from the wrong Hugging Face path, and
 then ran on hash pseudo-embeddings while `omega doctor` said embeddings worked.
 These tests pin the download file map, the post-download check, doctor's
-verdict, the reranker pre-fetch, and the behavioral analyzer's Core no-op.
+verdict, and the reranker pre-fetch.
 """
 import argparse
 import json
-import logging
 import sqlite3
 
 import pytest
