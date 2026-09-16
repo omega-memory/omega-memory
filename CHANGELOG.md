@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The hook daemon was missing from the package, so four of the five hooks
+  `omega setup` registers never ran.** `omega.server.hook_server` dropped out
+  of the public tree in the March sync, after it was split into a package
+  upstream and the sync script kept copying the old single file. The MCP
+  server fell back to a silent no-op stub, `~/.omega/hook.sock` was never
+  created, and `fast_hook.py` skipped `session_start`, `session_stop`,
+  `auto_capture`, and `surface_memories` on every invocation while logging
+  them as `OK (0ms, skipped)`. The daemon is back as a core package. It runs
+  the same hook modules in-process, so the fast path and the cold fallback
+  share one implementation instead of drifting apart. Thanks to
+  @mattgdrums-cloud for the report (#76).
+- **Capture confirmations never printed.** The hook scripts looked for a
+  `Memory Captured` result string the bridge stopped returning long ago, so
+  `[OMEGA] Captured: …` and `[OMEGA] Memory evolved: …` lines were silently
+  dropped. They show again when a prompt or an assistant reply stores a
+  decision, lesson, or error.
+
 ### Security
 
 - **Source distributions no longer ship VCS metadata.** Releases are built from
