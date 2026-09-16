@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`omega doctor` now checks the hook daemon.** It reports whether the daemon
+  socket is listening, absent, or stale, fails outright when the daemon module
+  cannot be imported, warns when an MCP server is running without a socket,
+  and counts core hook runs that hooks.log shows as skipped. `omega hooks
+  doctor` prints the same socket state. The troubleshooting page no longer
+  tells users to run `omega hooks restart` and `omega hooks start`, which never
+  existed (#78).
+
+### Removed
+
+- **The root `hooks/` directory.** It was a March copy of the shipped
+  `src/omega/hooks/` scripts that every file had drifted from, reachable only
+  through the test suite. Tests now import the shipped package; the CLI no
+  longer falls back to the root copy (#79).
+
 ## [1.5.16] - 2026-09-16
 
 ### Fixed

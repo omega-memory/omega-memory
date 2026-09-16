@@ -105,11 +105,18 @@ The model auto-unloads after 10 minutes without queries. The health check critic
 
 ---
 
-## Hook Server Not Running
+## Hook Daemon Not Running
 
-**Symptom**: Claude Code hooks don't trigger OMEGA (no memory capture, no coordination).
+**Symptom**: `~/.omega/hooks.log` shows core hooks as `OK (0ms, skipped)`,
+memories are not captured or surfaced during a session, or `omega doctor`
+warns that an MCP server is running but no hook socket exists.
 
-**Cause**: The hook daemon (`hook_server.py`) isn't running or can't be reached via its Unix Domain Socket.
+**Cause**: The hook daemon runs inside the MCP server process; there is no
+separate service to start. `fast_hook.py` reaches it over
+`~/.omega/hook.sock` (TCP loopback on Windows). When the socket is missing,
+hooks fall back to a cold path that runs only the safety guards and
+best-effort captures, so `session_start`, `session_stop`, `auto_capture`,
+and `surface_memories` are skipped.
 
 **Solutions**:
 
@@ -117,20 +124,27 @@ The model auto-unloads after 10 minutes without queries. The health check critic
    ```bash
    omega doctor
    ```
-   Look for the "Hook server" line.
+   The "Hook Daemon" section reports whether the socket is listening, absent,
+   or stale, and how many core hook runs were skipped recently.
 
-2. **Restart manually**:
-   ```bash
-   omega hooks restart
-   ```
+2. **Restart the session**: the daemon starts with the MCP server, so restart
+   Claude Code (or whichever client launched the server).
 
-3. **Check socket**: The UDS lives at `~/.omega/hook.sock`. If it's stale (process died without cleanup), remove it:
+3. **Stale socket**: if the file exists but nothing answers, remove it and
+   restart the session:
    ```bash
    rm ~/.omega/hook.sock
-   omega hooks start
    ```
 
-Note: Hooks fail open — if the daemon is unreachable, Claude Code continues working normally. You just lose auto-capture and coordination features until the daemon is restarted.
+4. **Still skipped**: if `omega doctor` reports the daemon module as not
+   importable, reinstall the package. Releases before 1.5.16 shipped without
+   the daemon (issue #76):
+   ```bash
+   pip install -U "omega-memory[server]"
+   ```
+
+Note: Hooks fail open. If the daemon is unreachable, Claude Code keeps working
+normally; you only lose automatic capture and surfacing until it is back.
 
 ---
 

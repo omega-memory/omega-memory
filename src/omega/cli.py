@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -675,19 +676,65 @@ def _setup_generic_mcp_client(client_name: str):
 
 
 def _resolve_hooks_src() -> Path:
-    """Resolve the hooks source directory.
+    """The hook scripts directory: ``omega/hooks`` inside the installed package."""
+    return Path(__file__).parent / "hooks"
 
-    Priority:
-    1. src/omega/hooks/ inside the installed package (pip install)
-    2. hooks/ at repo root (development checkout)
+
+_CORE_HOOK_NAMES = frozenset({"session_start", "session_stop", "auto_capture", "surface_memories", "assistant_capture"})
+_SKIPPED_HOOK_LINE = re.compile(r"fast_hook/(?P<hooks>[\w+]+): OK \(\d+ms, skipped\)")
+
+
+def _count_skipped_core_hooks(lines: list[str]) -> int:
+    """Count hooks.log lines where fast_hook skipped a core hook because no daemon answered."""
+    count = 0
+    for line in lines:
+        match = _SKIPPED_HOOK_LINE.search(line)
+        if match and _CORE_HOOK_NAMES & set(match.group("hooks").split("+")):
+            count += 1
+    return count
+
+
+def _probe_hook_daemon(timeout: float = 1.0) -> tuple[str, str]:
+    """Report the hook daemon's socket state.
+
+    Returns ``(state, detail)`` where state is ``listening``, ``absent`` (no
+    socket, the normal state when no MCP server is running), ``stale`` (a
+    socket file nobody answers on), or ``unavailable`` (the daemon module
+    itself cannot be imported, so hooks would be skipped even with a server).
     """
-    pkg_hooks = Path(__file__).parent / "hooks"
-    if pkg_hooks.exists() and (pkg_hooks / "fast_hook.py").exists():
-        return pkg_hooks
-    repo_hooks = Path(__file__).parent.parent.parent / "hooks"
-    if repo_hooks.exists() and (repo_hooks / "fast_hook.py").exists():
-        return repo_hooks
-    return pkg_hooks  # will fail gracefully downstream
+    try:
+        from omega.server.hook_server import HOOK_HOST, HOOK_PORT, SOCK_PATH
+    except ImportError as error:
+        return "unavailable", str(error)
+    if sys.platform == "win32":
+        target = f"{HOOK_HOST}:{HOOK_PORT}"
+        try:
+            with socket.create_connection((HOOK_HOST, HOOK_PORT), timeout=timeout):
+                return "listening", target
+        except OSError:
+            return "absent", target
+    if not SOCK_PATH.exists():
+        return "absent", str(SOCK_PATH)
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(timeout)
+    try:
+        probe.connect(str(SOCK_PATH))
+    except OSError as error:
+        return "stale", f"{SOCK_PATH}: {error.strerror or error}"
+    finally:
+        probe.close()
+    return "listening", str(SOCK_PATH)
+
+
+def _mcp_servers_running() -> bool:
+    """True when the PID registry lists a live MCP server process."""
+    try:
+        from omega.server.pid_registry import list_registered_pids
+
+        return bool(list_registered_pids())
+    except (ImportError, OSError) as error:
+        logging.getLogger("omega.cli").debug("pid registry unavailable: %s", error)
+        return False
 
 
 def cmd_hooks(args):
@@ -773,6 +820,16 @@ def cmd_hooks(args):
         else:
             print("  settings:   NOT FOUND (~/.claude/settings.json)")
             print("\n  Fix with: omega hooks setup")
+
+        # The daemon runs inside the MCP server; without it core hooks are skipped
+        state, detail = _probe_hook_daemon()
+        daemon_labels = {
+            "listening": f"OK ({detail})",
+            "absent": f"not running ({detail}); it starts with the MCP server",
+            "stale": f"STALE ({detail}); remove the socket and restart Claude Code",
+            "unavailable": f"MISSING ({detail}); reinstall with: pip install -U 'omega-memory[server]'",
+        }
+        print(f"  daemon:     {daemon_labels[state]}")
 
     else:
         print("Usage: omega hooks {setup|path|doctor}")
@@ -2684,10 +2741,35 @@ def cmd_doctor(args):
                         print(f"    {line[:120]}")
             else:
                 ok("No hook errors in log")
+            skipped = _count_skipped_core_hooks(lines[-500:])
+            if skipped:
+                warn(
+                    f"{skipped} core hook run(s) in the last {min(len(lines), 500)} log lines were skipped "
+                    "because the hook daemon was unreachable; nothing was captured or surfaced for them"
+                )
         except Exception as e:
             warn(f"Cannot read hooks.log: {e}")
     else:
         ok("No hooks.log (no errors recorded)")
+
+    # Hook daemon: runs inside the MCP server; without it the core hooks are skipped
+    state, detail = _probe_hook_daemon()
+    if state == "unavailable":
+        fail(
+            f"Hook daemon module not importable ({detail}); core hooks are skipped. "
+            "Reinstall with: pip install -U 'omega-memory[server]'"
+        )
+    elif state == "listening":
+        ok(f"Hook daemon listening ({detail})")
+    elif state == "stale":
+        warn(f"Hook socket exists but nothing answers ({detail}); remove it and restart Claude Code")
+    elif _mcp_servers_running():
+        warn(
+            f"An MCP server is running but no hook socket exists ({detail}); core hooks are being skipped. "
+            "Restart Claude Code and run doctor again"
+        )
+    else:
+        ok("Hook daemon not running (no MCP server active; it starts with Claude Code)")
 
     # 9. Hooks configuration (Claude Code-specific)
     check_hooks = client == "claude-code" or SETTINGS_JSON_PATH.exists()
