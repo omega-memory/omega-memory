@@ -1953,22 +1953,16 @@ def query(
         else:
             output += "*No matching memories found.*\n"
 
-        # Auto-inject relevant constraints (always, regardless of event_type filter)
+        # Auto-inject this project's relevant constraints (regardless of event_type filter)
         if event_type != "constraint":
             try:
                 result_ids = {n.id for n in results}
-                constraint_nodes = db.get_by_type("constraint", limit=10)
-                matching_constraints = []
-                if constraint_nodes:
-                    query_words = {w.lower() for w in query_text.split() if len(w) > 2}
-                    for cn in constraint_nodes:
-                        if cn.id in result_ids:
-                            continue
-                        if (cn.metadata or {}).get("superseded"):
-                            continue
-                        content_words = {w.lower() for w in cn.content.split() if len(w) > 2}
-                        if query_words & content_words:
-                            matching_constraints.append(cn)
+                query_words = {w.lower() for w in query_text.split() if len(w) > 2}
+                matching_constraints = [
+                    cn for cn in _constraints_in_scope(db, project, entity_id)
+                    if cn.id not in result_ids
+                    and query_words & {w.lower() for w in cn.content.split() if len(w) > 2}
+                ]
                 if matching_constraints:
                     output += "\n---\n**Active Constraints:**\n"
                     for cr in matching_constraints[:3]:
@@ -2118,24 +2112,22 @@ def query_structured(
                 }
             )
 
-        # Auto-inject relevant constraints
+        # Auto-inject this project's relevant constraints
         if event_type != "constraint":
             try:
                 result_ids = {node.id for node in results}
-                constraint_nodes = db.get_by_type("constraint", limit=10)
+                constraint_nodes = _constraints_in_scope(db, project, entity_id)
                 if constraint_nodes:
                     query_words = {w.lower() for w in query_text.split() if len(w) > 2}
                     injected = 0
                     for cn in constraint_nodes:
                         if cn.id in result_ids:
                             continue
-                        if (cn.metadata or {}).get("superseded"):
-                            continue
                         content_words = {w.lower() for w in cn.content.split() if len(w) > 2}
                         if query_words & content_words:
                             structured.insert(0, {
                                 "id": cn.id,
-                                "content": cn.content,
+                                "content": cn.content[:_CONSTRAINT_TEXT_LIMIT],
                                 "event_type": "constraint",
                                 "session_id": (cn.metadata or {}).get("session_id", ""),
                                 "created_at": cn.created_at.isoformat() if cn.created_at else "",
@@ -2209,6 +2201,33 @@ _welcome_cache: Dict[str, tuple] = {}  # key -> (monotonic_ts, result_dict)
 _WELCOME_CACHE_TTL = 30.0  # seconds
 
 
+# Longest rule text injected into a session, query or welcome briefing.
+_CONSTRAINT_TEXT_LIMIT = 300
+
+
+def _constraints_in_scope(
+    db, project: Optional[str], entity_id: Optional[str], limit: int = 10
+) -> List[Any]:
+    """Active constraints that apply to this project and entity, newest first.
+
+    A constraint is a standing rule pushed into sessions and queries whether
+    or not anyone searched for it, so one stored for another project or
+    entity must never reach this one: it broke project separation and let
+    anyone able to store a memory plant a rule everywhere (audit finding B5).
+    A caller that names no project gets the current directory, which is the
+    project store() records when none is given.
+    """
+    return db.get_by_type_in_scope(
+        "constraint", project or os.getcwd(), entity_id=entity_id, limit=limit
+    )
+
+
+def _constraint_text(node) -> str:
+    """A rule's injected text: its summary, else its content, capped."""
+    text = (node.metadata or {}).get("observation") or node.content
+    return text.replace("\n", " ").strip()[:_CONSTRAINT_TEXT_LIMIT]
+
+
 def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
     """Generate a session welcome briefing with relevant memories.
 
@@ -2249,6 +2268,8 @@ def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> 
             if meta.get("superseded"):
                 continue
             event_type = meta.get("event_type", "")
+            if event_type == "constraint":
+                continue  # added below, from this project and entity only
             # Track recent activity (useful types only, up to 5)
             _NOISE_TYPES = {"session_respawn"}
             if len(recent_activity) < 5 and event_type not in _NOISE_TYPES:
@@ -2259,22 +2280,35 @@ def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> 
                     break
         # If no high-value memories found, fall back to most recent of any type
         if not recent:
-            recent = candidates[:5]
+            recent = [
+                n for n in candidates
+                if (n.metadata or {}).get("event_type") != "constraint"
+            ][:5]
     except Exception as e:
         logger.debug("Welcome recent memory filtering failed: %s", e)
+
+    _entity_id = None
+    if project:
+        try:
+            from omega_platform.entity.engine import resolve_project_entity
+            _entity_id = resolve_project_entity(project)
+        except Exception as e:
+            logger.debug("Welcome entity resolution failed: %s", e)
+    recent_ids = {n.id for n in recent}
+
+    # Standing rules: this project's and entity's constraints only (audit finding B5)
+    try:
+        for node in _constraints_in_scope(db, project, _entity_id):
+            if node.id not in recent_ids:
+                recent.append(node)
+                recent_ids.add(node.id)
+    except Exception as e:
+        logger.debug("Welcome constraint lookup failed: %s", e)
 
     # Ensure user_preference and user_fact are always represented
     # These types have 95-98% never-accessed rates because recency-based
     # selection misses older entries. Direct type queries fix this.
     try:
-        _entity_id = None
-        if project:
-            try:
-                from omega_platform.entity.engine import resolve_project_entity
-                _entity_id = resolve_project_entity(project)
-            except Exception as e:
-                logger.debug("Welcome entity resolution failed: %s", e)
-        recent_ids = {n.id for n in recent}
         _welcome_types = ("user_preference", "user_fact", "decision", "task_completion", "checkpoint", "session_summary", "behavioral_pattern")
         _limit_per_type = 8
         # Batch query: fetch all 7 types in one SQL call instead of 7 separate queries
@@ -2359,7 +2393,7 @@ def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> 
             label = type_labels.get(etype)
             if not label:
                 continue
-            text = (n.metadata or {}).get("observation") or n.content[:300]
+            text = ((n.metadata or {}).get("observation") or n.content)[:300]
             if label not in grouped:
                 grouped[label] = []
             if len(grouped[label]) < 7:
@@ -2492,6 +2526,7 @@ def get_session_context(
     project: Optional[str] = None,
     exclude_session: Optional[str] = None,
     limit: int = 5,
+    entity_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Gather all data needed for session start briefing.
 
@@ -2530,17 +2565,12 @@ def get_session_context(
     }
     context_items: list[Dict[str, str]] = []
 
-    # Always-surface constraints (separate budget, not recency-dependent)
+    # Always-surface this project's constraints (separate budget, not recency-dependent)
     try:
-        constraint_nodes = db.get_by_type("constraint", limit=10)
-        for node in constraint_nodes:
-            if (node.metadata or {}).get("superseded"):
-                continue
-            text = (node.metadata or {}).get("observation") or node.content[:300]
-            text = text.replace("\n", " ").strip()
-            context_items.append({"tag": "RULE", "text": text, "stability": "stable"})
-            if len(context_items) >= 3:
-                break
+        for node in _constraints_in_scope(db, project, entity_id, limit=3):
+            context_items.append(
+                {"tag": "RULE", "text": _constraint_text(node), "stability": "stable"}
+            )
     except Exception as e:
         logger.debug("Constraint surfacing failed: %s", e)
 

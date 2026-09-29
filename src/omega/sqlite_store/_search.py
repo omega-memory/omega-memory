@@ -445,6 +445,32 @@ class SearchMixin:
             ).fetchall()
         return [self._row_to_result(row) for row in rows]
 
+    def get_by_type_in_scope(
+        self,
+        event_type: str,
+        project: str,
+        entity_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[MemoryResult]:
+        """Active memories of one type stored in ``project``, newest first.
+
+        Includes those stored for ``entity_id`` and those stored for no
+        entity; with no ``entity_id``, only the latter. Unlike get_by_type(),
+        never returns another project's or another entity's memories.
+        """
+        rows = self._conn.execute(
+            """SELECT node_id, content, metadata, created_at,
+                      access_count, last_accessed, ttl_seconds
+               FROM memories
+               WHERE event_type = ? AND project = ?
+                 AND (entity_id IS ? OR entity_id IS NULL)
+                 AND COALESCE(status, 'active') != 'superseded'
+                 AND COALESCE(json_extract(metadata, '$.superseded'), 0) = 0
+               ORDER BY created_at DESC LIMIT ?""",
+            (event_type, project, entity_id, limit),
+        ).fetchall()
+        return [self._row_to_result(row) for row in rows]
+
     def get_by_session(self, session_id: str, limit: int = 100) -> List[MemoryResult]:
         """Get memories by session ID, sorted by recency."""
         rows = self._conn.execute(
