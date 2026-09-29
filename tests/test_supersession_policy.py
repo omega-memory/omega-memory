@@ -167,6 +167,12 @@ DISTINCT = (
     "Rate-limit the public API to 100 requests per minute per key.",
     "Rate-limit the admin API to 20 requests per minute per user.",
 )
+# A genuine update sharing 9 of 11 long words, so word overlap alone calls it a
+# duplicate; long enough (>= 80 chars) to pass the noise gate on hook captures.
+LONG_UPDATE = (
+    "Decision: the project uses Postgres for storage in every environment, including local development.",
+    "Decision: the project now uses SQLite for storage in every environment, including local development.",
+)
 # Long enough (>= 150 chars) for the bridge to add an observation summary.
 LONG_DISTINCT = (
     "Rate-limit the public API to 100 requests per minute per key. Bursts above "
@@ -344,6 +350,8 @@ def bridge_with_embeddings(_reset_bridge, monkeypatch):
         DISTINCT[1]: _near(_embedding(11.0)),
         LONG_DISTINCT[0]: _embedding(13.0),
         LONG_DISTINCT[1]: _near(_embedding(13.0)),
+        LONG_UPDATE[0]: _embedding(17.0),
+        LONG_UPDATE[1]: _near(_embedding(17.0)),
     }
 
     def fake(text, *args, **kwargs):
@@ -403,3 +411,15 @@ def test_candidate_record_survives_the_observation_summary(bridge_with_embedding
     node = bridge._get_store().get_node(new_id, track_access=False)
     assert node.metadata.get("observation")
     assert [c["target_id"] for c in node.metadata.get("supersession_candidates", [])] == [old_id]
+
+
+def test_update_is_not_swallowed_by_word_overlap_dedup(bridge_with_embeddings):
+    """9 of 11 words shared clears the 0.80 dedup bar; the update must still land."""
+    bridge = bridge_with_embeddings
+    old_id = _node_id(bridge.store(LONG_UPDATE[0], event_type="decision", project="/work/alpha"))
+
+    result = bridge.store(LONG_UPDATE[1], event_type="decision", project="/work/alpha")
+
+    assert result.startswith("Stored"), result
+    assert "[SUPERSEDED]" in result and old_id in result
+
