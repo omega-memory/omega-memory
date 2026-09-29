@@ -34,6 +34,7 @@ from omega.contradictions import detect_update_signal, distinguishing_tokens
 from omega.dedup_config import load_dedup_thresholds
 from omega.exceptions import ValidationError
 from omega.llm import llm_complete  # noqa: F401 — used in distill_trajectory, module-level for test patchability
+from omega.redaction import redact_secrets
 from omega.types import TTLCategory, AutoCaptureEventType
 
 logger = logging.getLogger("omega.bridge")
@@ -1096,6 +1097,14 @@ def auto_capture(
         if _body_stripped.startswith(("{", "[", '"filePath', '"type"')):
             return "**Memory Blocked** (JSON blob, not a decision)"
 
+    # A hook captures text as it passes by; nobody asked for it to be
+    # remembered, so credential-shaped values are stripped before anything is
+    # stored, tagged or compared (audit finding B2). The noise gates above see
+    # the original text, so redaction cannot make a capture "too short". An
+    # explicit store is left as is.
+    if _is_hook:
+        content, _ = redact_secrets(content)
+
     store = _get_store()
     meta = dict(metadata or {})
     meta["event_type"] = event_type
@@ -1366,6 +1375,9 @@ def auto_capture(
         ttl_seconds=ttl,
         entity_id=entity_id,
         agent_type=agent_type,
+        # A captured prompt or transcript line is not a statement that an
+        # older memory is obsolete: flag possible replacements, never retire.
+        allow_supersession=not _is_hook,
     )
 
     ttl_str = _human_ttl(ttl)

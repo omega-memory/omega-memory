@@ -423,3 +423,20 @@ def test_update_is_not_swallowed_by_word_overlap_dedup(bridge_with_embeddings):
     assert result.startswith("Stored"), result
     assert "[SUPERSEDED]" in result and old_id in result
 
+
+def test_hook_capture_flags_but_never_retires(bridge_with_embeddings):
+    """Audit B2: junk captured by a hook could retire a real decision."""
+    bridge = bridge_with_embeddings
+    assert detect_update_signal(LONG_UPDATE[1], LONG_UPDATE[0]) == "update_marker"
+    old_id = _node_id(bridge.store(LONG_UPDATE[0], event_type="decision", project="/work/alpha"))
+
+    result = bridge.auto_capture(
+        content=LONG_UPDATE[1],
+        event_type="decision",
+        metadata={"source": "auto_capture_hook"},
+        project="/work/alpha",
+    )
+
+    assert "[SUPERSEDED]" not in result
+    assert "[POSSIBLE UPDATE]" in result and old_id in result
+    assert _status(bridge._get_store(), old_id) == "active"
