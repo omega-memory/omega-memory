@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --daemon` and `omega serve install` accepted anonymous requests, and a page
   could reach them through DNS rebinding and read, write or delete memories.
   The daemon now rejects non-local Host and Origin headers and requires a
-  bearer key, kept in `~/.omega/mcp_api_key` (`OMEGA_MCP_API_KEY` overrides
-  it). **If you use the daemon, run `omega serve migrate-config` after
+  bearer key, kept in `mcp_api_key` in the OMEGA home (`~/.omega` unless
+  `OMEGA_HOME` is set; `OMEGA_MCP_API_KEY` overrides it). **If you use the daemon, run `omega serve migrate-config` after
   upgrading** so Claude Code sends the key; `omega doctor` flags an entry
   without it. The `[server]` extra now needs `mcp>=1.10`.
 - **Hook-injected memories are no longer called "ground truth".** The
