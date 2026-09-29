@@ -883,6 +883,70 @@ def _schedule_auto_relate(store, node_id: str) -> None:
 
 _MAX_CANDIDATES_SHOWN = 3
 
+# A completion dismisses a pending reminder only when both signals agree.
+_REMINDER_MIN_SIMILARITY = 0.75
+_REMINDER_MIN_SHARED_WORDS = 3
+_REMINDER_DUE_STAMP = re.compile(r"\n\[due: [^\]]+\]$")
+_TASK_FILLER_WORDS = frozenset({
+    "that", "this", "with", "will", "have", "from", "were", "been", "into",
+    "then", "than", "when", "what", "also", "them", "they", "your", "their",
+})
+
+
+def _task_words(text: str) -> set:
+    words = (w.strip(".,;:!?()[]'\"`").lower() for w in text.split())
+    return {w for w in words if len(w) > 3 and w not in _TASK_FILLER_WORDS}
+
+
+def _dismiss_completed_reminders(
+    store, node_id: str, content: str, scope: tuple
+) -> List[str]:
+    """Dismiss the pending reminders in ``scope`` that this completion closes.
+
+    A reminder is dismissed only when the completion is a close embedding
+    neighbour AND repeats at least three of its content words. The old rules
+    (any decision or completion, any project, cosine 0.40 or any three shared
+    words, checkpoints retired too) never ran because of a swallowed
+    AttributeError, and would have dismissed unrelated reminders (audit
+    finding B6). Dismissal mirrors dismiss_reminder(): the reminder is not
+    retired, and the caller reports the IDs.
+
+    Returns the dismissed reminder IDs.
+    """
+    embedding = store.get_embedding(node_id)
+    if not embedding:
+        return []
+    near = [
+        r for r in store.find_similar(embedding, limit=10)
+        if r.id != node_id
+        and r.relevance >= _REMINDER_MIN_SIMILARITY
+        and (r.metadata or {}).get("event_type") == "reminder"
+        and (r.metadata or {}).get("reminder_status") == "pending"
+    ]
+    scopes = store.get_scopes([r.id for r in near])
+    completed_words = _task_words(content)
+    now = datetime.now(timezone.utc).isoformat()
+    dismissed = []
+    for r in near:
+        if scopes.get(r.id) != scope:
+            continue
+        task = _REMINDER_DUE_STAMP.sub("", r.content)
+        if len(_task_words(task) & completed_words) < _REMINDER_MIN_SHARED_WORDS:
+            continue
+        reminder = store.get_node(r.id, track_access=False)
+        meta = dict(reminder.metadata or {})
+        meta.update(
+            reminder_status="dismissed",
+            dismissed_at=now,
+            dismissed_reason="completed",
+            dismissed_by=node_id,
+        )
+        store.update_node(r.id, metadata=meta)
+        dismissed.append(r.id)
+    if dismissed:
+        logger.info("Dismissed %d completed reminder(s) for %s", len(dismissed), node_id)
+    return dismissed
+
 
 def _format_supersession_report(report: List[Dict[str, Any]], new_id: str) -> str:
     """Render what a store() retired or flagged, for the store result."""
@@ -1175,12 +1239,13 @@ def auto_capture(
         except Exception as e:
             logger.debug(f"Pre-computed embedding generation failed: {e}")
 
+    # Dedup, evolution, conflict and reminder checks compare only against
+    # memories this write shares a scope with: collapsing into, or rewriting,
+    # another project's or entity's memory hides the write from its own scope
+    # and changes someone else's (audit findings B3, B6).
+    scope_project, scope_entity = store.resolve_scope(meta, entity_id)
+
     if dedup_threshold is not None or event_type in EVOLUTION_TYPES:
-        # Dedup, evolution and conflict checks compare only against memories
-        # this write would share a scope with: collapsing into, or rewriting,
-        # another project's or entity's memory hides the write from its own
-        # scope and changes someone else's (audit finding B3).
-        scope_project, scope_entity = store.resolve_scope(meta, entity_id)
         try:
             with store.untracked_lookup():
                 _similar_results = store.query(
@@ -1506,69 +1571,19 @@ def auto_capture(
         logger.debug(f"Atomic fact splitting failed for {node_id[:12]}: {e}")
 
     # ------------------------------------------------------------------
-    # Phase 4.5: Auto-supersede stale reminders
+    # Phase 4.5: A completed task dismisses the reminder it completes
     # ------------------------------------------------------------------
-    _COMPLETION_TYPES = {"decision", "task_completion"}
-    if event_type in _COMPLETION_TYPES:
+    if event_type == AutoCaptureEventType.TASK_COMPLETION and not _is_hook:
         try:
-            superseded_count = 0
-            superseded_ids: set = set()
-            content_words = {w.lower() for w in content.split() if len(w) > 3}
-
-            # --- Pass 1: Embedding similarity (threshold lowered to 0.40) ---
-            embedding = store.get_embedding(node_id)
-            if embedding:
-                similar = store.find_similar(embedding, limit=10)
-                for r in similar:
-                    if r.id == node_id:
-                        continue
-                    r_type = (r.metadata or {}).get("event_type")
-                    if r_type not in ("reminder", "checkpoint"):
-                        continue
-                    if (r.metadata or {}).get("superseded"):
-                        continue
-                    if r.relevance < 0.40:
-                        continue
-                    superseded_ids.add(r.id)
-
-            # --- Pass 2: Keyword matching (3+ word overlap, like task auto-resolve) ---
-            with store._lock:
-                pending_rows = store._conn.execute(
-                    "SELECT node_id, content FROM memories "
-                    "WHERE event_type = 'reminder' "
-                    "AND json_extract(metadata, '$.reminder_status') = 'pending'"
-                ).fetchall()
-            for r_id, r_content in pending_rows:
-                if r_id in superseded_ids:
-                    continue
-                r_words = {w.lower() for w in (r_content or "").split() if len(w) > 3}
-                matches = sum(1 for w in r_words if w in content_words)
-                if matches >= 3:
-                    superseded_ids.add(r_id)
-
-            # --- Apply: mark superseded AND set reminder_status = dismissed ---
-            for s_id in superseded_ids:
-                r_row = store.get(s_id)
-                if not r_row:
-                    continue
-                r_meta = dict(r_row.metadata or {})
-                r_meta["superseded"] = True
-                r_meta["superseded_by"] = node_id
-                r_meta["reminder_status"] = "dismissed"
-                r_meta["dismissed_at"] = datetime.now(timezone.utc).isoformat()
-                r_meta["dismissed_reason"] = "auto_superseded"
-                store.update_node(s_id, metadata=r_meta)
-                r_type = r_meta.get("event_type", "reminder")
-                store._log_forgetting_external(
-                    s_id, r_row.content, r_type,
-                    "auto_superseded", {"superseded_by": node_id},
-                )
-                superseded_count += 1
-            if superseded_count:
-                output += f" | superseded {superseded_count} reminder(s)"
-                logger.info(f"Auto-superseded {superseded_count} reminders for {node_id}")
-        except Exception as e:
-            logger.debug(f"Auto-supersede failed for {node_id}: {e}")
+            dismissed = _dismiss_completed_reminders(
+                store, node_id, content, (scope_project, scope_entity)
+            )
+        except Exception:
+            # The memory is already stored; report that, not a failed write.
+            logger.warning("Reminder completion check failed for %s", node_id, exc_info=True)
+            dismissed = []
+        if dismissed:
+            output += f" | dismissed completed reminder(s): {', '.join(dismissed)}"
 
     # ------------------------------------------------------------------
     # Phase 5: Implicit positive feedback — retrieval-then-store signal
