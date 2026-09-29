@@ -14,6 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the last `omega-memory` upload on PyPI, so fixes ship together instead of as
   back-to-back versions. `--early-release` records an owner-approved exception.
 
+### Security
+
+- **The optional HTTP daemon could be used by any web page.** `omega serve
+  --daemon` and `omega serve install` accepted anonymous requests, and a page
+  could reach them through DNS rebinding and read, write or delete memories.
+  The daemon now rejects non-local Host and Origin headers and requires a
+  bearer key, kept in `~/.omega/mcp_api_key` (`OMEGA_MCP_API_KEY` overrides
+  it). **If you use the daemon, run `omega serve migrate-config` after
+  upgrading** so Claude Code sends the key; `omega doctor` flags an entry
+  without it. The `[server]` extra now needs `mcp>=1.10`.
+- **Hook-injected memories are no longer called "ground truth".** The
+  CLAUDE.md block setup installs, and the memory text the session-start and
+  file hooks inject, now say it is stored data to weigh, not instructions.
+- **The Stop hook script no longer contains a usage upload.** An unused code
+  path could post session usage to a Supabase project named in the
+  environment; it is removed.
+
 ### Fixed
 
 - **Storing a memory could silently retire a different one, including
@@ -57,6 +74,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reminder auto-dismiss never ran.** It now dismisses a pending reminder
   only when an explicit task completion in the same project clearly
   matches it, and the store result names the reminder.
+- **With Pro installed, setup installed no hooks.** `omega setup` and `omega
+  hooks setup` looked for a manifest Core does not ship and exited with an
+  error; they now fall back to the core hooks. The setup summary marks a
+  failed step `[FAIL]` with its reason instead of `[OK]`, and `omega doctor`
+  checks each hook entry setup writes, not any command that mentions "omega".
+- **A fresh install's first search found nothing.** New installs now get the
+  bge-small-en-v1.5 embedding model, which the search thresholds are tuned
+  for, instead of all-MiniLM. Existing installs keep their model.
+- **Setup and doctor said OK without the MCP server package.** Without the
+  `[server]` extra they now fail and say how to install it.
+- **Hooks failed when OMEGA was installed under a path with a space.** Hook
+  commands are quoted; entries written by older versions are repaired.
+- **`omega setup --dry-run` changed files and downloaded models.** It now
+  only reports. The CLI honours `OMEGA_HOME`, `omega status` shows the
+  installed Pro version, and messages no longer quote tool counts.
+- **Hooks went silent, or slow, after a session ended.** A server that
+  idle-exited left its hook socket behind and every hook then waited 2 s on
+  it; a session that exited removed the socket another session was using.
+  Servers now remove only the socket they created, hook traffic keeps a
+  server alive, and hooks skip a dead socket at once.
+- **Hooks waited behind tool calls.** Tool calls ran on the loop that serves
+  hooks, and the first session start of the day ran maintenance before
+  answering. Both now happen off the hook path.
+- **README install steps failed on a default Mac.** They now state the
+  Python 3.11 requirement, install with pipx, uv or a venv, quote the
+  `[server]` extra, and no longer list commands, tools or links that do not
+  exist.
 - **Usage, diagnostic and council stats miscounted by up to a day.** Look-back
   windows compared stored `isoformat()` timestamps with SQLite `datetime()`
   text, the mismatch behind #83, which put rows from a window's first calendar
