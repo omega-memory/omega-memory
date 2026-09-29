@@ -170,11 +170,11 @@ def _maybe_analyze_behavior():
         _log_hook_error("behavioral_analysis", e)
 
 
-def run(payload: dict) -> None:
-    """Run periodic maintenance and emit the welcome briefing for one session."""
-    project = payload.get("project") or payload.get("cwd") or os.getcwd()
-    session_id = payload.get("session_id", "")
+def run_periodic_maintenance() -> None:
+    """Consolidate, compact, back up and analyse behaviour, each only when due.
 
+    Each step takes a marker file first, so concurrent sessions run it once.
+    """
     # Auto-consolidation check (lightweight, max once per 3 days)
     _maybe_auto_consolidate()
 
@@ -186,6 +186,20 @@ def run(payload: dict) -> None:
 
     # Behavioral pattern extraction (max once per 3 days)
     _maybe_analyze_behavior()
+
+
+def run(payload: dict, *, maintenance: bool = True) -> None:
+    """Emit the welcome briefing for one session, after periodic maintenance unless told not to.
+
+    The hook daemon passes ``maintenance=False`` and runs
+    :func:`run_periodic_maintenance` in the background, so the briefing does
+    not wait on seconds of consolidation.
+    """
+    project = payload.get("project") or payload.get("cwd") or os.getcwd()
+    session_id = payload.get("session_id", "")
+
+    if maintenance:
+        run_periodic_maintenance()
 
     try:
         from omega.bridge import welcome

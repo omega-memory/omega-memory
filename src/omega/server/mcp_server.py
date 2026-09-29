@@ -17,6 +17,7 @@ import random
 import socket
 import signal
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -384,6 +385,35 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Tool loop: one long-lived event loop, on its own thread, for tool handlers.
+# Handlers are ``async def`` but do synchronous DB and embedding work, so
+# awaiting them on the server's loop blocked it, and that loop also accepts
+# hook connections and runs the MCP transport: one query held every other
+# session's hooks. Handlers stay serialized as before, just not on the
+# server's loop. The loop is created once, never per call (a fresh
+# asyncio.run() per call grew memory by ~1.8 GB/hr).
+# ---------------------------------------------------------------------------
+_tool_loop: asyncio.AbstractEventLoop | None = None
+_tool_loop_lock = threading.Lock()
+
+
+def _get_tool_loop() -> asyncio.AbstractEventLoop:
+    global _tool_loop
+    with _tool_loop_lock:
+        if _tool_loop is None:
+            loop = asyncio.new_event_loop()
+            threading.Thread(target=loop.run_forever, name="omega-tools", daemon=True).start()
+            _tool_loop = loop
+        return _tool_loop
+
+
+async def _run_on_tool_loop(handler, arguments: dict) -> dict:
+    """Await ``handler(arguments)`` on the tool loop; cancellation propagates both ways."""
+    future = asyncio.run_coroutine_threadsafe(handler(arguments), _get_tool_loop())
+    return await asyncio.wrap_future(future)
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Dispatch tool call to the appropriate handler."""
@@ -424,11 +454,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
     try:
-        # Handlers are async def wrapping synchronous DB/embedding work.
-        # Call them directly — the previous run_in_executor + asyncio.run()
-        # pattern created a new event loop per call, causing ~1.8 GB/hr memory
-        # growth from fragmentation and retained references.
-        result = await handler(arguments)
+        # Handlers are async def wrapping synchronous DB/embedding work; see
+        # _get_tool_loop for why they run on their own persistent loop.
+        result = await _run_on_tool_loop(handler, arguments)
         # Extract text from MCP response format
         content_list = result.get("content", [{}])
         text = content_list[0].get("text", str(result)) if content_list else str(result)

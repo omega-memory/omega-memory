@@ -40,6 +40,9 @@ def _isolated_daemon(_reset_bridge, tmp_path, monkeypatch):
     monkeypatch.setattr(surface_memories, "_get_session_tool_names_fast", lambda session_id: [])
     hook_server._debounce_state.reset()
     yield
+    # SessionStart queues maintenance on a background thread; let it finish
+    # while HOME and the store still point at this test's temp directory.
+    handlers._MAINTENANCE_EXECUTOR.submit(lambda: None).result(timeout=60)
     hook_server._debounce_state.reset()
 
 

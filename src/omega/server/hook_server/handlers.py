@@ -9,8 +9,10 @@ fresh interpreter.
 
 from __future__ import annotations
 
+import functools
 import logging
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 
 from omega.hooks import assistant_capture, auto_capture, session_start, session_stop, surface_memories
 from omega.hooks._output import capture, captured_text
@@ -53,9 +55,23 @@ def _run_hook(hook_name: str, run: Callable[[dict], None], payload: dict) -> dic
     return {"output": captured_text(lines), "error": None}
 
 
+# Periodic maintenance (consolidate, compact, backup) takes seconds on a large
+# store. It runs here, after the briefing is sent, on its own thread so it
+# never occupies a hook worker.
+_MAINTENANCE_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="omega-maintenance")
+
+
+def _log_maintenance_failure(future: Future) -> None:
+    error = future.exception()
+    if error is not None:
+        _log_hook_error("session_start_maintenance", error)
+
+
 def handle_session_start(payload: dict) -> dict:
-    """SessionStart: periodic maintenance plus the welcome briefing."""
-    return _label_stored_data(_run_hook("session_start", session_start.run, payload))
+    """SessionStart: the welcome briefing now, periodic maintenance in the background."""
+    response = _run_hook("session_start", functools.partial(session_start.run, maintenance=False), payload)
+    _MAINTENANCE_EXECUTOR.submit(session_start.run_periodic_maintenance).add_done_callback(_log_maintenance_failure)
+    return _label_stored_data(response)
 
 
 def handle_session_stop(payload: dict) -> dict:
