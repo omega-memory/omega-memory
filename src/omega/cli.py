@@ -1,15 +1,18 @@
 """OMEGA CLI — Memory commands, setup, status, migration, and server management."""
 
 import argparse
+import importlib.util
 import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -50,7 +53,7 @@ def _parse_event_types_arg(value) -> list[str] | None:
     return [part.strip() for part in str(value).split(",") if part.strip()]
 
 
-OMEGA_DIR = Path.home() / ".omega"
+OMEGA_DIR = Path(os.environ.get("OMEGA_HOME", str(Path.home() / ".omega")))
 OMEGA_CACHE = Path.home() / ".cache" / "omega"
 MAGMA_DIR = Path.home() / ".magma"
 MAGMA_GRAPHS = Path.home() / ".claude" / "magma"
@@ -62,10 +65,16 @@ ONNX_MODEL_DIR = BGE_MODEL_DIR
 
 CLAUDE_MD_PATH = Path.home() / ".claude" / "CLAUDE.md"
 SETTINGS_JSON_PATH = Path.home() / ".claude" / "settings.json"
+CLAUDE_JSON_PATH = Path.home() / ".claude.json"
+CLAUDE_SCRIPTS_DIR = Path.home() / ".claude" / "scripts"
 DATA_DIR = Path(__file__).parent / "data"
 
 OMEGA_BEGIN = "<!-- OMEGA:BEGIN"
 OMEGA_END = "<!-- OMEGA:END -->"
+
+# The MCP server (and the hook daemon inside it) needs the `mcp` package,
+# which only the [server] extra installs. Quoted: zsh globs bare brackets.
+SERVER_EXTRA_INSTALL = 'pip install "omega-memory[server]"'
 
 
 def _python_has_omega(python_path: str) -> bool:
@@ -111,6 +120,20 @@ def _resolve_python_path() -> str:
     return exe or "python3"
 
 
+def _mcp_importable(python_path: str) -> bool:
+    """True when ``python_path`` has the MCP SDK the server needs (the [server] extra)."""
+    if python_path == sys.executable:
+        return importlib.util.find_spec("mcp") is not None
+    return _python_has_omega(python_path)
+
+
+def _mcp_missing_message(python_path: str) -> str:
+    return (
+        f"the 'mcp' package is not installed for {python_path}, so the MCP server "
+        f"(and the hook daemon inside it) cannot start. Install it with: {SERVER_EXTRA_INSTALL}"
+    )
+
+
 def _inject_claude_md(*, dry_run: bool = False):
     """Inject or update the OMEGA block in ~/.claude/CLAUDE.md (idempotent).
 
@@ -127,11 +150,7 @@ def _inject_claude_md(*, dry_run: bool = False):
         fragment_file = DATA_DIR / "claude-md-fragment.md"
     fragment = fragment_file.read_text()
 
-    if CLAUDE_MD_PATH.exists():
-        content = CLAUDE_MD_PATH.read_text()
-    else:
-        CLAUDE_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
-        content = ""
+    content = CLAUDE_MD_PATH.read_text() if CLAUDE_MD_PATH.exists() else ""
 
     if OMEGA_BEGIN in content:
         # Replace existing block (upgrade path)
@@ -150,19 +169,19 @@ def _inject_claude_md(*, dry_run: bool = False):
         print("  CLAUDE.md: OMEGA block updated")
     else:
         # First time — back up existing file if it has content
-        if content.strip():
-            backup_path = CLAUDE_MD_PATH.with_suffix(".md.pre-omega")
-            if not backup_path.exists():
-                if dry_run:
-                    print(f"  CLAUDE.md: would back up to {backup_path.name} (dry-run)")
-                    print("  CLAUDE.md: would append OMEGA block (dry-run)")
-                    return
-                backup_path.write_text(content)
-                print(f"  CLAUDE.md: backed up existing file to {backup_path.name}")
-        elif dry_run:
-            print("  CLAUDE.md: would create with OMEGA block (dry-run)")
+        backup_path = CLAUDE_MD_PATH.with_suffix(".md.pre-omega")
+        needs_backup = bool(content.strip()) and not backup_path.exists()
+        if dry_run:
+            if needs_backup:
+                print(f"  CLAUDE.md: would back up to {backup_path.name} (dry-run)")
+            action = "append" if content.strip() else "create with"
+            print(f"  CLAUDE.md: would {action} OMEGA block (dry-run)")
             return
+        if needs_backup:
+            backup_path.write_text(content)
+            print(f"  CLAUDE.md: backed up existing file to {backup_path.name}")
         separator = "\n" if content and not content.endswith("\n") else ""
+        CLAUDE_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
         CLAUDE_MD_PATH.write_text(content + separator + fragment)
         print("  CLAUDE.md: OMEGA block appended")
 
@@ -186,94 +205,139 @@ def _has_commercial_modules() -> bool:
     return False
 
 
+class HookSetupError(RuntimeError):
+    """settings.json could not be updated with OMEGA's hook entries."""
+
+
+def _hooks_manifest_path() -> Path:
+    """The hook manifest to install: the full one when shipped, otherwise the core one.
+
+    Core ships only ``hooks-core.json``. A ``hooks.json`` beside it comes from
+    an extension (Pro points ``DATA_DIR`` at its own hooks directory while it
+    installs). Choosing ``hooks.json`` merely because Pro was importable is
+    what left every Pro install with no hooks at all.
+    """
+    full = DATA_DIR / "hooks.json"
+    return full if full.exists() else DATA_DIR / "hooks-core.json"
+
+
+def _manifest_hooks(manifest: dict) -> Iterator[tuple[str, dict]]:
+    """Yield ``(event, hook_def)``; old manifests hold one dict per event, new ones a list."""
+    for event, hook_defs in manifest.items():
+        for hook_def in [hook_defs] if isinstance(hook_defs, dict) else hook_defs:
+            yield event, hook_def
+
+
+def _shell_join(argv: list[str]) -> str:
+    """Join argv into a command that Claude Code's shell splits back unchanged."""
+    if sys.platform == "win32":
+        return subprocess.list2cmdline(argv)
+    return shlex.join(argv)
+
+
+def _shell_split(command: str) -> list[str]:
+    """Split a hook command into words; unbalanced quotes fall back to whitespace."""
+    try:
+        if sys.platform == "win32":
+            return [word.strip('"') for word in shlex.split(command, posix=False)]
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
+
+
+def _file_name(word: str) -> str:
+    """Final path component, for either separator."""
+    return word.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _hook_command(python_path: str, hooks_src: Path, script: str) -> str:
+    """The settings.json command for a manifest ``script`` such as ``fast_hook.py session_start``."""
+    script_file, *script_args = script.split()
+    return _shell_join([python_path, str(hooks_src / script_file), *script_args])
+
+
+def _hook_identity(command: str) -> tuple[str, tuple[str, ...]] | None:
+    """``(script file name, arguments)`` of a hook command, however it was quoted.
+
+    Setup before 1.5.19 did not quote, so an install path with a space splits
+    into several words; the script is still the first word ending in ``.py``.
+    """
+    words = _shell_split(command)
+    for index, word in enumerate(words):
+        if _file_name(word).endswith(".py"):
+            return _file_name(word), tuple(words[index + 1:])
+    return None
+
+
+def _manifest_identity(script: str) -> tuple[str, tuple[str, ...]]:
+    script_file, *script_args = script.split()
+    return script_file, tuple(script_args)
+
+
+def _find_hook_command(hooks: dict, event: str, identity: tuple[str, tuple[str, ...]]) -> dict | None:
+    """The settings.json hook dict under ``event`` that runs ``identity``, if any."""
+    return next(
+        (h for entry in hooks.get(event, []) for h in entry.get("hooks", [])
+         if _hook_identity(h.get("command", "")) == identity),
+        None,
+    )
+
+
+def _read_settings_json() -> dict:
+    """Load ~/.claude/settings.json; a file we cannot parse is an error, never overwritten."""
+    if not SETTINGS_JSON_PATH.exists():
+        return {}
+    try:
+        settings = json.loads(SETTINGS_JSON_PATH.read_text())
+    except json.JSONDecodeError as error:
+        raise HookSetupError(
+            f"{SETTINGS_JSON_PATH} is malformed JSON ({error}); fix it, then run: omega hooks setup"
+        ) from error
+    if not isinstance(settings, dict):
+        raise HookSetupError(f"{SETTINGS_JSON_PATH} is not a JSON object; fix it, then run: omega hooks setup")
+    return settings
+
+
+def _merge_hook_entries(settings: dict, manifest: dict, hooks_src: Path, python_path: str) -> tuple[int, int, int]:
+    """Add or repair OMEGA's entries in ``settings`` in place.
+
+    Returns ``(configured, repaired, already_configured)``. An existing entry
+    for the same script and arguments is rewritten in place when its command
+    differs (moved install, or left unquoted by an older setup) rather than
+    duplicated.
+    """
+    hooks = settings.setdefault("hooks", {})
+    configured = repaired = skipped = 0
+    for event, hook_def in _manifest_hooks(manifest):
+        command = _hook_command(python_path, hooks_src, hook_def["script"])
+        existing = _find_hook_command(hooks, event, _manifest_identity(hook_def["script"]))
+        if existing is None:
+            hooks.setdefault(event, []).append({
+                "hooks": [{"command": command, "timeout": hook_def["timeout"], "type": "command"}],
+                "matcher": hook_def.get("matcher", ""),
+            })
+            configured += 1
+        elif existing["command"] != command:
+            existing["command"] = command
+            repaired += 1
+        else:
+            skipped += 1
+    return configured, repaired, skipped
+
+
 def _inject_settings_hooks(hooks_src: Path):
     """Inject OMEGA hook entries into ~/.claude/settings.json (idempotent).
 
-    Uses hooks-core.json for core-only installs, or hooks.json (full) when
-    commercial modules are available. Supports both old format (single dict
-    per event) and new format (list of dicts per event) in hooks.json manifest.
+    Installs the manifest chosen by :func:`_hooks_manifest_path`. Raises
+    :class:`HookSetupError` when settings.json cannot be parsed, so setup
+    reports the step as failed instead of printing a warning under [OK].
+    Pro wraps this function and requires it to take exactly one parameter.
     """
-    if _has_commercial_modules():
-        hooks_file = "hooks.json"
-    else:
-        hooks_file = "hooks-core.json"
-    manifest = json.loads((DATA_DIR / hooks_file).read_text())
+    manifest = json.loads(_hooks_manifest_path().read_text())
+    settings = _read_settings_json()
+    configured, repaired, skipped = _merge_hook_entries(settings, manifest, hooks_src, _resolve_python_path())
 
-    # Determine the python path: prefer the running interpreter
-    python_path = _resolve_python_path()
-
-    if SETTINGS_JSON_PATH.exists():
-        try:
-            settings = json.loads(SETTINGS_JSON_PATH.read_text())
-        except json.JSONDecodeError:
-            print("  WARNING: settings.json is malformed, skipping hook injection")
-            return
-    else:
-        SETTINGS_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
-        settings = {}
-
-    if "hooks" not in settings:
-        settings["hooks"] = {}
-
-    configured = 0
-    skipped = 0
-    repaired = 0
-
-    for event, hook_defs in manifest.items():
-        # Normalize: old format is a single dict, new format is a list of dicts
-        if isinstance(hook_defs, dict):
-            hook_defs = [hook_defs]
-
-        for hook_def in hook_defs:
-            script = hook_def["script"]
-            command = f"{python_path} {hooks_src / script}"
-
-            # Build a unique identifier for this hook (handles "fast_hook.py session_start" etc.)
-            # Strip .py and use the full script string for matching
-            script_key = script.replace(".py", "").replace(" ", "_")
-
-            # Check if this OMEGA hook is already wired (match by script_key in command)
-            existing_idx = None
-            existing_hook_idx = None
-            if event in settings["hooks"]:
-                for i, entry in enumerate(settings["hooks"][event]):
-                    for j, h in enumerate(entry.get("hooks", [])):
-                        cmd = h.get("command", "")
-                        if script_key in cmd.replace(".py", "").replace(" ", "_"):
-                            existing_idx = i
-                            existing_hook_idx = j
-                            break
-                    if existing_idx is not None:
-                        break
-
-            if existing_idx is not None:
-                # Hook exists — check if the path is correct
-                existing_cmd = settings["hooks"][event][existing_idx]["hooks"][existing_hook_idx]["command"]
-                if existing_cmd == command:
-                    skipped += 1
-                    continue
-                # Path changed (broken or outdated) — replace it
-                settings["hooks"][event][existing_idx]["hooks"][existing_hook_idx]["command"] = command
-                repaired += 1
-                continue
-
-            # Build the hook entry
-            entry = {
-                "hooks": [
-                    {
-                        "command": command,
-                        "timeout": hook_def["timeout"],
-                        "type": "command",
-                    }
-                ],
-                "matcher": hook_def.get("matcher", ""),
-            }
-
-            if event not in settings["hooks"]:
-                settings["hooks"][event] = []
-            settings["hooks"][event].append(entry)
-            configured += 1
-
+    SETTINGS_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_JSON_PATH.write_text(json.dumps(settings, indent=2) + "\n")
 
     if configured > 0:
@@ -282,8 +346,50 @@ def _inject_settings_hooks(hooks_src: Path):
         print(f"  settings.json: {repaired} hook(s) repaired (paths updated)")
     if skipped > 0:
         print(f"  settings.json: {skipped} hook(s) already configured")
-    if configured == 0 and skipped == 0:
-        print("  settings.json: hooks configured")
+
+
+def _plan_settings_hooks(hooks_src: Path) -> None:
+    """Print what :func:`_inject_settings_hooks` would change, without writing."""
+    manifest = json.loads(_hooks_manifest_path().read_text())
+    configured, repaired, skipped = _merge_hook_entries(
+        _read_settings_json(), manifest, hooks_src, _resolve_python_path()
+    )
+    print(
+        f"  settings.json: would configure {configured}, repair {repaired}, "
+        f"and leave {skipped} hook(s) as they are (dry-run)"
+    )
+
+
+def _check_settings_hooks(hooks_src: Path) -> tuple[int, int, list[str]]:
+    """Compare settings.json against the manifest setup would install.
+
+    Returns ``(wired, expected, problems)``. A hook counts as wired only when
+    an entry runs the manifest's script with the manifest's arguments; a
+    command that merely mentions "omega" does not. Missing hooks, and wired
+    hooks whose interpreter or script no longer exists, are listed in
+    ``problems``. Raises :class:`HookSetupError` for an unreadable settings.json.
+    """
+    manifest = json.loads(_hooks_manifest_path().read_text())
+    hooks = _read_settings_json().get("hooks", {})
+    wired = expected = 0
+    problems: list[str] = []
+    for event, hook_def in _manifest_hooks(manifest):
+        expected += 1
+        identity = _manifest_identity(hook_def["script"])
+        label = f"{event} {' '.join(identity[1]) or identity[0]}"
+        hook = _find_hook_command(hooks, event, identity)
+        if hook is None:
+            problems.append(f"{label}: not configured")
+            continue
+        wired += 1
+        words = _shell_split(hook["command"])
+        interpreter = words[0]
+        if not (Path(interpreter).exists() or ("/" not in interpreter and shutil.which(interpreter))):
+            problems.append(f"{label}: Python not found: {interpreter}")
+        script_path = next(word for word in words if _file_name(word) == identity[0])
+        if not Path(script_path).exists():
+            problems.append(f"{label}: script not found: {script_path}")
+    return wired, expected, problems
 
 
 def _download_file(url: str, target: Path) -> None:
@@ -363,36 +469,69 @@ def _download_minilm_model(target_dir: Path, errors_ref: list) -> bool:
     return True
 
 
-def _install_embedding_model(download_bge: bool, errors_ref: list, steps_done: list) -> None:
-    """Make sure a loadable embedding model is on disk.
+def _embedding_model_action(download_bge: bool) -> str:
+    """What setup does about the embedding model, before doing anything.
+
+    A fresh install gets bge-small-en-v1.5, the model the retrieval thresholds
+    are tuned for; all-MiniLM scores fall under the 0.60 vector floor, so the
+    first query of a MiniLM install found nothing. An existing MiniLM install
+    is kept: its stored vectors belong to MiniLM, and switching the model
+    under them would need a full re-embed.
+    """
+    if download_bge:
+        return "fetch-bge"
+    if not _missing_model_files(BGE_MODEL_DIR):
+        return "bge-present"
+    if (BGE_MODEL_DIR / "model.onnx").exists():
+        return "repair-bge"
+    if not _missing_model_files(MINILM_MODEL_DIR):
+        return "minilm-present"
+    if (MINILM_MODEL_DIR / "model.onnx").exists():
+        return "repair-minilm"
+    return "fetch-bge"
+
+
+_EMBEDDING_MODEL_PLANS = {
+    "fetch-bge": "Would download bge-small-en-v1.5 (~130MB) to {bge_dir}",
+    "bge-present": "bge-small-en-v1.5 already present",
+    "repair-bge": "Would complete the bge-small-en-v1.5 download (tokenizer missing)",
+    "minilm-present": "all-MiniLM-L6-v2 already present",
+    "repair-minilm": "Would complete the all-MiniLM-L6-v2 download (tokenizer missing)",
+}
+
+
+def _install_embedding_model(download_bge: bool, errors_ref: list, steps_done: list, dry_run: bool = False) -> None:
+    """Make sure a loadable embedding model is on disk (see :func:`_embedding_model_action`).
 
     "Present" means the weights *and* the tokenizer: installs made before
     1.5.17 have `model.onnx` alone (the tokenizer download 404'd), and those
     are completed here rather than reported as fine.
     """
-    if download_bge:
-        if _download_bge_model(BGE_MODEL_DIR, errors_ref):
-            steps_done.append("Embedding model (bge-small-en-v1.5)")
+    action = _embedding_model_action(download_bge)
+    if dry_run:
+        print(f"  {_EMBEDDING_MODEL_PLANS[action].format(bge_dir=BGE_MODEL_DIR)} (dry-run)")
+        steps_done.append("Embedding model")
         return
 
-    if not _missing_model_files(BGE_MODEL_DIR):
+    if action == "fetch-bge":
+        if _download_bge_model(BGE_MODEL_DIR, errors_ref):
+            steps_done.append("Embedding model (bge-small-en-v1.5)")
+    elif action == "bge-present":
         print(f"  ONNX model: bge-small-en-v1.5 at {BGE_MODEL_DIR}")
         steps_done.append("Embedding model (already present)")
-    elif (BGE_MODEL_DIR / "model.onnx").exists():
+    elif action == "repair-bge":
         print("  bge-small-en-v1.5 is missing its tokenizer; completing the download...")
         if _download_bge_model(BGE_MODEL_DIR, errors_ref):
             steps_done.append("Embedding model (repaired)")
-    elif not _missing_model_files(MINILM_MODEL_DIR):
+    elif action == "minilm-present":
         print(f"  ONNX model: all-MiniLM-L6-v2 at {MINILM_MODEL_DIR}")
         print("  TIP: Run 'omega setup --download-model' to upgrade to bge-small-en-v1.5")
         steps_done.append("Embedding model (already present)")
     else:
-        repairing = (MINILM_MODEL_DIR / "model.onnx").exists()
-        if repairing:
-            print("  all-MiniLM-L6-v2 is missing its tokenizer; completing the download...")
+        print("  all-MiniLM-L6-v2 is missing its tokenizer; completing the download...")
         if _download_minilm_model(MINILM_MODEL_DIR, errors_ref):
             print("  TIP: Run 'omega setup --download-model' to upgrade to bge-small-en-v1.5")
-            steps_done.append("Embedding model (repaired)" if repairing else "Embedding model (downloaded)")
+            steps_done.append("Embedding model (repaired)")
 
 
 def _download_reranker_model(steps_done: list, steps_skipped: list) -> None:
@@ -682,74 +821,105 @@ def cmd_timeline(args):
 # ---------------------------------------------------------------------------
 
 
-def _setup_claude_code(errors_ref: list, hooks_src: Path, hooks_only: bool = False, dry_run: bool = False):
+def _register_claude_code_mcp(python_path: str, errors_ref: list) -> bool:
+    """Register the stdio MCP server with Claude Code. Failures go to ``errors_ref``."""
+    step = "MCP server registration"
+    if not _mcp_importable(python_path):
+        errors_ref.append(f"{step}: {_mcp_missing_message(python_path)}")
+        print(f"  ERROR: {_mcp_missing_message(python_path)}")
+        return False
+    manual = f"claude mcp add -s user omega-memory -- {_shell_join([python_path])} -m omega.server.mcp_server"
+    print("  Registering MCP server with Claude Code...")
+    try:
+        result = subprocess.run(
+            ["claude", "mcp", "add", "-s", "user", "omega-memory", "--", python_path, "-m", "omega.server.mcp_server"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        errors_ref.append(f"{step}: 'claude' command not found in PATH")
+        print("  ERROR: 'claude' command not found in PATH.")
+        print("  Install Claude Code: https://docs.anthropic.com/en/docs/claude-code")
+        print(f"  Or register manually: {manual}")
+        return False
+    except (OSError, subprocess.SubprocessError) as error:
+        errors_ref.append(f"{step}: {error}")
+        print(f"  ERROR: MCP registration failed: {error}")
+        print(f"  Register manually: {manual}")
+        return False
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"exit code {result.returncode}"
+        errors_ref.append(f"{step}: claude mcp add failed ({detail})")
+        print(f"  ERROR: MCP registration returned code {result.returncode}")
+        if result.stderr:
+            print(f"  {result.stderr.strip()}")
+        print(f"  Register manually: {manual}")
+        return False
+    print("  MCP server registered successfully")
+    return True
+
+
+def _setup_claude_code(errors_ref: list, hooks_src: Path, hooks_only: bool = False, dry_run: bool = False) -> list[str]:
     """Claude Code-specific setup: MCP registration, hooks, CLAUDE.md.
 
-    If hooks_only=True, skips MCP server registration entirely. Hooks call
-    bridge.py directly (no MCP process needed), saving ~600MB RAM per session.
+    Returns the steps that succeeded (or, with ``dry_run``, that would run).
+    A failed step is appended to ``errors_ref`` as ``"<step>: <reason>"`` and
+    left out of the result, so the summary never prints [OK] beside it.
     """
-    if not hooks_only:
-        # Register MCP server with Claude Code
-        print("  Registering MCP server with Claude Code...")
-        python_path = _resolve_python_path()
-        try:
-            result = subprocess.run(
-                ["claude", "mcp", "add", "-s", "user", "omega-memory", "--", python_path, "-m", "omega.server.mcp_server"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                print("  MCP server registered successfully")
-            else:
-                errors_ref.append(1)
-                print(f"  ERROR: MCP registration returned code {result.returncode}")
-                if result.stderr:
-                    print(f"  {result.stderr.strip()}")
-                print(f"  Register manually: claude mcp add -s user omega-memory -- {python_path} -m omega.server.mcp_server")
-        except FileNotFoundError:
-            errors_ref.append(1)
-            print("  ERROR: 'claude' command not found in PATH.")
-            print("  Install Claude Code: https://docs.anthropic.com/en/docs/claude-code")
-            print(f"  Or register manually: claude mcp add -s user omega-memory -- {python_path} -m omega.server.mcp_server")
-        except Exception as e:
-            errors_ref.append(1)
-            print(f"  ERROR: MCP registration failed: {e}")
-            print(f"  Register manually: claude mcp add -s user omega-memory -- {python_path} -m omega.server.mcp_server")
-    else:
+    done: list[str] = []
+    python_path = _resolve_python_path()
+
+    if hooks_only:
         print("  Skipping MCP server registration (--hooks-only mode)")
-        print("  Hooks will call bridge.py directly (~600MB RAM saved per session)")
-        print("  Note: omega_store, omega_query etc. won't be available as Claude tools")
-        print("  To add MCP later: omega setup --client claude-code")
-
-    # Install hooks
-    hooks_dst = Path.home() / ".claude" / "scripts"
-    hooks_dst.mkdir(parents=True, exist_ok=True)
-
-    hook_files = ["session_start.py", "session_stop.py", "surface_memories.py", "auto_capture.py"]
-    for hook in hook_files:
-        src = hooks_src / hook
-        dst = hooks_dst / f"omega-{hook}"
-        if src.exists():
-            shutil.copy2(src, dst)
-            if sys.platform != "win32":
-                dst.chmod(0o755)
-            print(f"  Installed hook: {dst.name}")
+        print("  NOTE: the hook daemon runs inside the OMEGA MCP server. Without a registered")
+        print("  server Claude Code starts none, so these hooks capture and surface nothing.")
+        print("  To add the server: omega setup --client claude-code")
+    elif dry_run:
+        if _mcp_importable(python_path):
+            print("  Would register the MCP server with: claude mcp add -s user omega-memory (dry-run)")
+            done.append("MCP server registration")
         else:
-            print(f"  WARNING: Hook source not found: {src}")
+            errors_ref.append(f"MCP server registration: {_mcp_missing_message(python_path)}")
+            print(f"  ERROR: {_mcp_missing_message(python_path)}")
+    elif _register_claude_code_mcp(python_path, errors_ref):
+        done.append("MCP server registration")
 
-    # Wire hooks into settings.json
+    # Copies for settings written before the fast_hook manifest, which ran
+    # these scripts from ~/.claude/scripts directly.
+    hook_files = ["session_start.py", "session_stop.py", "surface_memories.py", "auto_capture.py"]
+    if dry_run:
+        print(f"  Would copy {len(hook_files)} legacy hook scripts to {CLAUDE_SCRIPTS_DIR} (dry-run)")
+    else:
+        CLAUDE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+        for hook in hook_files:
+            src = hooks_src / hook
+            dst = CLAUDE_SCRIPTS_DIR / f"omega-{hook}"
+            if src.exists():
+                shutil.copy2(src, dst)
+                if sys.platform != "win32":
+                    dst.chmod(0o755)
+                print(f"  Installed hook: {dst.name}")
+            else:
+                print(f"  WARNING: Hook source not found: {src}")
+
     try:
-        _inject_settings_hooks(hooks_src)
+        if dry_run:
+            _plan_settings_hooks(hooks_src)
+        else:
+            _inject_settings_hooks(hooks_src)
+        done.append("Hooks (settings.json)")
     except Exception as e:
-        errors_ref.append(1)
+        errors_ref.append(f"Hooks (settings.json): {e}")
         print(f"  ERROR: Failed to configure settings.json hooks: {e}")
 
-    # Inject OMEGA block into CLAUDE.md
     try:
         _inject_claude_md(dry_run=dry_run)
+        done.append("CLAUDE.md instructions")
     except Exception as e:
         print(f"  WARNING: Failed to update CLAUDE.md: {e}")
+
+    return done
 
 
 def _mcp_server_json_snippet() -> str:
@@ -854,7 +1024,7 @@ def cmd_hooks(args):
 
         if not (hooks_src / "fast_hook.py").exists():
             print("\n  ERROR: fast_hook.py not found at expected location.")
-            print("  Try reinstalling: pip install omega-memory[server]")
+            print(f"  Try reinstalling: {SERVER_EXTRA_INSTALL}")
             sys.exit(1)
 
         try:
@@ -887,42 +1057,19 @@ def cmd_hooks(args):
         else:
             print(f"  fast_hook:  MISSING ({fh})")
 
-        # Check settings.json has hooks
-        if SETTINGS_JSON_PATH.exists():
-            try:
-                settings = json.loads(SETTINGS_JSON_PATH.read_text())
-                hooks = settings.get("hooks", {})
-                events_with_omega = 0
-                broken_paths = []
-                for event, entries in hooks.items():
-                    for entry in entries:
-                        for h in entry.get("hooks", []):
-                            cmd = h.get("command", "")
-                            if "omega" in cmd.lower() or "fast_hook" in cmd:
-                                events_with_omega += 1
-                                # Check if the path in the command exists
-                                parts = cmd.split()
-                                if len(parts) >= 2:
-                                    py_path = parts[0]
-                                    script_path = parts[1]
-                                    if not Path(py_path).exists():
-                                        broken_paths.append(f"{event}: Python not found: {py_path}")
-                                    if not Path(script_path).exists():
-                                        broken_paths.append(f"{event}: Script not found: {script_path}")
-
-                print(f"  settings:   {events_with_omega} OMEGA hook events configured")
-                if broken_paths:
-                    print(f"  BROKEN:     {len(broken_paths)} path issue(s)")
-                    for bp in broken_paths:
-                        print(f"    - {bp}")
-                    print("\n  Fix with: omega hooks setup")
-                else:
-                    print("  paths:      All OK")
-            except json.JSONDecodeError:
-                print("  settings:   MALFORMED (~/.claude/settings.json)")
+        try:
+            wired, expected, problems = _check_settings_hooks(hooks_src)
+        except HookSetupError as error:
+            print(f"  settings:   UNREADABLE ({error})")
         else:
-            print("  settings:   NOT FOUND (~/.claude/settings.json)")
-            print("\n  Fix with: omega hooks setup")
+            print(f"  settings:   {wired}/{expected} OMEGA hooks configured")
+            if problems:
+                print(f"  BROKEN:     {len(problems)} problem(s)")
+                for problem in problems:
+                    print(f"    - {problem}")
+                print("\n  Fix with: omega hooks setup")
+            else:
+                print("  paths:      All OK")
 
         # The daemon runs inside the MCP server; without it core hooks are skipped
         state, detail = _probe_hook_daemon()
@@ -1079,62 +1226,74 @@ def _setup_venv(errors_ref: list, hooks_src: Path):
         print(f"    {line}")
 
 
-def _setup_claude_desktop(errors_ref: list, hooks_src: Path, dry_run: bool = False):
-    """Claude Desktop setup: inject MCP entry into claude_desktop_config.json."""
-    # Determine config path
+def _setup_claude_desktop(errors_ref: list, hooks_src: Path, dry_run: bool = False) -> list[str]:
+    """Claude Desktop setup: inject MCP entry into claude_desktop_config.json.
+
+    Returns the steps that succeeded; failures go to ``errors_ref`` as
+    ``"<step>: <reason>"``.
+    """
+    step = "Claude Desktop MCP registration"
+    done: list[str] = []
     if sys.platform == "darwin":
         config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
     else:
         appdata = os.environ.get("APPDATA", "")
         if not appdata:
-            errors_ref.append(1)
+            errors_ref.append(f"{step}: APPDATA is not set, so the Claude Desktop config cannot be found")
             print("  ERROR: APPDATA not set, cannot find Claude Desktop config")
-            return
+            return done
         config_path = Path(appdata) / "Claude" / "claude_desktop_config.json"
 
     python_path = _resolve_python_path()
-    mcp_entry = {
-        "command": python_path,
-        "args": ["-m", "omega.server.mcp_server"],
-    }
-
-    # Read or create config
-    if config_path.exists():
-        try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            print(f"  WARNING: Could not parse existing config ({e}), creating new")
-            config = {}
+    if not _mcp_importable(python_path):
+        errors_ref.append(f"{step}: {_mcp_missing_message(python_path)}")
+        print(f"  ERROR: {_mcp_missing_message(python_path)}")
     else:
-        config = {}
+        mcp_entry = {
+            "command": python_path,
+            "args": ["-m", "omega.server.mcp_server"],
+        }
 
-    if "mcpServers" not in config:
-        config["mcpServers"] = {}
-
-    # Check if already configured and up to date
-    existing = config["mcpServers"].get("omega-memory")
-    if existing and existing.get("command") == python_path:
-        print("  Claude Desktop: omega-memory already configured")
-    else:
-        config["mcpServers"]["omega-memory"] = mcp_entry
-        if dry_run:
-            print(f"  Claude Desktop: would write MCP entry to {config_path} (dry-run)")
+        # Read or create config
+        if config_path.exists():
+            try:
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"  WARNING: Could not parse existing config ({e}), creating new")
+                config = {}
         else:
-            # Back up existing config
-            if config_path.exists():
-                backup = config_path.with_suffix(".json.bak")
-                if not backup.exists():
-                    shutil.copy2(config_path, backup)
-                    print(f"  Backed up config to {backup.name}")
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-            print(f"  Claude Desktop: MCP server registered in {config_path}")
+            config = {}
+
+        if "mcpServers" not in config:
+            config["mcpServers"] = {}
+
+        # Check if already configured and up to date
+        existing = config["mcpServers"].get("omega-memory")
+        if existing and existing.get("command") == python_path:
+            print("  Claude Desktop: omega-memory already configured")
+        else:
+            config["mcpServers"]["omega-memory"] = mcp_entry
+            if dry_run:
+                print(f"  Claude Desktop: would write MCP entry to {config_path} (dry-run)")
+            else:
+                # Back up existing config
+                if config_path.exists():
+                    backup = config_path.with_suffix(".json.bak")
+                    if not backup.exists():
+                        shutil.copy2(config_path, backup)
+                        print(f"  Backed up config to {backup.name}")
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                print(f"  Claude Desktop: MCP server registered in {config_path}")
+        done.append(step)
 
     # Inject CLAUDE.md (reuse existing function)
     try:
         _inject_claude_md(dry_run=dry_run)
+        done.append("CLAUDE.md instructions")
     except Exception as e:
         print(f"  WARNING: Failed to update CLAUDE.md: {e}")
+    return done
 
 
 def cmd_setup(args):
@@ -1172,20 +1331,32 @@ def cmd_setup(args):
     steps_done = []
     steps_skipped = []
     files_modified = []
+    if dry_run:
+        print("  Dry run: nothing will be written or downloaded.")
 
     # 1. Create directories with restricted permissions
-    OMEGA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    (OMEGA_DIR / "graphs").mkdir(exist_ok=True, mode=0o700)
-    print(f"  Created {OMEGA_DIR}")
+    if dry_run:
+        print(f"  Would create {OMEGA_DIR} (dry-run)")
+    else:
+        OMEGA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        (OMEGA_DIR / "graphs").mkdir(exist_ok=True, mode=0o700)
+        print(f"  Created {OMEGA_DIR}")
     steps_done.append("Storage directory")
 
     # 2. Download ONNX model
-    _install_embedding_model(download_model, errors, steps_done)
+    model_errors: list = []
+    _install_embedding_model(download_model, model_errors, steps_done, dry_run=dry_run)
+    errors.extend(f"Embedding model: {error}" for error in model_errors)
 
     # 3. Check for existing MAGMA model and symlink
     gnosis_model = Path.home() / ".cache" / "gnosis" / "models" / "all-MiniLM-L6-v2-onnx"
     minilm_model_path = MINILM_MODEL_DIR / "model.onnx"
-    if gnosis_model.exists() and not minilm_model_path.exists() and not (BGE_MODEL_DIR / "model.onnx").exists():
+    if (
+        not dry_run
+        and gnosis_model.exists()
+        and not minilm_model_path.exists()
+        and not (BGE_MODEL_DIR / "model.onnx").exists()
+    ):
         print(f"  Found existing model at {gnosis_model}, creating symlink...")
         if MINILM_MODEL_DIR.exists():
             shutil.rmtree(MINILM_MODEL_DIR)
@@ -1193,19 +1364,26 @@ def cmd_setup(args):
         print("  Symlinked to existing model")
 
     # 3b. Reranker: fetch it now rather than during the first capture of a session
-    _download_reranker_model(steps_done, steps_skipped)
+    if dry_run:
+        print("  Would fetch the reranker model if it is not present (dry-run)")
+        steps_done.append("Reranker model")
+    else:
+        _download_reranker_model(steps_done, steps_skipped)
 
     # 4. Create default config
     config_path = OMEGA_DIR / "config.json"
     if not config_path.exists():
-        config = {
-            "storage_path": str(OMEGA_DIR),
-            "model_dir": str(ONNX_MODEL_DIR),
-            "entity_scoping": {"enabled": False},
-        }
-        config_path.write_text(json.dumps(config, indent=2))
-        config_path.chmod(0o600)
-        print(f"  Created config at {config_path}")
+        if dry_run:
+            print(f"  Would create config at {config_path} (dry-run)")
+        else:
+            config = {
+                "storage_path": str(OMEGA_DIR),
+                "model_dir": str(ONNX_MODEL_DIR),
+                "entity_scoping": {"enabled": False},
+            }
+            config_path.write_text(json.dumps(config, indent=2))
+            config_path.chmod(0o600)
+            print(f"  Created config at {config_path}")
     steps_done.append("Config file")
 
     # 5. Client-specific setup
@@ -1218,22 +1396,18 @@ def cmd_setup(args):
         "antigravity": _setup_antigravity,
         "venv": _setup_venv,
     }
+    # These two write a config file; the rest only print a snippet.
+    _CLIENTS_THAT_WRITE = {"codex", "antigravity"}
     if client == "claude-code":
-        _setup_claude_code(errors, hooks_src, hooks_only=hooks_only, dry_run=dry_run)
+        steps_done.extend(_setup_claude_code(errors, hooks_src, hooks_only=hooks_only, dry_run=dry_run))
         if hooks_only:
-            steps_done.append("MCP server registration (skipped — hooks-only)")
-        else:
-            steps_done.append("MCP server registration")
-        steps_done.append("Hooks (settings.json)")
-        steps_done.append("CLAUDE.md instructions")
+            steps_skipped.append("MCP server registration (--hooks-only: hooks will not run without it)")
         files_modified.append("~/.claude/settings.json (hook entries)")
         files_modified.append("~/.claude/CLAUDE.md (OMEGA instruction block)")
         if not hooks_only:
             files_modified.append("~/.claude.json (MCP server entry)")
     elif client == "claude-desktop":
-        _setup_claude_desktop(errors, hooks_src, dry_run=dry_run)
-        steps_done.append("Claude Desktop MCP registration")
-        steps_done.append("CLAUDE.md instructions")
+        steps_done.extend(_setup_claude_desktop(errors, hooks_src, dry_run=dry_run))
         if sys.platform == "darwin":
             config_display = "~/Library/Application Support/Claude/claude_desktop_config.json"
         else:
@@ -1241,19 +1415,37 @@ def cmd_setup(args):
         files_modified.append(f"{config_display} (MCP server entry)")
         files_modified.append("~/.claude/CLAUDE.md (OMEGA instruction block)")
     elif client in _CLIENT_SETUP:
-        _CLIENT_SETUP[client](errors, hooks_src)
+        if dry_run and client in _CLIENTS_THAT_WRITE:
+            print(f"  Would write the omega-memory MCP entry to the {client} config (dry-run)")
+        else:
+            _CLIENT_SETUP[client](errors, hooks_src)
         steps_done.append(f"MCP config snippet ({client})")
         steps_skipped.append(f"Hooks (not available for {client})")
     else:
         steps_skipped.append("MCP server registration (no client specified)")
         steps_skipped.append("Hooks (no client specified)")
         python_path = _resolve_python_path()
-        print("\n  MCP server ready. Add to your client:")
-        print(f"    Command: {python_path} -m omega.server.mcp_server")
-        print("    Transport: stdio")
+        if _mcp_importable(python_path):
+            print("\n  MCP server ready. Add to your client:")
+            print(f"    Command: {python_path} -m omega.server.mcp_server")
+            print("    Transport: stdio")
+        else:
+            errors.append(f"MCP server: {_mcp_missing_message(python_path)}")
+            print(f"\n  ERROR: {_mcp_missing_message(python_path)}")
 
     # ── Summary ───────────────────────────────────────────────────────
     print()
+    if dry_run:
+        print("OMEGA setup dry run: nothing was changed. Setup would run:")
+        for step in steps_done:
+            print(f"  [PLAN] {step}")
+        for err in errors:
+            print(f"  [FAIL] {err}")
+        for step in steps_skipped:
+            print(f"  [SKIP] {step}")
+        if errors:
+            sys.exit(1)
+        return
     if errors:
         print(f"OMEGA setup completed with {len(errors)} error(s).")
         for step in steps_done:
@@ -1276,7 +1468,7 @@ def cmd_setup(args):
         for step in steps_skipped:
             print(f"  [SKIP] {step}")
         if files_modified:
-            print("\n  Files modified outside ~/.omega/:")
+            print(f"\n  Files modified outside {OMEGA_DIR}:")
             for f in files_modified:
                 print(f"    {f}")
         print(f"\n  Storage: {OMEGA_DIR}")
@@ -1300,9 +1492,8 @@ def cmd_setup(args):
             print("  ┌─────────────────────────────────────────────────────┐")
             print("  │  Unlock the full platform with OMEGA Pro            │")
             print("  │                                                     │")
-            print("  │  + 98 Pro tools: coordination, LLM routing,         │")
+            print("  │  + Multi-agent coordination, LLM routing,           │")
             print("  │    knowledge base, entity management, oracle        │")
-            print("  │  + Multi-agent coordination (53 tools)              │")
             print("  │  + Cloud sync via your own Supabase                 │")
             print("  │                                                     │")
             print("  │  $19/mo  ·  14-day money-back guarantee             │")
@@ -1395,10 +1586,14 @@ def cmd_status(args):
 
     # Pro ships as a separate wheel installed alongside Core. Ask packaging
     # metadata rather than importing omega_platform, so Core stays self-contained.
-    try:
-        data["platform_version"] = _pkg_version("omega-platform")
-    except PackageNotFoundError:
-        pass
+    # The published wheel is omega-memory-pro; omega-platform is the name a
+    # source checkout of the private repository installs under.
+    for pro_distribution in ("omega-memory-pro", "omega-platform"):
+        try:
+            data["platform_version"] = _pkg_version(pro_distribution)
+            break
+        except PackageNotFoundError:
+            continue
 
     # Cloud
     secrets_path = OMEGA_DIR / "secrets.json"
@@ -1495,7 +1690,7 @@ def cmd_status(args):
             mem_count = data.get("memories", 0)
             if mem_count >= 1500:
                 print(f"\n  You have {mem_count:,} memories (limit: 2,000). Pro removes limits.")
-            print("  Pro: coordination, routing, knowledge base, and 95 more tools. $19/mo")
+            print("  Pro: coordination, routing, knowledge base and more. $19/mo")
             print("  Run 'omega upgrade' or visit https://omegamax.co/pro?ref=cli-status")
 
     if not use_json:
@@ -2632,12 +2827,17 @@ def cmd_doctor(args):
     else:
         warn("omega.db not found (will be created on first use)")
 
-    # 4. MCP registration (client-specific)
+    # 4. MCP server: can it start at all, and is it registered (client-specific)
     client = getattr(args, "client", None)
     check_claude = client == "claude-code" or shutil.which("claude")
+    if not use_json:
+        print_section("MCP Server (Claude Code)" if check_claude else "MCP Server")
+    server_python = _resolve_python_path()
+    if _mcp_importable(server_python):
+        ok(f"MCP package available ({server_python})")
+    else:
+        fail(f"MCP server cannot start: {_mcp_missing_message(server_python)}")
     if check_claude:
-        if not use_json:
-            print_section("MCP Server (Claude Code)")
         try:
             result = subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True, timeout=5)
             if "omega-memory" in result.stdout:
@@ -2645,17 +2845,11 @@ def cmd_doctor(args):
             else:
                 fail("omega-memory NOT registered in Claude Code")
                 if not use_json:
-                    print("    Run: claude mcp add -s user omega-memory -- python3 -m omega.server.mcp_server")
+                    print(f"    Run: claude mcp add -s user omega-memory -- {_shell_join([server_python])} -m omega.server.mcp_server")
         except FileNotFoundError:
             warn("Claude Code CLI not found (cannot verify MCP registration)")
         except Exception as e:
             warn(f"MCP check failed: {e}")
-    else:
-        if not use_json:
-            print_section("MCP Server")
-        python_path = _resolve_python_path()
-        ok(f"MCP server available: {python_path} -m omega.server.mcp_server")
-
     # Claude Desktop config check
     if not use_json:
         print_section("Claude Desktop")
@@ -2852,34 +3046,28 @@ def cmd_doctor(args):
     else:
         ok("Hook daemon not running (no MCP server active; it starts with Claude Code)")
 
-    # 9. Hooks configuration (Claude Code-specific)
+    # 9. Hooks configuration (Claude Code-specific): the entries setup would
+    # write, checked one by one, not any command that happens to say "omega"
     check_hooks = client == "claude-code" or SETTINGS_JSON_PATH.exists()
     if check_hooks:
         if not use_json:
             print_section("Hooks (Claude Code)")
-        if SETTINGS_JSON_PATH.exists():
-            try:
-                settings = json.loads(SETTINGS_JSON_PATH.read_text())
-                hooks = settings.get("hooks", {})
-                expected_events = ["SessionStart", "Stop", "PostToolUse"]
-                for event in expected_events:
-                    found = False
-                    for entry in hooks.get(event, []):
-                        for h in entry.get("hooks", []):
-                            if "omega" in h.get("command", ""):
-                                found = True
-                                cmd_parts = h["command"].split()
-                                if cmd_parts and not Path(cmd_parts[0]).exists():
-                                    warn(f"{event} hook references {cmd_parts[0]} which doesn't exist")
-                                break
-                    if found:
-                        ok(f"{event} hook configured")
-                    else:
-                        warn(f"{event} hook not configured")
-            except Exception as e:
-                warn(f"Cannot read settings.json: {e}")
+        # Missing hooks are a failure where Claude Code is in use, else a warning.
+        report_missing = fail if check_claude else warn
+        try:
+            wired, expected, problems = _check_settings_hooks(_resolve_hooks_src())
+        except HookSetupError as error:
+            fail(str(error))
         else:
-            warn("settings.json not found (hooks not configured)")
+            summary = f"{wired}/{expected} OMEGA hooks configured"
+            if wired == expected and not problems:
+                ok(summary)
+            elif wired < expected:
+                missing = [p for p in problems if p.endswith("not configured")]
+                report_missing(f"{summary} (missing: {'; '.join(missing)}). Run: omega hooks setup")
+            for problem in problems:
+                if not problem.endswith("not configured"):
+                    fail(f"Hook {problem}. Run: omega hooks setup")
 
     # 6. Python path
     if not use_json:
@@ -2925,9 +3113,9 @@ def cmd_doctor(args):
         try:
             from omega.plugins import has_capability
             if not has_capability("pro_tools"):
-                print("\n  Upgrade to Pro: 98 more tools. Run 'omega upgrade' or visit https://omegamax.co/pro?ref=cli-doctor")
+                print("\n  Upgrade to Pro for coordination, routing and the knowledge base. Run 'omega upgrade' or visit https://omegamax.co/pro?ref=cli-doctor")
         except Exception:
-            print("\n  Upgrade to Pro: 98 more tools. Run 'omega upgrade' or visit https://omegamax.co/pro?ref=cli-doctor")
+            print("\n  Upgrade to Pro for coordination, routing and the knowledge base. Run 'omega upgrade' or visit https://omegamax.co/pro?ref=cli-doctor")
 
     if not use_json:
         _offer_email_capture()
@@ -3153,8 +3341,7 @@ def _offer_email_capture():
     """Offer email capture for users approaching or at the memory cap."""
     try:
         import sqlite3
-        from pathlib import Path
-        db_path = Path.home() / ".omega" / "omega.db"
+        db_path = OMEGA_DIR / "omega.db"
         if not db_path.exists():
             return
         conn = sqlite3.connect(str(db_path), timeout=5)
@@ -3497,7 +3684,7 @@ def cmd_activate(args):
     if _download_and_install_pro_wheel(key):
         print("  Pro package installed.")
         print()
-        print("  Pro license activated! 69 Pro tools now available.")
+        print("  Pro license activated! Pro tools are now available.")
         print()
         print("  Next steps:")
         print("    omega doctor                         # Verify installation")
@@ -3776,7 +3963,7 @@ def main():
     parser = argparse.ArgumentParser(
         prog="omega",
         description="OMEGA — Persistent memory for AI coding agents",
-        epilog="Pro: 98 more tools (coordination, routing, knowledge base). Run 'omega upgrade' for details.",
+        epilog="Pro adds coordination, routing and a knowledge base. Run 'omega upgrade' for details.",
     )
     parser.add_argument(
         "--version",

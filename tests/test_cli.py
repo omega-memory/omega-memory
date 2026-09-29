@@ -497,13 +497,15 @@ class TestInjectSettingsHooks:
                     assert "type" in h
                     assert h["type"] == "command"
 
-    def test_malformed_settings_json_skips(self, capsys):
-        """If settings.json is malformed, injection should warn and skip."""
+    def test_malformed_settings_json_is_reported_and_left_untouched(self):
+        """A malformed settings.json fails the hooks step (setup reports [FAIL]) and is not overwritten."""
+        from omega.cli import HookSetupError
+
         self.settings_json.parent.mkdir(parents=True, exist_ok=True)
         self.settings_json.write_text("{ not valid json")
-        _inject_settings_hooks(self.hooks_src)
-        out = capsys.readouterr().out
-        assert "malformed" in out.lower()
+        with pytest.raises(HookSetupError, match="malformed"):
+            _inject_settings_hooks(self.hooks_src)
+        assert self.settings_json.read_text() == "{ not valid json"
 
 
 # ============================================================================
