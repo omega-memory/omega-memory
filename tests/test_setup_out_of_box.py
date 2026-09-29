@@ -231,7 +231,7 @@ def _by_status(report: dict, status: str) -> list[str]:
 def test_doctor_fails_when_settings_has_no_omega_hooks_even_if_commands_mention_omega(
     claude_home, core_only_data_dir, monkeypatch, capsys
 ):
-    unrelated = "/Users/omega-fan/bin/python3 /Users/omega-fan/lint.py"
+    unrelated = "/Users/someone/omega-fan/bin/python3 /Users/someone/omega-fan/lint.py"
     (claude_home / ".claude" / "settings.json").write_text(json.dumps({
         "hooks": {event: [{"hooks": [{"command": unrelated, "type": "command"}], "matcher": ""}]
                   for event in ("SessionStart", "Stop", "PostToolUse", "UserPromptSubmit")}
