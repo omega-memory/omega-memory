@@ -17,6 +17,7 @@ from ._types import (
     SurfacingContext,
     QueryIntent,
     MemoryResult,
+    SupersessionRecord,
     EMBEDDING_DIM,
     SCHEMA_VERSION,
     _cosine_similarity,
@@ -36,6 +37,7 @@ from ._types import (
 __all__ = [
     "SQLiteStore",
     "MemoryResult",
+    "SupersessionRecord",
     "SurfacingContext",
     "QueryIntent",
     "EMBEDDING_DIM",

@@ -1,0 +1,212 @@
+{
+  "_comment": "Synthetic memory pairs for the supersession policy (B1, 2026-09-29 bug-team audit). 'distinct' pairs are related but both stay true; 'updates' pairs are genuine updates where the older memory is obsolete. Each entry is [event_type, older, newer].",
+  "distinct": [
+    [
+      "decision",
+      "Use PostgreSQL for the orders service database.",
+      "Use Redis for the session cache in the orders service."
+    ],
+    [
+      "decision",
+      "Deploy the marketing site on Vercel.",
+      "Deploy the background worker on Fly.io."
+    ],
+    [
+      "decision",
+      "Use pytest for unit tests in the billing module.",
+      "Use Playwright for end-to-end tests in the billing UI."
+    ],
+    [
+      "decision",
+      "Rate-limit the public API to 100 requests per minute per key.",
+      "Rate-limit the admin API to 20 requests per minute per user."
+    ],
+    [
+      "decision",
+      "Store uploaded images in S3 with a 30-day lifecycle rule.",
+      "Store uploaded PDFs in S3 with a 90-day lifecycle rule."
+    ],
+    [
+      "decision",
+      "Use JWT access tokens that expire after 15 minutes.",
+      "Use refresh tokens that expire after 30 days."
+    ],
+    [
+      "decision",
+      "Adopt Tailwind for styling the dashboard frontend.",
+      "Adopt shadcn/ui components for the dashboard frontend."
+    ],
+    [
+      "decision",
+      "Run database migrations with Alembic on deploy.",
+      "Run database backups nightly with pg_dump to S3."
+    ],
+    [
+      "decision",
+      "Pin numpy to 1.26 in the ML service requirements.",
+      "Pin torch to 2.3 in the ML service requirements."
+    ],
+    [
+      "decision",
+      "Log errors to Sentry from the web frontend.",
+      "Log errors to Sentry from the Python backend."
+    ],
+    [
+      "decision",
+      "The checkout page will use Stripe Checkout.",
+      "The subscription page will use the Stripe customer portal."
+    ],
+    [
+      "decision",
+      "Cache product listings for 5 minutes at the CDN.",
+      "Cache user profile pages for 1 minute at the CDN."
+    ],
+    [
+      "user_preference",
+      "User prefers dark mode in the editor.",
+      "User prefers a 14px font size in the editor."
+    ],
+    [
+      "user_preference",
+      "User prefers TypeScript for frontend code.",
+      "User prefers Python 3.11 for backend code."
+    ],
+    [
+      "user_preference",
+      "User prefers concise commit messages in imperative mood.",
+      "User prefers pull request descriptions with a test plan section."
+    ],
+    [
+      "user_preference",
+      "User prefers pnpm over npm for JavaScript projects.",
+      "User prefers uv over pip for Python projects."
+    ],
+    [
+      "user_preference",
+      "User likes tabs rendered as 4 spaces in Python.",
+      "User likes tabs rendered as 2 spaces in YAML."
+    ],
+    [
+      "user_preference",
+      "User wants test output kept short, only failures.",
+      "User wants lint output kept short, only errors."
+    ],
+    [
+      "user_fact",
+      "User's name is Maria and she lives in Lisbon.",
+      "User's sister is named Ana and lives in Porto."
+    ],
+    [
+      "user_fact",
+      "User works at Acme Corp as a backend engineer.",
+      "User previously worked at Globex as a data engineer."
+    ],
+    [
+      "user_fact",
+      "User's dog is a beagle named Max.",
+      "User's cat is a tabby named Luna."
+    ],
+    [
+      "user_fact",
+      "User's laptop is a MacBook Pro M3 with 36GB RAM.",
+      "User's desktop is a Linux workstation with an RTX 4090."
+    ],
+    [
+      "lesson_learned",
+      "Always run migrations before deploying the API, or requests fail with missing column errors.",
+      "Always warm the cache after deploying the API, or the first requests time out."
+    ],
+    [
+      "lesson_learned",
+      "The CI runner lacks Chrome, so browser tests must be skipped in CI.",
+      "The CI runner lacks a GPU, so model tests must use the CPU backend in CI."
+    ],
+    [
+      "lesson_learned",
+      "Heroku free dynos sleep after 30 minutes idle; ping them before demos.",
+      "Heroku review apps do not get production config vars by default."
+    ],
+    [
+      "lesson_learned",
+      "SQLite needs WAL mode for concurrent readers during writes.",
+      "SQLite needs busy_timeout set or concurrent writers get database is locked."
+    ],
+    [
+      "error_pattern",
+      "ImportError: cannot import name 'foo' from 'bar' -- fixed by upgrading bar to 2.0.",
+      "ImportError: cannot import name 'baz' from 'qux' -- fixed by reinstalling qux."
+    ],
+    [
+      "error_pattern",
+      "TimeoutError when calling the payments API from the worker; increase timeout to 30s.",
+      "TimeoutError when calling the search API from the web app; add a retry with backoff."
+    ],
+    [
+      "error_pattern",
+      "npm ERR! ERESOLVE peer dependency conflict with react 19; use --legacy-peer-deps.",
+      "npm ERR! EACCES permission denied on global install; use a node version manager."
+    ],
+    [
+      "error_pattern",
+      "pytest fails with 'fixture not found: db' in tests/api; add conftest import.",
+      "pytest fails with 'fixture not found: client' in tests/web; add conftest import."
+    ]
+  ],
+  "updates": [
+    [
+      "decision",
+      "The project uses Postgres for storage.",
+      "The project now uses SQLite for storage."
+    ],
+    [
+      "decision",
+      "Use PostgreSQL for the orders service database.",
+      "Switched the orders service database from PostgreSQL to MySQL."
+    ],
+    [
+      "decision",
+      "Deploy the marketing site on Netlify.",
+      "We moved the marketing site from Netlify to Vercel; deploy there now."
+    ],
+    [
+      "decision",
+      "Rate-limit the public API to 100 requests per minute per key.",
+      "Rate-limit the public API to 300 requests per minute per key (raised from 100)."
+    ],
+    [
+      "user_preference",
+      "User prefers dark mode in the editor.",
+      "User now prefers light mode in the editor."
+    ],
+    [
+      "user_preference",
+      "User prefers npm for JavaScript projects.",
+      "User no longer uses npm; prefers pnpm for JavaScript projects."
+    ],
+    [
+      "user_fact",
+      "User lives in Lisbon.",
+      "User moved from Lisbon to Berlin."
+    ],
+    [
+      "user_fact",
+      "User works at Acme Corp as a backend engineer.",
+      "User left Acme Corp and now works at Initech as a staff engineer."
+    ],
+    [
+      "lesson_learned",
+      "Use requests for HTTP calls in the scraper.",
+      "Do not use requests in the scraper; use httpx because requests blocks the event loop."
+    ],
+    [
+      "decision",
+      "Use pytest-xdist with 8 workers in CI.",
+      "Stop using pytest-xdist in CI; tests share a database and fail in parallel."
+    ],
+    [
+      "user_preference",
+      "User wants responses in English.",
+      "User wants responses in Portuguese from now on."
+    ]
+  ]
+}

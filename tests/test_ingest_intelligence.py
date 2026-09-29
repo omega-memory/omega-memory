@@ -10,96 +10,72 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
 class TestContradictionDetection:
-    """Phase 4.1: Detect and supersede contradicting memories."""
+    """Store-time supersession with real embeddings.
 
-    def test_contradiction_supersedes_old(self, store):
-        """Store two conflicting decisions — old one should be superseded."""
-        from omega.bridge import _detect_and_supersede
+    Supersession used to run twice: inside store() and again in the bridge's
+    Phase 4.1 (_detect_and_supersede), which retired on similarity alone with
+    no project check. store() is now the single authority; see
+    test_supersession_policy.py for the policy itself.
+    """
 
-        # Store first decision
+    def test_single_word_substitution_is_flagged_not_retired(self, store):
+        """PostgreSQL -> MySQL with no update wording: keep both, flag the pair."""
         nid1 = store.store(
             content="We decided to use PostgreSQL as the primary database for production.",
             metadata={"event_type": "decision"},
         )
-        # Store contradicting decision
         nid2 = store.store(
             content="We decided to use MySQL as the primary database for production.",
             metadata={"event_type": "decision"},
         )
 
-        count = _detect_and_supersede(store, nid2,
-            "We decided to use MySQL as the primary database for production.",
-            "decision")
-
-        # Check if old was superseded
         old = store.get_node(nid1)
-        if count > 0:
-            assert old.metadata.get("superseded") is True
-            assert old.metadata.get("superseded_by") == nid2
-        # If embeddings are hash-based (no real model), similarity may not
-        # reach threshold — count may be 0, which is acceptable in CI.
+        assert old.metadata.get("superseded") is not True
+        candidates = store.get_node(nid2).metadata.get("supersession_candidates", [])
+        # Hash-fallback embeddings (no model in CI) may not reach the gate.
+        assert all(c["target_id"] == nid1 for c in candidates)
 
     def test_contradiction_same_content_not_superseded(self, store):
         """Exact duplicate content should not trigger superseding."""
-        from omega.bridge import _detect_and_supersede
-
         content = "We use PostgreSQL for the main database in all environments."
         nid1 = store.store(content=content, metadata={"event_type": "decision"})
-        nid2 = store.store(content=content, metadata={"event_type": "decision"})
+        store.store(content=content, metadata={"event_type": "decision"})
 
-        count = _detect_and_supersede(store, nid2, content, "decision")
-
-        # Same content → skip (first 100 chars match), should not supersede
         old = store.get_node(nid1)
         assert old.metadata.get("superseded") is not True
 
     def test_contradiction_different_type_not_superseded(self, store):
         """Similar content but different event_type should not be superseded."""
-        from omega.bridge import _detect_and_supersede
-
         nid1 = store.store(
             content="PostgreSQL is the best database choice for our workload.",
             metadata={"event_type": "lesson_learned"},
         )
-        nid2 = store.store(
+        store.store(
             content="PostgreSQL is now deprecated in favor of SQLite for our workload.",
             metadata={"event_type": "decision"},
         )
-
-        count = _detect_and_supersede(store, nid2,
-            "PostgreSQL is now deprecated in favor of SQLite for our workload.",
-            "decision")
 
         # lesson_learned != decision → should not supersede
         old = store.get_node(nid1)
         assert old.metadata.get("superseded") is not True
 
     def test_contradiction_threshold(self, store):
-        """Content with low similarity (< 0.80) should not trigger superseding."""
-        from omega.bridge import _detect_and_supersede
-
+        """Unrelated content (below the similarity gate) is never superseded."""
         nid1 = store.store(
             content="The deployment pipeline runs on Jenkins with Docker containers.",
             metadata={"event_type": "decision"},
         )
         nid2 = store.store(
-            content="Our team prefers dark mode in all IDEs and editors.",
+            content="Our team now prefers dark mode in all IDEs and editors.",
             metadata={"event_type": "decision"},
         )
 
-        count = _detect_and_supersede(store, nid2,
-            "Our team prefers dark mode in all IDEs and editors.",
-            "decision")
-
-        # Completely different topics → should not supersede
-        assert count == 0
         old = store.get_node(nid1)
         assert old.metadata.get("superseded") is not True
+        assert store.get_node(nid2).metadata.get("supersession_candidates", []) == []
 
     def test_cross_type_user_preference_supersedes_decision(self, store):
-        """A user_preference should supersede a conflicting decision."""
-        from omega.bridge import _detect_and_supersede
-
+        """A user_preference naming the old choice supersedes the decision."""
         nid1 = store.store(
             content="We decided to use PostgreSQL as the primary database for this project.",
             metadata={"event_type": "decision"},
@@ -109,34 +85,20 @@ class TestContradictionDetection:
             metadata={"event_type": "user_preference"},
         )
 
-        count = _detect_and_supersede(
-            store, nid2,
-            "User prefers SQLite over PostgreSQL as the primary database for this project.",
-            "user_preference",
-        )
-
-        # user_preference should supersede the decision
-        assert count >= 1
         old = store.get_node(nid1)
         assert old.metadata.get("superseded") is True
+        assert old.metadata.get("superseded_by") == nid2
+        assert old.metadata.get("superseded_reason") == "replacement"
 
     def test_cross_type_decision_does_not_supersede_preference(self, store):
         """A decision should NOT supersede a user_preference (one-directional)."""
-        from omega.bridge import _detect_and_supersede
-
         nid1 = store.store(
             content="User prefers to always use SQLite as the primary database.",
             metadata={"event_type": "user_preference"},
         )
-        nid2 = store.store(
+        store.store(
             content="Decided to use PostgreSQL instead of SQLite as the primary database.",
             metadata={"event_type": "decision"},
-        )
-
-        count = _detect_and_supersede(
-            store, nid2,
-            "Decided to use PostgreSQL instead of SQLite as the primary database.",
-            "decision",
         )
 
         # decision should NOT supersede user_preference
@@ -145,40 +107,17 @@ class TestContradictionDetection:
 
     def test_cross_type_low_similarity_no_supersede(self, store):
         """Low-similarity user_preference should not supersede unrelated decision."""
-        from omega.bridge import _detect_and_supersede
-
         nid1 = store.store(
             content="Deploy the production database migration on Friday night.",
             metadata={"event_type": "decision"},
         )
-        nid2 = store.store(
-            content="I prefer dark mode in all text editors and IDEs.",
+        store.store(
+            content="I now prefer dark mode in all text editors and IDEs.",
             metadata={"event_type": "user_preference"},
         )
 
-        count = _detect_and_supersede(
-            store, nid2,
-            "I prefer dark mode in all text editors and IDEs.",
-            "user_preference",
-        )
-
-        # Completely unrelated topics, should not supersede
-        assert count == 0
         old = store.get_node(nid1)
         assert old.metadata.get("superseded") is not True
-
-    def test_non_supersedable_type_ignored(self, store):
-        """Event types outside the supersede set should return 0."""
-        from omega.bridge import _detect_and_supersede
-
-        nid1 = store.store(
-            content="Error: connection refused on port 5432.",
-            metadata={"event_type": "error_pattern"},
-        )
-        count = _detect_and_supersede(store, nid1,
-            "Error: connection refused on port 5432.",
-            "error_pattern")
-        assert count == 0
 
 
 class TestAtomicFactSplitting:

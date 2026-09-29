@@ -48,6 +48,20 @@ LESSON_PATTERNS = [
 # Minimum prompt length to avoid matching on short commands
 MIN_PROMPT_LENGTH = 20
 
+# A sentence that asks rather than states is not a decision or a lesson:
+# "let's use Redis? actually wait, can you ...", "can you remember that ...",
+# "what do you think? is MySQL better?" were all stored as decisions.
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
+# A wh-word opens a question on its own; an auxiliary only when a subject
+# follows it ("can you ...", "is it ..."), so "Do not deploy ..." and
+# "Will do, ..." stay statements.
+_QUESTION_OPENER = re.compile(
+    r"^\W*(?:(?:what|why|how|which|who|where|when)\b"
+    r"|(?:can|could|would|will|should|shall|do|does|did|is|are|was|were)"
+    r"\s+(?:you|we|i|it|they|there|he|she|this|that)\b)",
+    re.IGNORECASE,
+)
+
 # Maximum prompts to store per session (avoid runaway storage). Keyed by
 # session because the daemon serves many sessions from one process.
 MAX_CAPTURES_PER_SESSION = 20
@@ -84,6 +98,15 @@ def _echo_capture(result: str, event_type: str, prompt: str) -> None:
         emit(f"[OMEGA] Memory evolved: {event_type} updated (evolution #{evo_num}) — {summary}")
     elif result.startswith("Stored"):
         emit(f"[OMEGA] Captured: {event_type} — {summary}")
+
+
+def _statements(prompt: str) -> str:
+    """The prompt's declarative sentences; questions and asked requests are dropped."""
+    sentences = (part.strip() for part in _SENTENCE_BREAK.split(prompt))
+    return " ".join(
+        s for s in sentences
+        if s and not s.endswith("?") and not _QUESTION_OPENER.match(s)
+    )
 
 
 def _detect_decision(prompt: str) -> bool:
@@ -133,19 +156,21 @@ def run(payload: dict) -> None:
     if _captures_by_session.get(session_id, 0) >= MAX_CAPTURES_PER_SESSION:
         return
 
+    statements = _statements(prompt)
+
     # Decision takes priority if both match
-    if _detect_decision(prompt):
-        _capture(f"Decision: {prompt[:500]}", "decision", "decision", prompt, session_id, cwd)
+    if _detect_decision(statements):
+        _capture(f"Decision: {statements[:500]}", "decision", "decision", statements, session_id, cwd)
         return
 
-    if _detect_lesson(prompt):
+    if _detect_lesson(statements):
         # Lesson quality gate: min 60 chars, >= 8 words, substance validation
-        if len(prompt) < 60 or len(prompt.split()) < 8:
+        if len(statements) < 60 or len(statements.split()) < 8:
             return
         _tech_signals = ["/", "`", "Error", "error", ".py", ".js", ".ts", "import ", "def ", "class "]
-        if len(prompt) < 100 and not any(s in prompt for s in _tech_signals):
+        if len(statements) < 100 and not any(s in statements for s in _tech_signals):
             return
-        _capture(f"Lesson: {prompt[:500]}", "lesson_learned", "lesson", prompt, session_id, cwd)
+        _capture(f"Lesson: {statements[:500]}", "lesson_learned", "lesson", statements, session_id, cwd)
 
 
 def main(payload: dict | None = None) -> None:

@@ -459,8 +459,12 @@ class TestTemporalSupersession:
         assert "X strategy is 5 tweets per week" in contents
         assert "X strategy is 35 tweets per week" not in contents
 
-    def test_explicit_contradiction_still_works(self, vec_store):
-        """Existing negation/antonym detection should still function."""
+    def test_explicit_contradiction_retires_user_fact(self, vec_store):
+        """user_fact is eligible, and "Never" denying "Always use ..." is a signal.
+
+        This used to assert the opposite because only the bridge's second
+        supersession pass covered user_fact; store() is now the one authority.
+        """
         base_emb = _make_embedding(seed=5.0)
         similar_emb = _perturb_embedding(base_emb, amount=0.4)
 
@@ -479,18 +483,13 @@ class TestTemporalSupersession:
             embedding=similar_emb,
         )
 
-        # user_fact is NOT in _TEMPORAL_SUPERSESSION_TYPES so supersession
-        # should not apply, but contradiction annotation should exist
         old = vec_store.get_node(old_id)
-        new = vec_store.get_node(new_id)
-        assert old is not None
-        assert old.metadata.get("superseded") is not True
-        # Contradiction annotations may or may not fire depending on signal
-        # strength, but the old memory should NOT be superseded since user_fact
-        # isn't a supersession-eligible type.
+        assert old.metadata.get("superseded") is True
+        assert old.metadata.get("superseded_by") == new_id
+        assert old.metadata.get("superseded_reason") == "negation"
 
     def test_non_eligible_type_not_superseded(self, vec_store):
-        """Types outside _TEMPORAL_SUPERSESSION_TYPES should never supersede."""
+        """Types outside _SUPERSESSION_TYPES should never supersede."""
         base_emb = _make_embedding(seed=6.0)
         similar_emb = _perturb_embedding(base_emb, amount=0.4)
 

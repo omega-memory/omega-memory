@@ -1829,8 +1829,9 @@ class QueryMixin:
                     pass
 
         # --- A/B feedback tracking: record retrieval context for returned results ---
+        tracked = deduped if not getattr(self._untracked_lookups, "depth", 0) else []
         with self._cache_lock:
-            for n in deduped:
+            for n in tracked:
                 self._recent_query_context[n.id] = {
                     "query_text": query_text[:200],
                     "query_hint": query_hint,

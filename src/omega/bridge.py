@@ -30,9 +30,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from omega import json_compat as json
+from omega.contradictions import detect_update_signal, distinguishing_tokens
 from omega.dedup_config import load_dedup_thresholds
 from omega.exceptions import ValidationError
 from omega.llm import llm_complete  # noqa: F401 — used in distill_trajectory, module-level for test patchability
+from omega.redaction import redact_secrets
 from omega.types import TTLCategory, AutoCaptureEventType
 
 logger = logging.getLogger("omega.bridge")
@@ -761,6 +763,26 @@ def _jaccard(text_a: str, text_b: str, min_word_len: int = 4) -> float:
     return len(words_a & words_b) / len(words_a | words_b)
 
 
+def _is_restatement(content: str, existing: str, event_type: str) -> bool:
+    """Whether ``content`` may be treated as a repeat of ``existing``.
+
+    Word overlap alone cannot say. _jaccard() ignores words shorter than four
+    characters, so "100" vs "300", "not" and "on"/"off" were invisible, and a
+    one-word swap ("... now uses SQLite ...") still clears a 0.80 threshold in
+    a ten-word sentence: updates were dropped as duplicates, or "Reconfirmed",
+    into the very memory they updated (audit finding B3). A text is a repeat
+    only if it agrees on every number and polarity word and carries no update
+    signal. error_pattern keeps ignoring numbers: _normalize_for_dedup() masks
+    them on purpose because line numbers and counts vary between runs.
+    """
+    if event_type == AutoCaptureEventType.ERROR_PATTERN:
+        return distinguishing_tokens(content, False) == distinguishing_tokens(existing, False)
+    return (
+        distinguishing_tokens(content) == distinguishing_tokens(existing)
+        and detect_update_signal(content, existing) is None
+    )
+
+
 def _auto_relate(store, node_id: str, max_related: int = 3, min_similarity: float = 0.65) -> int:
     """Create typed edges from node_id to its most similar existing memories.
 
@@ -859,69 +881,95 @@ def _schedule_auto_relate(store, node_id: str) -> None:
     t.start()
 
 
-_CROSS_TYPE_SUPERSEDE = {
-    "user_preference": {"decision"},
-}
+_MAX_CANDIDATES_SHOWN = 3
+
+# A completion dismisses a pending reminder only when both signals agree.
+_REMINDER_MIN_SIMILARITY = 0.75
+_REMINDER_MIN_SHARED_WORDS = 3
+_REMINDER_DUE_STAMP = re.compile(r"\n\[due: [^\]]+\]$")
+_TASK_FILLER_WORDS = frozenset({
+    "that", "this", "with", "will", "have", "from", "were", "been", "into",
+    "then", "than", "when", "what", "also", "them", "they", "your", "their",
+})
 
 
-def _detect_and_supersede(
-    store, node_id: str, content: str, event_type: str,
-    entity_id: Optional[str] = None,
-) -> int:
-    """Detect contradicting memories and mark old ones as superseded.
+def _task_words(text: str) -> set:
+    words = (w.strip(".,;:!?()[]'\"`").lower() for w in text.split())
+    return {w for w in words if len(w) > 3 and w not in _TASK_FILLER_WORDS}
 
-    Only runs for decision, user_preference, user_fact types.
-    Uses embedding similarity to find candidates, then checks for topic
-    overlap with different content — indicating a contradiction/update.
 
-    Cross-type supersession: user_preference can supersede decision memories
-    (e.g. "stop suggesting HN" supersedes "post Show HN on Tuesday").
+def _dismiss_completed_reminders(
+    store, node_id: str, content: str, scope: tuple
+) -> List[str]:
+    """Dismiss the pending reminders in ``scope`` that this completion closes.
 
-    Returns count of superseded memories.
+    A reminder is dismissed only when the completion is a close embedding
+    neighbour AND repeats at least three of its content words. The old rules
+    (any decision or completion, any project, cosine 0.40 or any three shared
+    words, checkpoints retired too) never ran because of a swallowed
+    AttributeError, and would have dismissed unrelated reminders (audit
+    finding B6). Dismissal mirrors dismiss_reminder(): the reminder is not
+    retired, and the caller reports the IDs.
+
+    Returns the dismissed reminder IDs.
     """
-    _SUPERSEDE_TYPES = {"decision", "user_preference", "user_fact"}
-    if event_type not in _SUPERSEDE_TYPES:
-        return 0
-    try:
-        embedding = store.get_embedding(node_id)
-        if not embedding:
-            return 0
-        similar = store.find_similar(embedding, limit=5)
-        superseded = 0
-        content_norm = content[:100].strip().lower()
-        cross_targets = _CROSS_TYPE_SUPERSEDE.get(event_type)
-        for r in similar:
-            if r.id == node_id:
-                continue
-            if (r.metadata or {}).get("superseded"):
-                continue
-            r_type = (r.metadata or {}).get("event_type", "")
-            if r_type != event_type:
-                if not cross_targets or r_type not in cross_targets:
-                    continue
-            if r.relevance < 0.80:
-                continue
-            if entity_id:
-                r_entity = (r.metadata or {}).get("entity_id", "")
-                if r_entity and r_entity != entity_id:
-                    continue
-            existing_norm = r.content[:100].strip().lower()
-            if content_norm == existing_norm:
-                continue
-            store.mark_superseded(r.id, superseded_by=node_id)
-            store.add_edge(node_id, r.id, "supersedes", r.relevance)
-            superseded += 1
-            logger.info(
-                "Ingest superseded %s (sim=%.2f) by %s",
-                r.id[:12], r.relevance, node_id[:12],
-            )
-        if superseded:
-            store.stats.setdefault("ingest_superseded", 0)
-            store.stats["ingest_superseded"] += superseded
-        return superseded
-    except Exception as e:
-        logger.debug("_detect_and_supersede failed for %s: %s", node_id[:12], e)
-        return 0
+    embedding = store.get_embedding(node_id)
+    if not embedding:
+        return []
+    near = [
+        r for r in store.find_similar(embedding, limit=10)
+        if r.id != node_id
+        and r.relevance >= _REMINDER_MIN_SIMILARITY
+        and (r.metadata or {}).get("event_type") == "reminder"
+        and (r.metadata or {}).get("reminder_status") == "pending"
+    ]
+    scopes = store.get_scopes([r.id for r in near])
+    completed_words = _task_words(content)
+    now = datetime.now(timezone.utc).isoformat()
+    dismissed = []
+    for r in near:
+        if scopes.get(r.id) != scope:
+            continue
+        task = _REMINDER_DUE_STAMP.sub("", r.content)
+        if len(_task_words(task) & completed_words) < _REMINDER_MIN_SHARED_WORDS:
+            continue
+        reminder = store.get_node(r.id, track_access=False)
+        meta = dict(reminder.metadata or {})
+        meta.update(
+            reminder_status="dismissed",
+            dismissed_at=now,
+            dismissed_reason="completed",
+            dismissed_by=node_id,
+        )
+        store.update_node(r.id, metadata=meta)
+        dismissed.append(r.id)
+    if dismissed:
+        logger.info("Dismissed %d completed reminder(s) for %s", len(dismissed), node_id)
+    return dismissed
+
+
+def _format_supersession_report(report: List[Dict[str, Any]], new_id: str) -> str:
+    """Render what a store() retired or flagged, for the store result."""
+    retired = [r for r in report if r["action"] == "retired"]
+    candidates = [r for r in report if r["action"] == "candidate"]
+    text = ""
+    if retired:
+        lines = [
+            f"  - `{r['node_id']}` ({r['signal']}): {r['content_preview'][:60]}"
+            for r in retired
+        ]
+        text += "\n\n[SUPERSEDED] Retired older memory this one replaces:\n" + "\n".join(lines)
+    if candidates:
+        lines = [
+            f"  - `{r['node_id']}` (similarity {r['similarity']:.2f}): {r['content_preview'][:60]}"
+            for r in candidates[:_MAX_CANDIDATES_SHOWN]
+        ]
+        text += (
+            "\n\n[POSSIBLE UPDATE] Similar older memory kept active. If this one replaces it, run "
+            f'omega_memory(action="supersede", memory_id="<id>", target_id="{new_id}"):\n'
+            + "\n".join(lines)
+        )
+    return text
 
 
 def _split_atomic_facts(content: str, event_type: str) -> List[str]:
@@ -1113,6 +1161,14 @@ def auto_capture(
         if _body_stripped.startswith(("{", "[", '"filePath', '"type"')):
             return "**Memory Blocked** (JSON blob, not a decision)"
 
+    # A hook captures text as it passes by; nobody asked for it to be
+    # remembered, so credential-shaped values are stripped before anything is
+    # stored, tagged or compared (audit finding B2). The noise gates above see
+    # the original text, so redaction cannot make a capture "too short". An
+    # explicit store is left as is.
+    if _is_hook:
+        content, _ = redact_secrets(content)
+
     store = _get_store()
     meta = dict(metadata or {})
     meta["event_type"] = event_type
@@ -1183,12 +1239,25 @@ def auto_capture(
         except Exception as e:
             logger.debug(f"Pre-computed embedding generation failed: {e}")
 
+    # Dedup, evolution, conflict and reminder checks compare only against
+    # memories this write shares a scope with: collapsing into, or rewriting,
+    # another project's or entity's memory hides the write from its own scope
+    # and changes someone else's (audit findings B3, B6).
+    scope_project, scope_entity = store.resolve_scope(meta, entity_id)
+
     if dedup_threshold is not None or event_type in EVOLUTION_TYPES:
         try:
-            _similar_results = store.query(
-                content[:200], limit=8,
-                query_embedding=_precomputed_embedding,
-            )
+            with store.untracked_lookup():
+                _similar_results = store.query(
+                    content[:200], limit=8,
+                    query_embedding=_precomputed_embedding,
+                    project_path=scope_project, scope="project", entity_id=scope_entity,
+                )
+            scopes = store.get_scopes([r.id for r in _similar_results])
+            _similar_results = [
+                r for r in _similar_results
+                if scopes.get(r.id) == (scope_project, scope_entity)
+            ]
         except Exception as e:
             logger.debug(f"Similar-content query failed: {e}")
 
@@ -1211,6 +1280,8 @@ def auto_capture(
                     existing_session = (existing.metadata or {}).get("session_id", "")
                     if existing_session and existing_session != session_id:
                         continue
+                if not _is_restatement(content, existing.content, event_type):
+                    continue
                 if event_type == AutoCaptureEventType.ERROR_PATTERN:
                     sim = _jaccard(_normalize_for_dedup(content), _normalize_for_dedup(existing.content))
                 else:
@@ -1250,6 +1321,8 @@ def auto_capture(
         try:
             for existing in _similar_results[:3]:
                 if (existing.metadata or {}).get("event_type", "") != event_type:
+                    continue
+                if not _is_restatement(content, existing.content, event_type):
                     continue
                 sim = _jaccard(content.lower(), existing.content.lower())
                 if EVOLUTION_THRESHOLD <= sim < (dedup_threshold or 0.95):
@@ -1368,6 +1441,9 @@ def auto_capture(
         ttl_seconds=ttl,
         entity_id=entity_id,
         agent_type=agent_type,
+        # A captured prompt or transcript line is not a statement that an
+        # older memory is obsolete: flag possible replacements, never retire.
+        allow_supersession=not _is_hook,
     )
 
     ttl_str = _human_ttl(ttl)
@@ -1379,9 +1455,15 @@ def auto_capture(
     except AttributeError:
         _deduped = False
     if _deduped:
-        output = f"Deduped → {node_id}"
-    else:
-        output = f"Stored {node_id} ({event_type}, {ttl_str})"
+        # Nothing new was written. The phases below enrich a new memory, so
+        # running them here would rewrite the existing one (audit finding B4).
+        return f"Deduped → {node_id}"
+    output = f"Stored {node_id} ({event_type}, {ttl_str})"
+
+    # Supersession is settled inside store(): same project and entity only,
+    # and an older memory is retired only on an explicit update signal. A
+    # retired memory drops out of queries, so every retirement is reported.
+    output += _format_supersession_report(store.get_last_supersession_results(), node_id)
 
     # Surface deep contradiction detection results
     try:
@@ -1442,8 +1524,13 @@ def auto_capture(
         try:
             observation = _compress_to_observation(content, event_type)
             if observation:
-                meta["observation"] = observation
-                store.update_node(node_id, metadata=meta)
+                # Merge into the stored metadata: store() has added to it
+                # (supersession candidates, contradiction notes) since `meta`
+                # was built, and replacing it would erase those.
+                stored = store.get_node(node_id, track_access=False)
+                merged = dict(stored.metadata or {}) if stored else dict(meta)
+                merged["observation"] = observation
+                store.update_node(node_id, metadata=merged)
         except Exception as e:
             logger.debug(f"Observation compression failed for {node_id[:12]}: {e}")
 
@@ -1451,18 +1538,6 @@ def auto_capture(
     # Phase 4: Auto-relate — link to similar existing memories (background)
     # ------------------------------------------------------------------
     _schedule_auto_relate(store, node_id)
-
-    # ------------------------------------------------------------------
-    # Phase 4.1: Contradiction detection — supersede old conflicting memories
-    # ------------------------------------------------------------------
-    try:
-        supersede_count = _detect_and_supersede(
-            store, node_id, content, event_type, entity_id,
-        )
-        if supersede_count:
-            output += f" | {supersede_count} superseded"
-    except Exception as e:
-        logger.debug(f"Contradiction detection failed for {node_id[:12]}: {e}")
 
     # ------------------------------------------------------------------
     # Phase 4.2: Atomic fact splitting — create sub-nodes for recall
@@ -1496,69 +1571,19 @@ def auto_capture(
         logger.debug(f"Atomic fact splitting failed for {node_id[:12]}: {e}")
 
     # ------------------------------------------------------------------
-    # Phase 4.5: Auto-supersede stale reminders
+    # Phase 4.5: A completed task dismisses the reminder it completes
     # ------------------------------------------------------------------
-    _COMPLETION_TYPES = {"decision", "task_completion"}
-    if event_type in _COMPLETION_TYPES:
+    if event_type == AutoCaptureEventType.TASK_COMPLETION and not _is_hook:
         try:
-            superseded_count = 0
-            superseded_ids: set = set()
-            content_words = {w.lower() for w in content.split() if len(w) > 3}
-
-            # --- Pass 1: Embedding similarity (threshold lowered to 0.40) ---
-            embedding = store.get_embedding(node_id)
-            if embedding:
-                similar = store.find_similar(embedding, limit=10)
-                for r in similar:
-                    if r.id == node_id:
-                        continue
-                    r_type = (r.metadata or {}).get("event_type")
-                    if r_type not in ("reminder", "checkpoint"):
-                        continue
-                    if (r.metadata or {}).get("superseded"):
-                        continue
-                    if r.relevance < 0.40:
-                        continue
-                    superseded_ids.add(r.id)
-
-            # --- Pass 2: Keyword matching (3+ word overlap, like task auto-resolve) ---
-            with store._lock:
-                pending_rows = store._conn.execute(
-                    "SELECT node_id, content FROM memories "
-                    "WHERE event_type = 'reminder' "
-                    "AND json_extract(metadata, '$.reminder_status') = 'pending'"
-                ).fetchall()
-            for r_id, r_content in pending_rows:
-                if r_id in superseded_ids:
-                    continue
-                r_words = {w.lower() for w in (r_content or "").split() if len(w) > 3}
-                matches = sum(1 for w in r_words if w in content_words)
-                if matches >= 3:
-                    superseded_ids.add(r_id)
-
-            # --- Apply: mark superseded AND set reminder_status = dismissed ---
-            for s_id in superseded_ids:
-                r_row = store.get(s_id)
-                if not r_row:
-                    continue
-                r_meta = dict(r_row.metadata or {})
-                r_meta["superseded"] = True
-                r_meta["superseded_by"] = node_id
-                r_meta["reminder_status"] = "dismissed"
-                r_meta["dismissed_at"] = datetime.now(timezone.utc).isoformat()
-                r_meta["dismissed_reason"] = "auto_superseded"
-                store.update_node(s_id, metadata=r_meta)
-                r_type = r_meta.get("event_type", "reminder")
-                store._log_forgetting_external(
-                    s_id, r_row.content, r_type,
-                    "auto_superseded", {"superseded_by": node_id},
-                )
-                superseded_count += 1
-            if superseded_count:
-                output += f" | superseded {superseded_count} reminder(s)"
-                logger.info(f"Auto-superseded {superseded_count} reminders for {node_id}")
-        except Exception as e:
-            logger.debug(f"Auto-supersede failed for {node_id}: {e}")
+            dismissed = _dismiss_completed_reminders(
+                store, node_id, content, (scope_project, scope_entity)
+            )
+        except Exception:
+            # The memory is already stored; report that, not a failed write.
+            logger.warning("Reminder completion check failed for %s", node_id, exc_info=True)
+            dismissed = []
+        if dismissed:
+            output += f" | dismissed completed reminder(s): {', '.join(dismissed)}"
 
     # ------------------------------------------------------------------
     # Phase 5: Implicit positive feedback — retrieval-then-store signal
@@ -1944,22 +1969,16 @@ def query(
         else:
             output += "*No matching memories found.*\n"
 
-        # Auto-inject relevant constraints (always, regardless of event_type filter)
+        # Auto-inject this project's relevant constraints (regardless of event_type filter)
         if event_type != "constraint":
             try:
                 result_ids = {n.id for n in results}
-                constraint_nodes = db.get_by_type("constraint", limit=10)
-                matching_constraints = []
-                if constraint_nodes:
-                    query_words = {w.lower() for w in query_text.split() if len(w) > 2}
-                    for cn in constraint_nodes:
-                        if cn.id in result_ids:
-                            continue
-                        if (cn.metadata or {}).get("superseded"):
-                            continue
-                        content_words = {w.lower() for w in cn.content.split() if len(w) > 2}
-                        if query_words & content_words:
-                            matching_constraints.append(cn)
+                query_words = {w.lower() for w in query_text.split() if len(w) > 2}
+                matching_constraints = [
+                    cn for cn in _constraints_in_scope(db, project, entity_id)
+                    if cn.id not in result_ids
+                    and query_words & {w.lower() for w in cn.content.split() if len(w) > 2}
+                ]
                 if matching_constraints:
                     output += "\n---\n**Active Constraints:**\n"
                     for cr in matching_constraints[:3]:
@@ -2109,24 +2128,22 @@ def query_structured(
                 }
             )
 
-        # Auto-inject relevant constraints
+        # Auto-inject this project's relevant constraints
         if event_type != "constraint":
             try:
                 result_ids = {node.id for node in results}
-                constraint_nodes = db.get_by_type("constraint", limit=10)
+                constraint_nodes = _constraints_in_scope(db, project, entity_id)
                 if constraint_nodes:
                     query_words = {w.lower() for w in query_text.split() if len(w) > 2}
                     injected = 0
                     for cn in constraint_nodes:
                         if cn.id in result_ids:
                             continue
-                        if (cn.metadata or {}).get("superseded"):
-                            continue
                         content_words = {w.lower() for w in cn.content.split() if len(w) > 2}
                         if query_words & content_words:
                             structured.insert(0, {
                                 "id": cn.id,
-                                "content": cn.content,
+                                "content": cn.content[:_CONSTRAINT_TEXT_LIMIT],
                                 "event_type": "constraint",
                                 "session_id": (cn.metadata or {}).get("session_id", ""),
                                 "created_at": cn.created_at.isoformat() if cn.created_at else "",
@@ -2200,6 +2217,33 @@ _welcome_cache: Dict[str, tuple] = {}  # key -> (monotonic_ts, result_dict)
 _WELCOME_CACHE_TTL = 30.0  # seconds
 
 
+# Longest rule text injected into a session, query or welcome briefing.
+_CONSTRAINT_TEXT_LIMIT = 300
+
+
+def _constraints_in_scope(
+    db, project: Optional[str], entity_id: Optional[str], limit: int = 10
+) -> List[Any]:
+    """Active constraints that apply to this project and entity, newest first.
+
+    A constraint is a standing rule pushed into sessions and queries whether
+    or not anyone searched for it, so one stored for another project or
+    entity must never reach this one: it broke project separation and let
+    anyone able to store a memory plant a rule everywhere (audit finding B5).
+    A caller that names no project gets the current directory, which is the
+    project store() records when none is given.
+    """
+    return db.get_by_type_in_scope(
+        "constraint", project or os.getcwd(), entity_id=entity_id, limit=limit
+    )
+
+
+def _constraint_text(node) -> str:
+    """A rule's injected text: its summary, else its content, capped."""
+    text = (node.metadata or {}).get("observation") or node.content
+    return text.replace("\n", " ").strip()[:_CONSTRAINT_TEXT_LIMIT]
+
+
 def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
     """Generate a session welcome briefing with relevant memories.
 
@@ -2240,6 +2284,8 @@ def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> 
             if meta.get("superseded"):
                 continue
             event_type = meta.get("event_type", "")
+            if event_type == "constraint":
+                continue  # added below, from this project and entity only
             # Track recent activity (useful types only, up to 5)
             _NOISE_TYPES = {"session_respawn"}
             if len(recent_activity) < 5 and event_type not in _NOISE_TYPES:
@@ -2250,22 +2296,35 @@ def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> 
                     break
         # If no high-value memories found, fall back to most recent of any type
         if not recent:
-            recent = candidates[:5]
+            recent = [
+                n for n in candidates
+                if (n.metadata or {}).get("event_type") != "constraint"
+            ][:5]
     except Exception as e:
         logger.debug("Welcome recent memory filtering failed: %s", e)
+
+    _entity_id = None
+    if project:
+        try:
+            from omega_platform.entity.engine import resolve_project_entity
+            _entity_id = resolve_project_entity(project)
+        except Exception as e:
+            logger.debug("Welcome entity resolution failed: %s", e)
+    recent_ids = {n.id for n in recent}
+
+    # Standing rules: this project's and entity's constraints only (audit finding B5)
+    try:
+        for node in _constraints_in_scope(db, project, _entity_id):
+            if node.id not in recent_ids:
+                recent.append(node)
+                recent_ids.add(node.id)
+    except Exception as e:
+        logger.debug("Welcome constraint lookup failed: %s", e)
 
     # Ensure user_preference and user_fact are always represented
     # These types have 95-98% never-accessed rates because recency-based
     # selection misses older entries. Direct type queries fix this.
     try:
-        _entity_id = None
-        if project:
-            try:
-                from omega_platform.entity.engine import resolve_project_entity
-                _entity_id = resolve_project_entity(project)
-            except Exception as e:
-                logger.debug("Welcome entity resolution failed: %s", e)
-        recent_ids = {n.id for n in recent}
         _welcome_types = ("user_preference", "user_fact", "decision", "task_completion", "checkpoint", "session_summary", "behavioral_pattern")
         _limit_per_type = 8
         # Batch query: fetch all 7 types in one SQL call instead of 7 separate queries
@@ -2350,7 +2409,7 @@ def welcome(session_id: Optional[str] = None, project: Optional[str] = None) -> 
             label = type_labels.get(etype)
             if not label:
                 continue
-            text = (n.metadata or {}).get("observation") or n.content[:300]
+            text = ((n.metadata or {}).get("observation") or n.content)[:300]
             if label not in grouped:
                 grouped[label] = []
             if len(grouped[label]) < 7:
@@ -2483,6 +2542,7 @@ def get_session_context(
     project: Optional[str] = None,
     exclude_session: Optional[str] = None,
     limit: int = 5,
+    entity_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Gather all data needed for session start briefing.
 
@@ -2521,17 +2581,12 @@ def get_session_context(
     }
     context_items: list[Dict[str, str]] = []
 
-    # Always-surface constraints (separate budget, not recency-dependent)
+    # Always-surface this project's constraints (separate budget, not recency-dependent)
     try:
-        constraint_nodes = db.get_by_type("constraint", limit=10)
-        for node in constraint_nodes:
-            if (node.metadata or {}).get("superseded"):
-                continue
-            text = (node.metadata or {}).get("observation") or node.content[:300]
-            text = text.replace("\n", " ").strip()
-            context_items.append({"tag": "RULE", "text": text, "stability": "stable"})
-            if len(context_items) >= 3:
-                break
+        for node in _constraints_in_scope(db, project, entity_id, limit=3):
+            context_items.append(
+                {"tag": "RULE", "text": _constraint_text(node), "stability": "stable"}
+            )
     except Exception as e:
         logger.debug("Constraint surfacing failed: %s", e)
 

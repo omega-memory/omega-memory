@@ -5,16 +5,35 @@ import logging
 import os
 import time as _time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from omega import json_compat as json
 from omega.exceptions import StorageError
-from ._types import EMBEDDING_DIM, MemoryResult, _serialize_f32, _canonicalize, coerce_priority
+from ._types import (
+    EMBEDDING_DIM,
+    MemoryResult,
+    SupersessionRecord,
+    _canonicalize,
+    _serialize_f32,
+    coerce_priority,
+)
 
 logger = logging.getLogger("omega.sqlite_store")
 
 _PRIORITY_EDIT_HISTORY_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class _Neighbour:
+    """An active same-scope memory near a newly stored one."""
+
+    node_id: str
+    content: str
+    similarity: float
+    event_type: Optional[str]
+    created_at: Optional[datetime]
 
 
 def _check_embedding_dim(embedding: List[float]) -> None:
@@ -53,10 +72,19 @@ class StoreMixin:
         source_uri: Optional[str] = None,
         status: Optional[str] = None,
         sensitivity: Optional[str] = None,
+        allow_supersession: bool = True,
     ) -> str:
-        """Store a memory. Returns the node ID."""
+        """Store a memory. Returns the node ID.
+
+        ``allow_supersession=False`` stops this write from retiring any older
+        memory; would-be retirements are recorded as candidates instead. Hook
+        captures pass it: text captured from a prompt or transcript is not an
+        explicit statement that an older memory is obsolete.
+        """
         _t0_agency = _time.monotonic()
         self._last_store_deduped = False
+        self._last_contradiction_results = []
+        self._last_supersession_results = []
         self._total_write_count += 1
         if not content:
             raise StorageError("content must be a non-empty string")
@@ -165,13 +193,25 @@ class StoreMixin:
                         )
                     logger.warning(self._capacity_warning)
             self._invalidate_query_cache(new_content=content)
+
+            project, effective_entity_id = self.resolve_scope(meta, entity_id)
+
+            # Dedup only against a live memory in the same project and entity.
+            # Collapsing into another scope's row hid the write from this
+            # scope's queries, and collapsing into a retired row returned a
+            # memory that queries no longer show (audit finding B4).
+            dedup_scope = """
+                   AND project IS ? AND entity_id IS ?
+                   AND COALESCE(status, 'active') != 'superseded'
+                   AND COALESCE(json_extract(metadata, '$.superseded'), 0) = 0
+                   AND (ttl_seconds IS NULL
+                        OR datetime(created_at, '+' || ttl_seconds || ' seconds') > datetime('now'))"""
+
             # Canonical dedup (#6): catch reformatted duplicates
             canonical_existing = self._exec(
-                """SELECT node_id, id FROM memories WHERE canonical_hash = ?
-                   AND (ttl_seconds IS NULL
-                        OR datetime(created_at, '+' || ttl_seconds || ' seconds') > datetime('now'))
-                   LIMIT 1""",
-                (canonical_hash,),
+                "SELECT node_id, id FROM memories WHERE canonical_hash = ?"
+                + dedup_scope + " LIMIT 1",
+                (canonical_hash, project, effective_entity_id),
             ).fetchone()
             if canonical_existing:
                 self.stats.setdefault("dedup_canonical", 0)
@@ -180,13 +220,11 @@ class StoreMixin:
                 self._record_timing("write", (_time.monotonic() - _t0_agency) * 1000)
                 return canonical_existing[0]
 
-            # Exact-match dedup via content hash (skip expired memories)
+            # Exact-match dedup via content hash
             existing = self._exec(
-                """SELECT node_id, id FROM memories WHERE content_hash = ?
-                   AND (ttl_seconds IS NULL
-                        OR datetime(created_at, '+' || ttl_seconds || ' seconds') > datetime('now'))
-                   LIMIT 1""",
-                (content_hash,),
+                "SELECT node_id, id FROM memories WHERE content_hash = ?"
+                + dedup_scope + " LIMIT 1",
+                (content_hash, project, effective_entity_id),
             ).fetchone()
             if existing:
                 self.stats.setdefault("dedup_exact", 0)
@@ -199,7 +237,6 @@ class StoreMixin:
             node_id = f"mem-{uuid.uuid4().hex[:12]}"
 
             event_type = meta.get("event_type") or meta.get("type")
-            project = meta.get("project") or os.getcwd()
             now = datetime.now(timezone.utc).isoformat()
 
             # Determine priority from metadata or event type default. Coerce
@@ -212,9 +249,6 @@ class StoreMixin:
             else:
                 priority = self._DEFAULT_PRIORITY.get(event_type, 3)
             referenced_date = meta.get("referenced_date")
-
-            # Wire entity_id from metadata if not passed directly
-            effective_entity_id = entity_id or meta.get("entity_id")
 
             # Wire agent_type from metadata if not passed directly
             effective_agent_type = agent_type or meta.get("agent_type")
@@ -321,7 +355,7 @@ class StoreMixin:
         if not skip_inference and embedding and self._vec_available:
             try:
                 self._last_contradiction_results = self._check_contradictions(
-                    node_id, content, embedding
+                    node_id, content, embedding, allow_supersession=allow_supersession
                 )
             except Exception as e:
                 logger.debug("Contradiction check failed (non-blocking): %s", e)
@@ -329,10 +363,34 @@ class StoreMixin:
         self._record_timing("write", (_time.monotonic() - _t0_agency) * 1000)
         return node_id
 
+    @staticmethod
+    def resolve_scope(
+        metadata: Dict[str, Any], entity_id: Optional[str] = None
+    ) -> Tuple[str, Optional[str]]:
+        """The (project, entity_id) a store() call with these arguments writes."""
+        return metadata.get("project") or os.getcwd(), entity_id or metadata.get("entity_id")
+
+    def get_scopes(self, node_ids: List[str]) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+        """The stored (project, entity_id) of each existing node in ``node_ids``."""
+        if not node_ids:
+            return {}
+        placeholders = ",".join("?" * len(node_ids))
+        rows = self._conn.execute(
+            f"SELECT node_id, project, entity_id FROM memories WHERE node_id IN ({placeholders})",
+            node_ids,
+        ).fetchall()
+        return {row[0]: (row[1], row[2]) for row in rows}
+
     def get_last_contradiction_results(self) -> list:
         """Return contradiction results from the most recent store() call. Consume-once."""
         results = self._last_contradiction_results
         self._last_contradiction_results = []
+        return results
+
+    def get_last_supersession_results(self) -> List[SupersessionRecord]:
+        """Older memories the most recent store() retired or flagged. Consume-once."""
+        results = self._last_supersession_results
+        self._last_supersession_results = []
         return results
 
     def get_last_store_deduped(self) -> bool:
@@ -728,11 +786,14 @@ class StoreMixin:
 
         return ids
 
-    def mark_superseded(self, node_id: str, superseded_by: str) -> bool:
+    def mark_superseded(
+        self, node_id: str, superseded_by: str, reason: Optional[str] = None
+    ) -> bool:
         """Mark a memory as superseded by a newer memory.
 
-        Sets metadata.superseded=True and metadata.superseded_by on the target,
-        and invalidates the query cache.
+        Sets metadata.superseded=True and metadata.superseded_by on the target
+        (plus metadata.superseded_reason when ``reason`` is given), and
+        invalidates the query cache.
 
         Returns True if the node was found and updated.
         """
@@ -748,6 +809,8 @@ class StoreMixin:
             meta["superseded"] = True
             meta["superseded_by"] = superseded_by
             meta["superseded_at"] = datetime.now(timezone.utc).isoformat()
+            if reason:
+                meta["superseded_reason"] = reason
             self._conn.execute(
                 "UPDATE memories SET metadata = ? WHERE node_id = ?",
                 (json.dumps(meta), node_id),
@@ -758,9 +821,11 @@ class StoreMixin:
                 "UPDATE memories SET valid_until = ?, status = 'superseded' WHERE node_id = ?",
                 (now_str, node_id),
             )
+            details = {"superseded_by": superseded_by}
+            if reason:
+                details["reason"] = reason
             self._log_forgetting(
-                node_id, row[1] or "", row[2] or "",
-                "ingest_superseded", {"superseded_by": superseded_by},
+                node_id, row[1] or "", row[2] or "", "ingest_superseded", details,
             )
             self._commit()
         return True
@@ -914,23 +979,40 @@ class StoreMixin:
 
     _CONTRADICTION_CANDIDATE_LIMIT = 10
     _CONTRADICTION_CONFIDENCE_THRESHOLD = 0.4
-    _TEMPORAL_SUPERSESSION_THRESHOLD = 0.75
-    _TEMPORAL_SUPERSESSION_TYPES = frozenset({
-        "decision", "user_preference", "lesson_learned", "error_pattern",
+
+    # Cosine at which an older memory is considered for supersession at all.
+    # Similarity only nominates: retirement also needs a shared scope and an
+    # explicit update signal (_settle_supersession). Similarity alone used to
+    # retire at this threshold and took 11 of 30 related-but-distinct pairs,
+    # across projects and clients (audit finding B1, 2026-09-29). The lowest
+    # genuine update in that audit ("Stop using pytest-xdist in CI ...")
+    # scored 0.755, so the gate stays here rather than rising.
+    _SUPERSESSION_SIMILARITY_THRESHOLD = 0.75
+    _SUPERSESSION_TYPES = frozenset({
+        "decision", "user_preference", "user_fact", "lesson_learned", "error_pattern",
     })
+    # A newer memory of the key type may also supersede these older types
+    # ("stop suggesting HN" retires "post Show HN on Tuesday"). One-way.
+    _CROSS_TYPE_SUPERSESSION = {"user_preference": frozenset({"decision"})}
+    _MAX_SUPERSESSION_CANDIDATES = 20
 
     def _check_contradictions(
-        self, new_node_id: str, new_content: str, embedding: List[float]
+        self,
+        new_node_id: str,
+        new_content: str,
+        embedding: List[float],
+        allow_supersession: bool = True,
     ) -> list:
-        """Check if the newly stored memory contradicts existing ones.
+        """Settle supersession, then annotate contradictions, for a new memory.
 
-        First applies temporal supersession: if a candidate has the same
-        event_type, high embedding similarity, and is older, it is marked
-        superseded (no signal words required).
+        Only older memories in the same project and entity are considered;
+        a store never changes a memory that belongs to another scope. Each
+        eligible older memory is either retired (it carries an explicit update
+        signal) or recorded as a supersession candidate on the new memory.
+        The outcome is left for get_last_supersession_results().
 
-        Then runs contradiction detection heuristics on remaining candidates
-        and annotates metadata on both sides.
-        Never raises — all errors are logged and swallowed.
+        Then runs contradiction detection heuristics on the remaining
+        same-scope memories and annotates metadata on both sides.
 
         Returns:
             List of dicts with keys: node_id, confidence, reason, content_preview.
@@ -938,92 +1020,54 @@ class StoreMixin:
         """
         from omega.contradictions import detect_contradictions
 
-        # Find similar existing memories (exclude the one we just stored)
+        new_row = self._conn.execute(
+            "SELECT event_type, created_at, project, entity_id FROM memories WHERE node_id = ?",
+            (new_node_id,),
+        ).fetchone()
+        if not new_row:
+            return []
+        new_event_type, new_created_raw, new_project, new_entity = new_row
+        new_created_at = self._parse_dt(new_created_raw)
+
         similar = self._vec_query(embedding, limit=self._CONTRADICTION_CANDIDATE_LIMIT + 1)
         if not similar:
             return []
-
-        candidate_ids = []
-        candidate_contents = []
-        candidate_similarities = []
-        # Batch fetch all candidate metadata instead of N individual SELECTs
-        rowids = [rowid for rowid, _ in similar]
         distances = {rowid: distance for rowid, distance in similar}
-        if rowids:
-            placeholders = ",".join("?" * len(rowids))
-            rows = self._conn.execute(
-                f"SELECT id, node_id, content FROM memories WHERE id IN ({placeholders})",
-                rowids,
-            ).fetchall()
-            row_map = {r[0]: (r[1], r[2]) for r in rows}
-            for rowid in rowids:
-                if rowid not in row_map:
-                    continue
-                node_id_val, content_val = row_map[rowid]
-                if node_id_val == new_node_id:
-                    continue
-                candidate_ids.append(node_id_val)
-                candidate_contents.append(content_val)
-                candidate_similarities.append(1.0 - distances[rowid])
+        placeholders = ",".join("?" * len(distances))
+        rows = self._conn.execute(
+            f"""SELECT id, node_id, content, event_type, created_at, status,
+                       json_extract(metadata, '$.superseded')
+                FROM memories
+                WHERE id IN ({placeholders}) AND node_id != ?
+                  AND project IS ? AND entity_id IS ?""",
+            (*distances, new_node_id, new_project, new_entity),
+        ).fetchall()
+        row_map = {r[0]: r[1:] for r in rows}
 
-        if not candidate_contents:
+        neighbours: List[_Neighbour] = []
+        for rowid, _ in similar:  # keep nearest-first order
+            if rowid not in row_map:
+                continue
+            node_id_val, content_val, event_type, created_raw, status, superseded = row_map[rowid]
+            if status == "superseded" or superseded:
+                continue
+            neighbours.append(_Neighbour(
+                node_id=node_id_val,
+                content=content_val,
+                similarity=1.0 - distances[rowid],
+                event_type=event_type,
+                created_at=self._parse_dt(created_raw),
+            ))
+
+        retired = self._settle_supersession(
+            new_node_id, new_content, new_event_type, new_created_at,
+            neighbours, allow_supersession,
+        )
+        remaining = [n for n in neighbours if n.node_id not in retired]
+        if not remaining:
             return []
-
-        # --- Temporal supersession (runs before contradiction detection) ---
-        # If a candidate has the same event_type AND high similarity AND is
-        # older, the older memory is superseded by the new one.
-        new_row = self._conn.execute(
-            "SELECT event_type, created_at FROM memories WHERE node_id = ?",
-            (new_node_id,),
-        ).fetchone()
-        new_event_type = new_row[0] if new_row else None
-        new_created_at = self._parse_dt(new_row[1]) if new_row else None
-
-        superseded_indices: set = set()
-        if (
-            new_event_type
-            and new_event_type in self._TEMPORAL_SUPERSESSION_TYPES
-            and new_created_at
-        ):
-            # Batch fetch event_type and created_at for all candidates
-            cand_placeholders = ",".join("?" * len(candidate_ids))
-            cand_rows = self._conn.execute(
-                f"SELECT node_id, event_type, created_at FROM memories WHERE node_id IN ({cand_placeholders})",
-                candidate_ids,
-            ).fetchall()
-            cand_meta = {r[0]: (r[1], r[2]) for r in cand_rows}
-            for i, cand_id in enumerate(candidate_ids):
-                if candidate_similarities[i] < self._TEMPORAL_SUPERSESSION_THRESHOLD:
-                    continue
-                cand_info = cand_meta.get(cand_id)
-                if not cand_info or cand_info[0] != new_event_type:
-                    continue
-                cand_created = self._parse_dt(cand_info[1])
-                if cand_created and cand_created < new_created_at:
-                    self.mark_superseded(cand_id, new_node_id)
-                    superseded_indices.add(i)
-                    logger.info(
-                        "Temporal supersession: %s superseded by %s "
-                        "(type=%s, similarity=%.3f)",
-                        cand_id, new_node_id, new_event_type,
-                        candidate_similarities[i],
-                    )
-
-            if superseded_indices:
-                self.stats.setdefault("temporal_supersessions", 0)
-                self.stats["temporal_supersessions"] += len(superseded_indices)
-
-        # Remove superseded candidates before contradiction detection
-        if superseded_indices:
-            candidate_ids = [
-                v for i, v in enumerate(candidate_ids) if i not in superseded_indices
-            ]
-            candidate_contents = [
-                v for i, v in enumerate(candidate_contents) if i not in superseded_indices
-            ]
-
-        if not candidate_contents:
-            return []
+        candidate_ids = [n.node_id for n in remaining]
+        candidate_contents = [n.content for n in remaining]
 
         results = detect_contradictions(
             new_content,
@@ -1106,3 +1150,101 @@ class StoreMixin:
             })
         self._last_contradiction_results = surfaced
         return surfaced
+
+    def _settle_supersession(
+        self,
+        new_node_id: str,
+        new_content: str,
+        new_event_type: Optional[str],
+        new_created_at: Optional[datetime],
+        neighbours: List[_Neighbour],
+        allow_supersession: bool,
+    ) -> set:
+        """Retire or flag the older neighbours a new memory may replace.
+
+        ``neighbours`` are already limited to active memories in the new
+        memory's project and entity. An older one of an eligible type at or
+        above the similarity gate is retired when the new text carries an
+        explicit update signal and ``allow_supersession`` is set; otherwise it
+        is recorded as a candidate on the new memory and left active.
+
+        Returns the node IDs retired.
+        """
+        from omega.contradictions import detect_update_signal
+
+        if new_event_type not in self._SUPERSESSION_TYPES or not new_created_at:
+            return set()
+        replaceable_types = {new_event_type} | self._CROSS_TYPE_SUPERSESSION.get(
+            new_event_type, frozenset()
+        )
+
+        retired: set = set()
+        candidates = []
+        report: List[SupersessionRecord] = []
+        for n in neighbours:
+            if n.similarity < self._SUPERSESSION_SIMILARITY_THRESHOLD:
+                continue
+            if n.event_type not in replaceable_types:
+                continue
+            if not n.created_at or n.created_at >= new_created_at:
+                continue
+            signal = detect_update_signal(new_content, n.content)
+            if (
+                signal
+                and allow_supersession
+                and self.mark_superseded(n.node_id, new_node_id, reason=signal)
+            ):
+                self.add_edge(new_node_id, n.node_id, "supersedes", n.similarity)
+                retired.add(n.node_id)
+                action = "retired"
+                logger.info(
+                    "Superseded %s by %s (type=%s, signal=%s, similarity=%.3f)",
+                    n.node_id, new_node_id, n.event_type, signal, n.similarity,
+                )
+            else:
+                candidates.append({
+                    "target_id": n.node_id,
+                    "similarity": round(n.similarity, 3),
+                    "detector": "store_similarity",
+                    "reason": signal or "same scope and type, high similarity, no update signal",
+                    "target_event_type": n.event_type,
+                })
+                action = "candidate"
+            report.append(SupersessionRecord(
+                node_id=n.node_id,
+                action=action,
+                signal=signal,
+                similarity=round(n.similarity, 3),
+                content_preview=n.content[:80],
+            ))
+
+        if retired:
+            self.stats.setdefault("temporal_supersessions", 0)
+            self.stats["temporal_supersessions"] += len(retired)
+        if candidates:
+            self._record_supersession_candidates(new_node_id, candidates)
+            self.stats.setdefault("supersession_candidates", 0)
+            self.stats["supersession_candidates"] += len(candidates)
+        self._last_supersession_results = report
+        return retired
+
+    def _record_supersession_candidates(self, node_id: str, candidates: List[dict]) -> None:
+        """Append bounded, non-authoritative replacement proposals to a memory."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT metadata FROM memories WHERE node_id = ?", (node_id,)
+            ).fetchone()
+            if not row:
+                return
+            meta = json.loads(row[0]) if row[0] else {}
+            targets = {c["target_id"] for c in candidates}
+            kept = [
+                c for c in meta.get("supersession_candidates", [])
+                if c.get("target_id") not in targets
+            ]
+            meta["supersession_candidates"] = (kept + candidates)[-self._MAX_SUPERSESSION_CANDIDATES:]
+            self._conn.execute(
+                "UPDATE memories SET metadata = ? WHERE node_id = ?",
+                (json.dumps(meta), node_id),
+            )
+            self._commit()

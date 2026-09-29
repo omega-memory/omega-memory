@@ -3,7 +3,6 @@
 Covers:
   - _extract_facts: regex-based fact extraction
   - _auto_relate: typed edge creation between similar memories
-  - _detect_and_supersede: contradiction detection and supersession
   - _split_atomic_facts: sentence-level fact splitting
 """
 import os
@@ -15,7 +14,6 @@ import pytest
 
 from omega.bridge import (
     _auto_relate,
-    _detect_and_supersede,
     _extract_facts,
     _split_atomic_facts,
 )
@@ -305,131 +303,6 @@ class TestAutoRelate:
         mock_store.add_edge.return_value = False
 
         assert _auto_relate(mock_store, source_id) == 0
-
-
-# ===================================================================
-# _detect_and_supersede
-# ===================================================================
-
-
-class TestDetectAndSupersede:
-    def test_non_supersedable_type_returns_zero(self, mock_store):
-        assert _detect_and_supersede(mock_store, "mem-1", "content", "observation") == 0
-        assert _detect_and_supersede(mock_store, "mem-1", "content", "lesson_learned") == 0
-        assert _detect_and_supersede(mock_store, "mem-1", "content", "session_summary") == 0
-        mock_store.get_embedding.assert_not_called()
-
-    def test_no_embedding_returns_zero(self, mock_store):
-        mock_store.get_embedding.return_value = None
-        assert _detect_and_supersede(mock_store, "mem-1", "content", "decision") == 0
-
-    def test_no_similar_returns_zero(self, mock_store):
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = []
-        assert _detect_and_supersede(mock_store, "mem-1", "Use Redis now", "decision") == 0
-
-    def test_skips_self(self, mock_store):
-        node_id = "mem-self"
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id=node_id, content="Use Redis for caching", relevance=1.0, metadata={"event_type": "decision"})
-        ]
-        assert _detect_and_supersede(mock_store, node_id, "Use Redis for caching", "decision") == 0
-
-    def test_skips_already_superseded(self, mock_store):
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id="mem-old", content="Use Memcached", relevance=0.90, metadata={"event_type": "decision", "superseded": True})
-        ]
-        assert _detect_and_supersede(mock_store, "mem-new", "Use Redis for caching", "decision") == 0
-
-    def test_supersedes_same_type(self, mock_store):
-        node_id, old_id = "mem-new", "mem-old"
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id=old_id, content="Use Memcached for caching instead", relevance=0.85, metadata={"event_type": "decision"})
-        ]
-        count = _detect_and_supersede(mock_store, node_id, "Use Redis for caching now", "decision")
-        assert count == 1
-        mock_store.mark_superseded.assert_called_once_with(old_id, superseded_by=node_id)
-        mock_store.add_edge.assert_called_once_with(node_id, old_id, "supersedes", 0.85)
-
-    def test_cross_type_user_preference_supersedes_decision(self, mock_store):
-        node_id, old_id = "mem-pref", "mem-decision"
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id=old_id, content="Post Show HN on Tuesdays for launch", relevance=0.88, metadata={"event_type": "decision"})
-        ]
-        count = _detect_and_supersede(mock_store, node_id, "Stop suggesting HN posts entirely", "user_preference")
-        assert count == 1
-
-    def test_no_cross_type_for_decision(self, mock_store):
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id="mem-pref", content="I prefer dark mode always", relevance=0.90, metadata={"event_type": "user_preference"})
-        ]
-        assert _detect_and_supersede(mock_store, "mem-dec", "Switch to light mode", "decision") == 0
-
-    def test_below_similarity_threshold(self, mock_store):
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id="mem-old", content="Use SQLite for storage backend", relevance=0.75, metadata={"event_type": "decision"})
-        ]
-        assert _detect_and_supersede(mock_store, "mem-new", "Use PostgreSQL for storage", "decision") == 0
-
-    def test_identical_content_not_superseded(self, mock_store):
-        content = "Use Redis for caching layer"
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id="mem-old", content=content, relevance=0.95, metadata={"event_type": "decision"})
-        ]
-        assert _detect_and_supersede(mock_store, "mem-new", content, "decision") == 0
-
-    def test_entity_id_mismatch_skips(self, mock_store):
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id="mem-old", content="Use PostgreSQL for project Alpha", relevance=0.90,
-                metadata={"event_type": "decision", "entity_id": "proj-beta"})
-        ]
-        assert _detect_and_supersede(mock_store, "mem-new", "Use MySQL for project Alpha", "decision", entity_id="proj-alpha") == 0
-
-    def test_entity_id_match_supersedes(self, mock_store):
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id="mem-old", content="Use PostgreSQL for project Alpha", relevance=0.90,
-                metadata={"event_type": "decision", "entity_id": "proj-alpha"})
-        ]
-        assert _detect_and_supersede(mock_store, "mem-new", "Use MySQL for project Alpha", "decision", entity_id="proj-alpha") == 1
-
-    def test_supersede_count_multiple(self, mock_store):
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id="mem-old-1", content="Use Memcached for caching layer v1", relevance=0.88, metadata={"event_type": "decision"}),
-            _mr(node_id="mem-old-2", content="Use Varnish for caching layer v2", relevance=0.82, metadata={"event_type": "decision"}),
-        ]
-        count = _detect_and_supersede(mock_store, "mem-new", "Use Redis for caching layer final", "decision")
-        assert count == 2
-        assert mock_store.mark_superseded.call_count == 2
-        assert mock_store.add_edge.call_count == 2
-
-    def test_updates_stats(self, mock_store):
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id="mem-old", content="Use Memcached for caching config", relevance=0.90, metadata={"event_type": "decision"})
-        ]
-        _detect_and_supersede(mock_store, "mem-new", "Use Redis for caching now", "decision")
-        assert mock_store.stats.get("ingest_superseded") == 1
-
-    def test_graceful_on_exception(self, mock_store):
-        mock_store.get_embedding.side_effect = RuntimeError("DB error")
-        assert _detect_and_supersede(mock_store, "mem-1", "content", "decision") == 0
-
-    def test_user_fact_is_supersedable(self, mock_store):
-        mock_store.get_embedding.return_value = [0.1, 0.2]
-        mock_store.find_similar.return_value = [
-            _mr(node_id="mem-old", content="My database port is 5432 for the main project", relevance=0.85, metadata={"event_type": "user_fact"})
-        ]
-        assert _detect_and_supersede(mock_store, "mem-new", "My database port is 5433 for the main project", "user_fact") == 1
 
 
 # ===================================================================

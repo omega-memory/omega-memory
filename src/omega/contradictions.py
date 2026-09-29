@@ -30,6 +30,8 @@ from typing import Optional
 
 __all__ = [
     "detect_contradictions",
+    "detect_update_signal",
+    "distinguishing_tokens",
     "ContradictionResult",
 ]
 
@@ -317,6 +319,176 @@ def _check_temporal_override(new_lower: str, cand_lower: str) -> float:
     elif new_temporal > 0 and cand_temporal > 0:
         return 0.4  # Both have temporal markers
     return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Update signals — may a newer memory retire an older one?
+# ---------------------------------------------------------------------------
+#
+# Embedding similarity cannot tell an update from a related-but-distinct
+# memory. On the bug team's synthetic pairs (tests/fixtures/
+# supersession_pairs.json) distinct pairs reached cosine 0.935 while genuine
+# updates went as low as 0.753, so a similarity threshold alone retired 11 of
+# 30 distinct pairs. Retirement therefore needs explicit evidence in the text.
+# Each rule below names one kind of evidence; the rules are deliberately
+# narrower than detect_contradictions(), whose preference-change signal fires
+# on pairs such as "Use JWT access tokens ..." / "Use refresh tokens ...".
+
+# Words that announce a change. Only counted when the older memory lacks the
+# same marker and the newer one still talks about the older one's subject.
+_UPDATE_MARKERS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\bnow\b",
+        r"\bno longer\b",
+        r"\banymore\b",
+        r"\bgoing forward\b",
+        r"\bswitch(?:ed|ing)?\b",
+        r"\bmov(?:ed|ing)\b",
+        r"\bmigrat(?:ed|ing)\b",
+        r"\bchang(?:ed|ing)\b",
+        r"\breplac(?:ed|ing)\b",
+        r"\bstop(?:ped|ping)?\b",
+        r"\b(?:raised|lowered|increased|decreased|reduced|bumped)\b",
+    )
+)
+
+# "X instead of Y", "prefers X over Y": Y must be something the older memory said.
+_REPLACEMENT = re.compile(
+    r"\b(?:instead of|rather than|in favou?r of|in place of"
+    r"|prefer(?:s|red)?\b[^.;]*?\bover)\s+(?:the |a |an )?([a-z0-9][\w.+/-]*)"
+)
+
+_UPDATE_NEGATIONS = frozenset({
+    "not", "no", "never", "don't", "doesn't", "didn't", "won't", "can't",
+    "cannot", "shouldn't", "isn't", "aren't", "wasn't", "weren't", "mustn't",
+})
+
+_UPDATE_ANTONYM_PAIRS = (
+    ("on", "off"), ("enable", "disable"), ("enabled", "disabled"),
+    ("true", "false"), ("light", "dark"), ("allow", "deny"),
+    ("always", "never"), ("yes", "no"), ("first", "last"),
+    ("before", "after"), ("include", "exclude"), ("accept", "reject"),
+    ("public", "private"), ("show", "hide"), ("open", "closed"),
+)
+_UPDATE_ANTONYMS: dict[str, set[str]] = {}
+for _a, _b in _UPDATE_ANTONYM_PAIRS:
+    _UPDATE_ANTONYMS.setdefault(_a, set()).add(_b)
+    _UPDATE_ANTONYMS.setdefault(_b, set()).add(_a)
+
+_POLARITY_WORDS = _UPDATE_NEGATIONS | set(_UPDATE_ANTONYMS)
+
+_DIGIT_RUN = re.compile(r"\d+(?:[.,:]\d+)*")
+_STOPWORDS = frozenset({
+    "the", "and", "for", "with", "from", "that", "this", "are", "was", "were",
+    "has", "have", "had", "will", "into", "onto", "its", "our", "your", "their",
+    "but", "not", "all", "any", "can", "too", "via", "per",
+})
+
+# Share of the older memory's content words the newer one must repeat before
+# a bare change marker counts: "switched" alone says something changed, not
+# that *this* memory changed.
+_MARKER_ANCHOR_OVERLAP = 0.5
+# Share of words (after removing the swapped pair) two texts must share for an
+# antonym swap to count as the same statement with the opposite value.
+_ANTONYM_CONTEXT_OVERLAP = 0.6
+
+
+def detect_update_signal(new_content: str, old_content: str) -> Optional[str]:
+    """Name the explicit evidence that ``new_content`` updates ``old_content``.
+
+    Returns one of ``"value_change"``, ``"update_marker"``, ``"negation"``,
+    ``"antonym"`` or ``"replacement"``, or None when the text carries no such
+    evidence. None does not mean the memories are unrelated, only that nothing
+    in the text justifies retiring the older one automatically.
+    """
+    new_words = _words(new_content)
+    old_words = _words(old_content)
+    if not new_words or not old_words or new_words == old_words:
+        return None
+
+    if _masked_digits(new_words) == _masked_digits(old_words):
+        return "value_change"
+
+    new_lower = new_content.lower()
+    old_lower = old_content.lower()
+    if any(m.search(new_lower) and not m.search(old_lower) for m in _UPDATE_MARKERS):
+        if _content_overlap(old_words, new_words) >= _MARKER_ANCHOR_OVERLAP:
+            return "update_marker"
+
+    if _negates(new_words, old_words) or _negates(old_words, new_words):
+        return "negation"
+
+    if _antonym_swap(set(new_words), set(old_words)):
+        return "antonym"
+
+    replaced = _REPLACEMENT.search(new_lower)
+    if replaced and replaced.group(1).strip(".,;:") in set(old_words):
+        return "replacement"
+
+    return None
+
+
+def distinguishing_tokens(text: str, include_numbers: bool = True) -> frozenset[str]:
+    """Numbers and polarity words in ``text``.
+
+    Word-overlap similarity treats these as noise because they are short and
+    change little of the wording, yet each one flips what a statement says:
+    "100" vs "300", "deploy" vs "not deploy", "on" vs "off". Two texts whose
+    distinguishing tokens differ are not duplicates of each other.
+    """
+    tokens = {w for w in _words(text) if w in _POLARITY_WORDS}
+    if include_numbers:
+        tokens.update(_DIGIT_RUN.findall(text))
+    return frozenset(tokens)
+
+
+def _words(text: str) -> list[str]:
+    """Lowercase words with surrounding punctuation stripped."""
+    stripped = (w.strip(".,;:!?()[]{}\"'`") for w in text.lower().split())
+    return [w for w in stripped if w]
+
+
+def _masked_digits(words: list[str]) -> list[str]:
+    return [_DIGIT_RUN.sub("#", w) for w in words]
+
+
+def _content_overlap(old_words: list[str], new_words: list[str]) -> float:
+    """Share of the older text's content words that the newer text repeats."""
+    old_content = {w for w in old_words if len(w) >= 2 and w not in _STOPWORDS}
+    if not old_content:
+        return 0.0
+    return len(old_content & set(new_words)) / len(old_content)
+
+
+def _negates(negated: list[str], plain: list[str]) -> bool:
+    """True when ``negated`` denies a phrase that ``plain`` states outright."""
+    if not set(negated) & _UPDATE_NEGATIONS or set(plain) & _UPDATE_NEGATIONS:
+        return False
+    for i, word in enumerate(negated):
+        if word in _UPDATE_NEGATIONS:
+            phrase = negated[i + 1:i + 3]
+            if phrase and _contains_sequence(plain, phrase):
+                return True
+    return False
+
+
+def _contains_sequence(words: list[str], phrase: list[str]) -> bool:
+    n = len(phrase)
+    return any(words[i:i + n] == phrase for i in range(len(words) - n + 1))
+
+
+def _antonym_swap(new_set: set[str], old_set: set[str]) -> bool:
+    """True when the texts match except for one word flipped to its opposite."""
+    for word in new_set - old_set:
+        for opposite in _UPDATE_ANTONYMS.get(word, ()):
+            if opposite in old_set and opposite not in new_set:
+                rest_new = new_set - {word}
+                rest_old = old_set - {opposite}
+                union = rest_new | rest_old
+                if union and len(rest_new & rest_old) / len(union) >= _ANTONYM_CONTEXT_OVERLAP:
+                    return True
+    return False
 
 
 # ---------------------------------------------------------------------------

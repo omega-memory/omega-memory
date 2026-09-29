@@ -2,8 +2,9 @@
 
 import logging
 import time as _time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from pathlib import Path
 
 
@@ -445,6 +446,32 @@ class SearchMixin:
             ).fetchall()
         return [self._row_to_result(row) for row in rows]
 
+    def get_by_type_in_scope(
+        self,
+        event_type: str,
+        project: str,
+        entity_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[MemoryResult]:
+        """Active memories of one type stored in ``project``, newest first.
+
+        Includes those stored for ``entity_id`` and those stored for no
+        entity; with no ``entity_id``, only the latter. Unlike get_by_type(),
+        never returns another project's or another entity's memories.
+        """
+        rows = self._conn.execute(
+            """SELECT node_id, content, metadata, created_at,
+                      access_count, last_accessed, ttl_seconds
+               FROM memories
+               WHERE event_type = ? AND project = ?
+                 AND (entity_id IS ? OR entity_id IS NULL)
+                 AND COALESCE(status, 'active') != 'superseded'
+                 AND COALESCE(json_extract(metadata, '$.superseded'), 0) = 0
+               ORDER BY created_at DESC LIMIT ?""",
+            (event_type, project, entity_id, limit),
+        ).fetchall()
+        return [self._row_to_result(row) for row in rows]
+
     def get_by_session(self, session_id: str, limit: int = 100) -> List[MemoryResult]:
         """Get memories by session ID, sorted by recency."""
         rows = self._conn.execute(
@@ -852,6 +879,22 @@ class SearchMixin:
         params.append(limit)
 
         return self._conn.execute(query, params).fetchall()
+
+    @contextmanager
+    def untracked_lookup(self) -> Iterator[None]:
+        """Queries run inside this block are not recorded as retrievals.
+
+        get_retrieval_context() feeds implicit "helpful" feedback: a memory an
+        agent retrieved and then built on. A search the system makes for itself,
+        such as auto_capture's dedup lookup, is not that; recording it let every
+        store credit its own nearest neighbours as helpful (audit finding B6).
+        Per thread, so another session's real query is still recorded.
+        """
+        self._untracked_lookups.depth = getattr(self._untracked_lookups, "depth", 0) + 1
+        try:
+            yield
+        finally:
+            self._untracked_lookups.depth -= 1
 
     def get_retrieval_context(self) -> List[Dict[str, Any]]:
         """Return recent retrieval context entries (A/B feedback tracking data)."""
