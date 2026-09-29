@@ -13,6 +13,8 @@ Usage:
     python3.11 scripts/release.py <version> --skip-confirm  # CI-like, no prompts
 
 Pre-flight:
+    - At least 7 days since the last omega-memory upload on PyPI
+      (--early-release only with the owner's explicit approval)
     - PYPI_TOKEN_OMEGA in ~/.omega/secrets.json
     - Working tree clean on main, up to date with origin
     - Version not already tagged
@@ -108,14 +110,15 @@ def _load_preflight():
     return module
 
 
-def gate_before_bump(preflight_module, version: str) -> None:
-    """Version policy, changelog, tag and branch hygiene.
+def gate_before_bump(preflight_module, version: str, early_release: str | None = None) -> None:
+    """Release cadence, version policy, changelog, tag and branch hygiene.
 
     Run before bump_version, while the tree is still clean -- bumping writes to
     pyproject.toml and __init__.py, which would trip the clean-tree gate.
     """
-    step("Preflight: version policy and branch hygiene")
+    step("Preflight: release cadence, version policy and branch hygiene")
     preflight_module.reset_results()
+    preflight_module.check_release_cadence(early_release)
     preflight_module.check_version(version)
     preflight_module.check_git()
     failed = preflight_module.failures()
@@ -307,12 +310,15 @@ def main() -> int:
     ap.add_argument("version", help="Version X.Y.Z")
     ap.add_argument("--dry-run", action="store_true", help="Build + verify only; do not publish or push")
     ap.add_argument("--skip-confirm", action="store_true", help="Skip interactive confirmation")
+    ap.add_argument("--early-release", metavar="APPROVAL",
+                    help="Release inside the 7-day window; only with the owner's explicit "
+                         "approval for this release, which APPROVAL records")
     args = ap.parse_args()
 
     preflight_module = _load_preflight()
 
     preflight(args.version)
-    gate_before_bump(preflight_module, args.version)
+    gate_before_bump(preflight_module, args.version, args.early_release)
     bump_version(args.version)
     wheel, sdist = build()
     verify_public_artifact_boundary(wheel, sdist)
