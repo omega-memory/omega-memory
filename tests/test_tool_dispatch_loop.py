@@ -11,8 +11,6 @@ import asyncio
 import threading
 import time
 
-import pytest
-
 from omega.server import mcp_server
 from omega.server.hook_server import handlers
 
