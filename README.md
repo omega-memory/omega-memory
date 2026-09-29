@@ -5,7 +5,6 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/omega-memory.svg)](https://pypi.org/project/omega-memory/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1123%20passing-brightgreen.svg)]()
 
 ---
 
@@ -25,35 +24,57 @@ OMEGA solves this. Memory, coordination, and learning that runs entirely on your
 
 ## Quick Install
 
+OMEGA needs **Python 3.11 or newer**. Check with `python3 --version`: macOS ships Python 3.9, which is too old. If pip answers `No matching distribution found for omega-memory`, that is the reason; install a newer Python first (for example `brew install python@3.12`, or from [python.org](https://www.python.org/downloads/)).
+
+Install OMEGA into its own environment. Homebrew's Python refuses a plain `pip install` (PEP 668), and an isolated install keeps OMEGA's dependencies away from your projects. Pick one:
+
 ```bash
-pip install omega-memory[server]    # Full install (memory + MCP server)
-omega setup                         # Downloads model, registers MCP, installs hooks
-omega doctor                        # Verify everything works
+# pipx
+pipx install "omega-memory[server]"
+
+# or uv
+uv tool install "omega-memory[server]"
+
+# or a virtual environment
+python3.12 -m venv ~/.venvs/omega     # any Python 3.11 or newer
+~/.venvs/omega/bin/pip install "omega-memory[server]"
+export PATH="$HOME/.venvs/omega/bin:$PATH"
 ```
+
+Keep the quotes around `"omega-memory[server]"`: zsh, the default macOS shell, treats bare square brackets as a pattern and fails. The `[server]` extra installs the MCP server, which also runs the hook daemon; without it Claude Code gets no OMEGA tools and no hooks.
+
+Then:
+
+```bash
+omega setup     # downloads the embedding model, registers the MCP server, installs hooks
+omega doctor    # checks every step, and names the fix for anything that failed
+```
+
+`omega setup --dry-run` shows what setup would change without writing or downloading anything.
 
 ### Claude Desktop
 
 ```bash
-pip install omega-memory[server]
 omega setup --client claude-desktop
 ```
 
 This registers OMEGA as an MCP server in Claude Desktop's config. Restart Claude Desktop to activate.
 
-### Cursor, Claw Code, Windsurf, Cline, Codex
+### Cursor, Windsurf, Cline, Codex, Antigravity
 
 ```bash
-pip install omega-memory[server]
-omega setup --client cursor      # or: claw-code, windsurf, cline, codex
+omega setup --client cursor      # or: windsurf, cline, codex, antigravity
 ```
+
+Codex and Antigravity get their config file written; for the others setup prints the JSON block to paste. For any other MCP client, `omega setup --client venv` prints the command and arguments to use. Hooks (automatic capture and surfacing) are available with Claude Code only.
 
 <details>
 <summary><strong>Library-only install (no MCP server)</strong></summary>
 
-If you only need OMEGA as a Python library for scripts, CI/CD, or automation:
+If you only need OMEGA as a Python library for scripts, CI/CD, or automation, install it into your project's environment:
 
 ```bash
-pip install omega-memory    # Core only, no MCP server process
+pip install omega-memory    # Core only, no MCP server
 ```
 
 ```python
@@ -63,29 +84,28 @@ store("Always use TypeScript strict mode", "user_preference")
 results = query("TypeScript preferences")
 ```
 
-This gives you the full storage and retrieval API without running an MCP server (~50 MB lighter, no background process). Hooks still work:
-
-```bash
-omega setup --hooks-only    # Auto-capture + memory surfacing, no MCP server (~600MB RAM saved)
-```
+This gives you the full storage and retrieval API without running an MCP server. Hooks need the MCP server (the hook daemon runs inside it), so a library-only install has no automatic capture or surfacing.
 
 </details>
 
 ### From Source
 
 ```bash
-git clone https://github.com/omega-memory/omega.git
-cd omega
+git clone https://github.com/omega-memory/omega-memory.git
+cd omega-memory
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[server,dev]"
 omega setup
 ```
 
 `omega setup` will:
-1. Create `~/.omega/` directory
-2. Download the ONNX embedding model (~90 MB) to `~/.cache/omega/models/`
-3. Register `omega-memory` as an MCP server (Claude Code auto-detected, or specify --client)
+1. Create `~/.omega/` (or `$OMEGA_HOME` if you set it)
+2. Download the ONNX embedding model, bge-small-en-v1.5 (~130 MB), and a reranker (~90 MB) to `~/.cache/omega/models/`
+3. Register `omega-memory` as an MCP server (Claude Code auto-detected, or specify `--client`)
 4. Install session hooks into `~/.claude/settings.json`
 5. Add an OMEGA block to `~/.claude/CLAUDE.md`
+
+If a step fails, the summary marks it `[FAIL]` with the reason and setup exits with an error.
 
 ## 60-Second Quickstart
 
@@ -112,9 +132,9 @@ That's it. Memories persist across sessions, accumulate over time, and are surfa
 
 ## Key Features
 
-- **Memory & Learning** — Stores decisions, lessons, error patterns, and preferences with semantic search. Claude recalls what matters without you re-explaining everything each session. 25 memory tools including compaction, consolidation, timeline, graph traversal, and context virtualization (checkpoint/resume).
+- **Memory & Learning** — Stores decisions, lessons, error patterns, and preferences with semantic search. Claude recalls what matters without you re-explaining everything each session. Tools cover compaction, consolidation, timeline, graph traversal, and checkpoint/resume.
 
-- **Multi-Agent Coordination** *(omega-pro)* — File and branch locking, session management, task queues with dependencies, intent broadcasting, and agent-to-agent messaging. 29 coordination tools that prevent agents from overwriting each other's work.
+- **Multi-Agent Coordination** *(omega-pro)* — File and branch locking, session management, task queues with dependencies, intent broadcasting, and agent-to-agent messaging, so agents don't overwrite each other's work.
 
 - **Intelligent LLM Routing** *(omega-pro)* — Classifies tasks and routes to the optimal model. Coding → Claude Sonnet. Quick edit → Llama 8b at 1/60th the cost. 1M token context → Gemini Flash. 5 providers, 4 priority modes, sub-2ms intent classification.
 
@@ -149,7 +169,7 @@ That's it. Memories persist across sessions, accumulate over time, and are surfa
                                │ stdio/MCP
                ┌───────────────▼─────────────┐
                │   OMEGA MCP Server   │
-               │   25 core tools      │
+               │   core memory tools  │
                └──┬──────────────────┘
                   │
          ┌────────▼──────────────┐
@@ -165,61 +185,45 @@ That's it. Memories persist across sessions, accumulate over time, and are surfa
          └──────────────────────────────────────┘
 ```
 
-Single database, modular handlers. Optional modules (coordination, router, entity, knowledge, profile) are available via [omega-pro](https://github.com/omega-memory) and register into the same server process. No separate daemons, no microservices.
+Single database, modular handlers. Optional modules (coordination, router, entity, knowledge, profile) are available with [OMEGA Pro](https://omegamax.co/pro) and register into the same server process. No separate daemons, no microservices.
 
 ## MCP Tools Reference
 
-OMEGA runs as an MCP server inside Claude Code. The core package provides 25 memory tools. [omega-pro](https://github.com/omega-memory) adds coordination, routing, entity, knowledge, and profile tools.
+OMEGA runs as an MCP server inside Claude Code. By default it shows the client five tools (`omega_store`, `omega_welcome`, `omega_protocol`, `omega_tools`, `omega_call`) to save context: `omega_tools` lists everything available and `omega_call` runs any of it. Set `OMEGA_CONDENSED=0` in the server's environment to expose every tool directly.
 
-### Memory (25 tools)
+### Core tools
 
 | Tool | What it does |
 |------|-------------|
-| `omega_store` | Store typed memory (decision, lesson, error, summary) |
-| `omega_query` | Semantic search with tag filters and contextual re-ranking |
-| `omega_welcome` | Session briefing with recent memories and profile |
-| `omega_profile` | Read or update user profile |
-| `omega_delete_memory` | Delete a specific memory by ID |
-| `omega_edit_memory` | Edit the content of a memory |
-| `omega_list_preferences` | List all stored user preferences |
-| `omega_health` | Detailed health check with memory usage and recommendations |
-| `omega_backup` | Export or import memories for backup/restore |
-| `omega_lessons` | Cross-session lessons ranked by access count |
-| `omega_feedback` | Record feedback on a surfaced memory |
-| `omega_clear_session` | Clear all memories for a specific session |
-| `omega_similar` | Find memories similar to a given one |
-| `omega_timeline` | Memories grouped by day |
-| `omega_consolidate` | Prune stale memories, cap summaries, clean edges |
-| `omega_traverse` | Walk the relationship graph |
-| `omega_compact` | Cluster and summarize related memories |
+| `omega_store` | Store a memory (decision, lesson, error, preference, ...) |
+| `omega_query` | Search memories: semantic, exact phrase, timeline, or browse |
+| `omega_welcome` | Session briefing: recent context, reminders, profile |
+| `omega_protocol` | Operating rules for the session |
 | `omega_checkpoint` | Save task state for cross-session continuity |
-| `omega_resume_task` | Resume a previously checkpointed task |
-| `omega_remind` | Set a time-based reminder |
-| `omega_remind_list` | List active reminders |
-| `omega_remind_dismiss` | Dismiss a reminder |
-| `omega_type_stats` | Memory counts grouped by event type |
-| `omega_session_stats` | Memory counts grouped by session |
-| `omega_weekly_digest` | Weekly knowledge digest with stats and trends |
+| `omega_resume_task` | Resume a checkpointed task |
+| `omega_memory` | Edit, delete, supersede, rate, or link one memory; find similar ones |
+| `omega_profile` | Read or update the user profile and preferences |
+| `omega_remind` | Set, list, or dismiss time-based reminders |
+| `omega_maintain` | Health, consolidation, compaction, backup and restore |
+| `omega_stats` | Type breakdown, session stats, weekly digest |
+| `omega_reflect` | Find contradictions; trace how a topic's decisions evolved |
+| `omega_review` | Review a diff with memory of your codebase's conventions |
+| `context_packet` | Compact, task-aware memory packet for the current work |
+| `omega_consult_gpt`, `omega_consult_claude` | Ask another model for a second opinion (needs your own API key for that provider) |
 
-### Additional tools with omega-pro
-
-| Module | Tools | Description |
-|--------|------:|-------------|
-| Coordination | 29 | File/branch locking, sessions, tasks, messaging, audit |
-| Router | 10 | LLM routing, intent classification, model switching |
-| Entity | 8 | Corporate entities, relationships, hierarchies |
-| Knowledge | 5 | Document ingestion, semantic search, RAG |
-| Profile | 3 | AES-256 encrypted personal data storage |
+[OMEGA Pro](https://omegamax.co/pro) adds coordination, routing, entity, knowledge base, and profile tools.
 
 ## CLI
 
 | Command | Description |
 |---------|-------------|
-| `omega setup` | Create dirs, download model, register MCP, install hooks (`--hooks-only` to skip MCP) |
+| `omega setup` | Create dirs, download model, register MCP, install hooks (`--dry-run` to preview) |
 | `omega doctor` | Verify installation health |
+| `omega hooks setup` / `omega hooks doctor` | Install or check the Claude Code hooks only |
 | `omega status` | Memory count, store size, model status |
 | `omega query <text>` | Search memories by semantic similarity |
 | `omega store <text>` | Store a memory with a specified type |
+| `omega remember <text>` | Store a permanent preference |
 | `omega timeline` | Show memory timeline grouped by day |
 | `omega activity` | Show recent session activity overview |
 | `omega stats` | Memory type distribution and health summary |
@@ -229,29 +233,40 @@ OMEGA runs as an MCP server inside Claude Code. The core package provides 25 mem
 | `omega validate` | Validate database integrity |
 | `omega logs` | Show recent hook errors |
 | `omega migrate-db` | Migrate legacy JSON to SQLite |
+| `omega serve` | Run the MCP server (`omega serve --help` for the HTTP daemon) |
+
+### Free and Pro
+
+Core is free and open source. On the free tier, once the store holds 2,000 memories search switches from semantic search to a plain text match, and new memories stop being stored at 5,000. `omega status` shows where you are. OMEGA Pro removes both limits.
 
 <details>
 <summary><strong>Advanced Details</strong></summary>
 
-### Hooks (7 processes, 11 handlers)
+### Hooks
 
-All hooks dispatch via `fast_hook.py` → daemon UDS socket, with fail-open semantics.
+All hooks run `fast_hook.py`, which hands the work to the hook daemon inside the MCP server over `~/.omega/hook.sock`. If no server is running, the hooks return at once without doing anything, except reply capture, which runs on its own; none of them blocks Claude Code.
 
-| Hook | Matcher | Handlers | Purpose |
-|------|---------|----------|---------|
+| Hook | Matcher | Handler | Purpose |
+|------|---------|---------|---------|
 | SessionStart | all | `session_start` | Welcome briefing, session resume |
-| Stop | all | `session_stop` | Summary |
+| Stop | all | `assistant_capture` | Capture decisions and fixes from the reply |
+| Stop | all | `session_stop` | Session summary |
 | UserPromptSubmit | all | `auto_capture` | Auto-capture lessons/decisions |
-| PostToolUse | Edit/Write/NotebookEdit | `surface_memories` | Surface relevant memories |
-| PostToolUse | Bash/Read | `surface_memories` | Surface relevant memories |
+| PostToolUse | Edit/Write/NotebookEdit/Bash/Read | `surface_memories` | Surface relevant memories |
 
-> With omega-pro, additional coordination handlers register automatically: session lifecycle, file/branch claim guards, heartbeat, and git push guards.
+Memory text the hooks inject is labelled as stored data, not instructions.
+
+> With OMEGA Pro, additional coordination handlers register automatically: session lifecycle, file/branch claim guards, heartbeat, and git push guards.
+
+### HTTP daemon (optional)
+
+`omega serve install` runs one shared server under launchd instead of one per session (macOS). It listens on `127.0.0.1:8377`, refuses requests whose Host or Origin is not local, and requires a bearer key kept in `~/.omega/mcp_api_key`. `omega serve migrate-config` points Claude Code at the daemon and writes that key into its config; `omega serve restore-config` switches back.
 
 ### Storage
 
 | Path | Purpose |
 |------|---------|
-| `~/.omega/omega.db` | SQLite database (memories, embeddings, edges) |
+| `~/.omega/omega.db` | SQLite database (memories, embeddings, edges); set `OMEGA_HOME` to move `~/.omega` |
 | `~/.omega/profile.json` | User profile |
 | `~/.omega/hooks.log` | Hook error log |
 | `~/.cache/omega/models/bge-small-en-v1.5-onnx/` | ONNX embedding model |
@@ -297,31 +312,30 @@ All changes are idempotent.
 - Check `python3 -c "import omega"` works
 
 **MCP server fails to start:**
-- Run `pip install omega-memory[server]` (the `[server]` extra includes the MCP package)
+- Install the server extra into the same environment as OMEGA: `pip install "omega-memory[server]"` (or `pipx install --force "omega-memory[server]"`)
 
 **MCP server not registered:**
-```bash
-claude mcp add omega-memory -- python3 -m omega.server.mcp_server
-```
+- Run `omega setup` again, or run the `claude mcp add -s user omega-memory -- ...` command that `omega doctor` prints: it names the Python from OMEGA's own environment
 
 **Hooks not firing:**
-- Check `~/.claude/settings.json` has OMEGA hook entries
+- Run `omega hooks doctor`; `omega hooks setup` repairs missing or outdated entries
 - Check `~/.omega/hooks.log` for errors
 
 ## Development
 
 ```bash
 pip install -e ".[server,dev]"
-pytest tests/                # 2198+ tests
+pytest tests/                # Test suite
 ruff check src/              # Lint
 ```
 
 ## Uninstall
 
 ```bash
-claude mcp remove omega-memory
+claude mcp remove -s user omega-memory
+omega serve uninstall        # only if you installed the HTTP daemon
 rm -rf ~/.omega ~/.cache/omega
-pip uninstall omega-memory
+pipx uninstall omega-memory  # or: uv tool uninstall omega-memory, or delete the venv
 ```
 
 Manually remove OMEGA entries from `~/.claude/settings.json` and the `<!-- OMEGA:BEGIN -->` block from `~/.claude/CLAUDE.md`.
@@ -331,7 +345,7 @@ Manually remove OMEGA entries from `~/.claude/settings.json` and the `<!-- OMEGA
 - [Contributing Guide](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
-- [Report a Bug](https://github.com/omega-memory/omega/issues)
+- [Report a Bug](https://github.com/omega-memory/omega-memory/issues)
 
 ## License
 

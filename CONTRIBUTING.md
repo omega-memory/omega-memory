@@ -5,8 +5,8 @@ Thanks for your interest in contributing to OMEGA!
 ## Development Setup
 
 ```bash
-git clone https://github.com/omega-memory/omega.git
-cd omega
+git clone https://github.com/omega-memory/omega-memory.git
+cd omega-memory
 pip install -e ".[dev]"
 omega setup
 ```
@@ -46,7 +46,7 @@ ruff check src/ tests/                 # Lint
 
 ## Reporting Issues
 
-Use [GitHub Issues](https://github.com/omega-memory/omega/issues). For security vulnerabilities, see [SECURITY.md](SECURITY.md).
+Use [GitHub Issues](https://github.com/omega-memory/omega-memory/issues). For security vulnerabilities, see [SECURITY.md](SECURITY.md).
 
 ## License
 

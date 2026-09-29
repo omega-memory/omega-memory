@@ -15,7 +15,7 @@ If you discover a security vulnerability in OMEGA, please report it responsibly.
 
 Instead, use one of these methods:
 
-1. **GitHub Security Advisories** (preferred): Go to the [Security Advisories page](https://github.com/omega-memory/omega/security/advisories/new) and create a private advisory.
+1. **GitHub Security Advisories** (preferred): Go to the [Security Advisories page](https://github.com/omega-memory/omega-memory/security/advisories/new) and create a private advisory.
 2. **Email**: Contact the maintainers at hello@omega-memory.dev.
 
 ### What to include
