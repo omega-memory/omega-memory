@@ -348,6 +348,8 @@ class SQLiteStoreBase:
         # A/B feedback tracking: LRU cache of recent query contexts per memory
         self._recent_query_context: OrderedDict = OrderedDict()  # node_id -> {query_text, query_hint, score, vec_sim, ts}
         self._QUERY_CONTEXT_MAX = 50
+        # Per-thread nesting depth of untracked_lookup() blocks.
+        self._untracked_lookups = threading.local()
 
         # WAL checkpoint: PASSIVE every N writes, TRUNCATE every M writes.
         # PASSIVE is non-blocking but can't reclaim pages held by readers.

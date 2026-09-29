@@ -1182,11 +1182,12 @@ def auto_capture(
         # scope and changes someone else's (audit finding B3).
         scope_project, scope_entity = store.resolve_scope(meta, entity_id)
         try:
-            _similar_results = store.query(
-                content[:200], limit=8,
-                query_embedding=_precomputed_embedding,
-                project_path=scope_project, scope="project", entity_id=scope_entity,
-            )
+            with store.untracked_lookup():
+                _similar_results = store.query(
+                    content[:200], limit=8,
+                    query_embedding=_precomputed_embedding,
+                    project_path=scope_project, scope="project", entity_id=scope_entity,
+                )
             scopes = store.get_scopes([r.id for r in _similar_results])
             _similar_results = [
                 r for r in _similar_results

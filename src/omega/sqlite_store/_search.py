@@ -2,8 +2,9 @@
 
 import logging
 import time as _time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from pathlib import Path
 
 
@@ -878,6 +879,22 @@ class SearchMixin:
         params.append(limit)
 
         return self._conn.execute(query, params).fetchall()
+
+    @contextmanager
+    def untracked_lookup(self) -> Iterator[None]:
+        """Queries run inside this block are not recorded as retrievals.
+
+        get_retrieval_context() feeds implicit "helpful" feedback: a memory an
+        agent retrieved and then built on. A search the system makes for itself,
+        such as auto_capture's dedup lookup, is not that; recording it let every
+        store credit its own nearest neighbours as helpful (audit finding B6).
+        Per thread, so another session's real query is still recorded.
+        """
+        self._untracked_lookups.depth = getattr(self._untracked_lookups, "depth", 0) + 1
+        try:
+            yield
+        finally:
+            self._untracked_lookups.depth -= 1
 
     def get_retrieval_context(self) -> List[Dict[str, Any]]:
         """Return recent retrieval context entries (A/B feedback tracking data)."""
