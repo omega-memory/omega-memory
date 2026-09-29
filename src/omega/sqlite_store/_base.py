@@ -378,6 +378,11 @@ class SQLiteStoreBase:
         # Last contradiction detection results (consume-once, set by store())
         self._last_contradiction_results: list = []
 
+        # Older memories the last store() retired or flagged as possibly
+        # replaced (consume-once, set by store()). A retirement drops the old
+        # memory out of queries, so the caller must be told it happened.
+        self._last_supersession_results: list = []
+
         # Whether the most recent store() collapsed into an existing memory
         # instead of inserting (consume-once, set by store()). Callers need
         # this to report "Deduped" rather than claiming a write happened —

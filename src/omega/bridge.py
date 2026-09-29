@@ -859,69 +859,31 @@ def _schedule_auto_relate(store, node_id: str) -> None:
     t.start()
 
 
-_CROSS_TYPE_SUPERSEDE = {
-    "user_preference": {"decision"},
-}
+_MAX_CANDIDATES_SHOWN = 3
 
 
-def _detect_and_supersede(
-    store, node_id: str, content: str, event_type: str,
-    entity_id: Optional[str] = None,
-) -> int:
-    """Detect contradicting memories and mark old ones as superseded.
-
-    Only runs for decision, user_preference, user_fact types.
-    Uses embedding similarity to find candidates, then checks for topic
-    overlap with different content — indicating a contradiction/update.
-
-    Cross-type supersession: user_preference can supersede decision memories
-    (e.g. "stop suggesting HN" supersedes "post Show HN on Tuesday").
-
-    Returns count of superseded memories.
-    """
-    _SUPERSEDE_TYPES = {"decision", "user_preference", "user_fact"}
-    if event_type not in _SUPERSEDE_TYPES:
-        return 0
-    try:
-        embedding = store.get_embedding(node_id)
-        if not embedding:
-            return 0
-        similar = store.find_similar(embedding, limit=5)
-        superseded = 0
-        content_norm = content[:100].strip().lower()
-        cross_targets = _CROSS_TYPE_SUPERSEDE.get(event_type)
-        for r in similar:
-            if r.id == node_id:
-                continue
-            if (r.metadata or {}).get("superseded"):
-                continue
-            r_type = (r.metadata or {}).get("event_type", "")
-            if r_type != event_type:
-                if not cross_targets or r_type not in cross_targets:
-                    continue
-            if r.relevance < 0.80:
-                continue
-            if entity_id:
-                r_entity = (r.metadata or {}).get("entity_id", "")
-                if r_entity and r_entity != entity_id:
-                    continue
-            existing_norm = r.content[:100].strip().lower()
-            if content_norm == existing_norm:
-                continue
-            store.mark_superseded(r.id, superseded_by=node_id)
-            store.add_edge(node_id, r.id, "supersedes", r.relevance)
-            superseded += 1
-            logger.info(
-                "Ingest superseded %s (sim=%.2f) by %s",
-                r.id[:12], r.relevance, node_id[:12],
-            )
-        if superseded:
-            store.stats.setdefault("ingest_superseded", 0)
-            store.stats["ingest_superseded"] += superseded
-        return superseded
-    except Exception as e:
-        logger.debug("_detect_and_supersede failed for %s: %s", node_id[:12], e)
-        return 0
+def _format_supersession_report(report: List[Dict[str, Any]], new_id: str) -> str:
+    """Render what a store() retired or flagged, for the store result."""
+    retired = [r for r in report if r["action"] == "retired"]
+    candidates = [r for r in report if r["action"] == "candidate"]
+    text = ""
+    if retired:
+        lines = [
+            f"  - `{r['node_id']}` ({r['signal']}): {r['content_preview'][:60]}"
+            for r in retired
+        ]
+        text += "\n\n[SUPERSEDED] Retired older memory this one replaces:\n" + "\n".join(lines)
+    if candidates:
+        lines = [
+            f"  - `{r['node_id']}` (similarity {r['similarity']:.2f}): {r['content_preview'][:60]}"
+            for r in candidates[:_MAX_CANDIDATES_SHOWN]
+        ]
+        text += (
+            "\n\n[POSSIBLE UPDATE] Similar older memory kept active. If this one replaces it, run "
+            f'omega_memory(action="supersede", memory_id="<id>", target_id="{new_id}"):\n'
+            + "\n".join(lines)
+        )
+    return text
 
 
 def _split_atomic_facts(content: str, event_type: str) -> List[str]:
@@ -1383,6 +1345,11 @@ def auto_capture(
     else:
         output = f"Stored {node_id} ({event_type}, {ttl_str})"
 
+    # Supersession is settled inside store(): same project and entity only,
+    # and an older memory is retired only on an explicit update signal. A
+    # retired memory drops out of queries, so every retirement is reported.
+    output += _format_supersession_report(store.get_last_supersession_results(), node_id)
+
     # Surface deep contradiction detection results
     try:
         contradiction_results = store.get_last_contradiction_results()
@@ -1442,8 +1409,13 @@ def auto_capture(
         try:
             observation = _compress_to_observation(content, event_type)
             if observation:
-                meta["observation"] = observation
-                store.update_node(node_id, metadata=meta)
+                # Merge into the stored metadata: store() has added to it
+                # (supersession candidates, contradiction notes) since `meta`
+                # was built, and replacing it would erase those.
+                stored = store.get_node(node_id, track_access=False)
+                merged = dict(stored.metadata or {}) if stored else dict(meta)
+                merged["observation"] = observation
+                store.update_node(node_id, metadata=merged)
         except Exception as e:
             logger.debug(f"Observation compression failed for {node_id[:12]}: {e}")
 
@@ -1451,18 +1423,6 @@ def auto_capture(
     # Phase 4: Auto-relate — link to similar existing memories (background)
     # ------------------------------------------------------------------
     _schedule_auto_relate(store, node_id)
-
-    # ------------------------------------------------------------------
-    # Phase 4.1: Contradiction detection — supersede old conflicting memories
-    # ------------------------------------------------------------------
-    try:
-        supersede_count = _detect_and_supersede(
-            store, node_id, content, event_type, entity_id,
-        )
-        if supersede_count:
-            output += f" | {supersede_count} superseded"
-    except Exception as e:
-        logger.debug(f"Contradiction detection failed for {node_id[:12]}: {e}")
 
     # ------------------------------------------------------------------
     # Phase 4.2: Atomic fact splitting — create sub-nodes for recall

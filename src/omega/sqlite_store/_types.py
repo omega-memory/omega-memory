@@ -5,7 +5,7 @@ import struct
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, TypedDict
 
 from omega.embedding_config import get_embedding_config
 from omega.schema import SCHEMA_VERSION  # noqa: F401 -- re-exported
@@ -186,6 +186,16 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
 # ---------------------------------------------------------------------------
 # MemoryResult -- lightweight result object matching MemoryNode interface
 # ---------------------------------------------------------------------------
+
+
+class SupersessionRecord(TypedDict):
+    """One older memory a store() retired or flagged as possibly replaced."""
+
+    node_id: str
+    action: Literal["retired", "candidate"]
+    signal: Optional[str]  # detect_update_signal() evidence, None for a bare candidate
+    similarity: float
+    content_preview: str
 
 
 class MemoryResult:
