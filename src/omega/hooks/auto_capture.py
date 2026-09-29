@@ -52,9 +52,13 @@ MIN_PROMPT_LENGTH = 20
 # "let's use Redis? actually wait, can you ...", "can you remember that ...",
 # "what do you think? is MySQL better?" were all stored as decisions.
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
+# A wh-word opens a question on its own; an auxiliary only when a subject
+# follows it ("can you ...", "is it ..."), so "Do not deploy ..." and
+# "Will do, ..." stay statements.
 _QUESTION_OPENER = re.compile(
-    r"^\W*(?:can|could|would|will|should|shall|do|does|did|is|are|was|were|"
-    r"what|why|how|which|who|where|when)\b",
+    r"^\W*(?:(?:what|why|how|which|who|where|when)\b"
+    r"|(?:can|could|would|will|should|shall|do|does|did|is|are|was|were)"
+    r"\s+(?:you|we|i|it|they|there|he|she|this|that)\b)",
     re.IGNORECASE,
 )
 

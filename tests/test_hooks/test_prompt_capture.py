@@ -58,6 +58,18 @@ class TestQuestionsAreNotCaptured:
         assert "Let's go with Postgres for the orders service because" in content
         assert "Any concerns" not in content
 
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "Do not deploy on Fridays from now on; releases wait until Monday morning after standup.",
+            "Will do, and from now on run the full suite before saying something is fixed or done.",
+        ],
+    )
+    def test_statement_opening_with_an_auxiliary_is_captured(self, prompt):
+        """Only an auxiliary followed by a subject ("can you", "is it") asks."""
+        _submit(prompt)
+        assert len(_captured("decision")) == 1
+
     def test_plain_decision_is_still_captured(self):
         _submit("from now on please run the full test suite before you tell me that something is done or fixed")
         [content] = _captured("decision")
@@ -126,6 +138,11 @@ class TestRedactSecrets:
             "request 3f2b8c1e-9d4a-4c6b-8e2f-1a2b3c4d5e6f failed",  # UUID
             "the token is valid until midnight",
             "set the password rotation to 90 days",
+            # Identifiers, filenames and setting names in captured lessons.
+            "the fix was renaming getOAuth2AccessTokenFromCache to a plain getter",
+            "build emitted main.a1B2c3D4e5F6g7H8i9J0k1L2.js twice",
+            "set password = settings.DB_PASSWORD_PATH before the migration",
+            "the api key is STRIPE_SECRET_KEY in the environment",
         ],
     )
     def test_ordinary_text_is_left_alone(self, text):
