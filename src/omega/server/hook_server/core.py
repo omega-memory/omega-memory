@@ -54,6 +54,16 @@ _HOOK_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="omega-hoo
 
 _READ_TIMEOUT_S = 10.0
 
+# Monotonic time of the last real hook request (liveness probes excluded).
+# The MCP server's idle watchdog reads it: a session that uses hooks but no
+# OMEGA tool is active, and exiting under it leaves every hook dead.
+_last_request_at = 0.0
+
+
+def last_request_at() -> float:
+    """Monotonic time of the most recent hook request this process served (0.0 if none)."""
+    return _last_request_at
+
 
 def register_hook_handler(name: str, handler: HookHandler) -> None:
     """Register or replace a hook handler at runtime (used by plugins)."""
@@ -93,6 +103,7 @@ async def _read_request(reader: asyncio.StreamReader) -> bytes:
 
 async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     """Serve one hook client: read the request to EOF, dispatch, write the response."""
+    global _last_request_at
     started = time.monotonic()
     hook_name = "unknown"
     data = b""
@@ -103,6 +114,7 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
             # we are alive. Nothing to dispatch, nothing worth logging.
             return
 
+        _last_request_at = time.monotonic()
         request = json.loads(data.decode("utf-8").strip())
         hook_name = "+".join(request["hooks"]) if request.get("hooks") else request.get("hook", "unknown")
         response = await _respond(request)
@@ -135,6 +147,37 @@ async def _write_error(writer: asyncio.StreamWriter, message: str) -> None:
 
 
 _hook_server: asyncio.Server | None = None
+# (st_dev, st_ino) of the socket file this process bound. The path is shared
+# by every session's server and the newest one takes it over, so a server may
+# only remove the file while it is still the one it created.
+_bound_socket: tuple[int, int] | None = None
+
+
+def _file_identity(path) -> tuple[int, int] | None:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return stat.st_dev, stat.st_ino
+
+
+def release_socket_file() -> None:
+    """Remove the socket file and owner record if this process created them.
+
+    Safe to call from ``atexit`` or just before ``os._exit``: it does not
+    touch the event loop. A file another session's server has since bound at
+    the same path is left alone.
+    """
+    global _bound_socket
+    if sys.platform != "win32" and _bound_socket is not None:
+        sock_path = _pkg.SOCK_PATH
+        if sock_path and _file_identity(sock_path) == _bound_socket:
+            try:
+                sock_path.unlink()
+            except OSError as error:
+                logger.debug("socket unlink failed: %s", error)
+        _bound_socket = None
+    clear_owner_state(os.getpid())
 
 
 async def start_hook_server() -> asyncio.Server | None:
@@ -143,7 +186,7 @@ async def start_hook_server() -> asyncio.Server | None:
     Returns None when the socket cannot be bound. The MCP server keeps running
     without the daemon; ``fast_hook.py`` then falls back to its cold path.
     """
-    global _hook_server
+    global _hook_server, _bound_socket
     try:
         if sys.platform == "win32":
             _hook_server = await asyncio.start_server(handle_connection, host=_pkg.HOOK_HOST, port=_pkg.HOOK_PORT)
@@ -152,9 +195,13 @@ async def start_hook_server() -> asyncio.Server | None:
         else:
             sock_path = _pkg.SOCK_PATH
             sock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # Take the path over from whichever server holds it: that server
+            # keeps serving its own clients and, finding the file no longer
+            # its own, will not remove ours when it exits.
             if sock_path.exists():
                 sock_path.unlink()
             _hook_server = await asyncio.start_unix_server(handle_connection, path=str(sock_path))
+            _bound_socket = _file_identity(sock_path)
             sock_path.chmod(0o600)
             write_owner_state(os.getpid(), "unix", "ready")
             logger.info("hook server listening on %s", sock_path)
@@ -165,7 +212,7 @@ async def start_hook_server() -> asyncio.Server | None:
 
 
 async def stop_hook_server(srv: asyncio.Server | None = None) -> None:
-    """Stop the server and remove the socket file this process created."""
+    """Stop the server and remove the socket file, if this process still owns it."""
     global _hook_server
     server = srv or _hook_server
     if server is None:
@@ -173,9 +220,4 @@ async def stop_hook_server(srv: asyncio.Server | None = None) -> None:
     server.close()
     await server.wait_closed()
     _hook_server = None
-    if sys.platform != "win32" and _pkg.SOCK_PATH and _pkg.SOCK_PATH.exists():
-        try:
-            _pkg.SOCK_PATH.unlink()
-        except OSError as error:
-            logger.debug("socket unlink failed: %s", error)
-    clear_owner_state(os.getpid())
+    release_socket_file()

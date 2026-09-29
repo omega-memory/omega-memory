@@ -24,6 +24,9 @@ else:
     HOOK_HOST = None
     HOOK_PORT = None
 
+# Written by the hook server that owns the socket (hook_server/owner_state.py).
+OWNER_STATE_PATH = os.path.expanduser("~/.omega/hook.sock.owner.json")
+
 # Map hook names to their original script modules for fallback
 _FALLBACK_SCRIPTS = {
     "session_start": "session_start",
@@ -122,6 +125,52 @@ def delegate(hook_names, payload, timeout=5.0):
         return json.loads(response.decode("utf-8"))
     finally:
         s.close()
+
+
+def _socket_owner_alive():
+    """True while the process that owns the hook socket is still running.
+
+    A refused connection means nobody is listening on the socket: either a
+    server is still starting (retrying helps) or the server that created the
+    file died without removing it (retrying only adds seconds to every hook).
+    The owner record tells the two apart. No record means no owner.
+    """
+    try:
+        with open(OWNER_STATE_PATH, encoding="utf-8") as f:
+            pid = int(json.load(f)["pid"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if sys.platform == "win32":
+        return True  # os.kill(pid, 0) terminates the process on Windows
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # alive, owned by another user
+    return True
+
+
+def _delegate_with_retries(hook_names, payload, timeout):
+    """Send the request to the daemon; return its response, or None if none is reachable.
+
+    Retries a refused connection only while the socket's owner is alive (the
+    startup race). A missing socket, a slow daemon, or an owner that has
+    exited returns None at once.
+    """
+    for attempt in range(_CONNECT_RETRIES + 1):
+        try:
+            return delegate(hook_names, payload, timeout=timeout)
+        except socket.timeout:
+            return None  # daemon exists but slow — don't retry, fall through
+        except FileNotFoundError:
+            return None  # socket file missing — daemon not started
+        except OSError:
+            # ConnectionRefusedError and friends: nobody is accepting.
+            if attempt == _CONNECT_RETRIES or not _socket_owner_alive():
+                return None
+            time.sleep(_CONNECT_RETRY_DELAY)
+    return None
 
 
 def _fallback(hook_name, payload):
@@ -253,20 +302,7 @@ def main():
     if _SLOW_HOOKS.intersection(hook_names):
         timeout = 20.0
 
-    # Try daemon connection with retries (handles startup race where
-    # SessionStart hook fires before MCP server opens the socket).
-    result = None
-    for attempt in range(_CONNECT_RETRIES + 1):
-        try:
-            result = delegate(hook_names if is_batch else hook_names[0], payload, timeout=timeout)
-            break
-        except socket.timeout:
-            break  # Daemon exists but slow — don't retry, fall through
-        except FileNotFoundError:
-            break  # Socket file missing — daemon not started, skip retries
-        except (ConnectionRefusedError, OSError):
-            if attempt < _CONNECT_RETRIES:
-                time.sleep(_CONNECT_RETRY_DELAY)
+    result = _delegate_with_retries(hook_names if is_batch else hook_names[0], payload, timeout)
 
     elapsed_ms = (time.monotonic() - t0) * 1000
 

@@ -146,6 +146,7 @@ _SQLITE_EXECUTOR = ThreadPoolExecutor(
 # MCP tool calls that saturate _SQLITE_EXECUTOR. SQLite WAL mode handles
 # concurrent reader access safely across both executors. The hook daemon owns
 # the pool; it is imported here so shutdown releases it with the others.
+from omega.server.hook_server import core as _hook_core  # noqa: E402
 from omega.server.hook_server.core import _HOOK_EXECUTOR  # noqa: E402
 
 # RSS memory watchdog threshold (bytes). Default 1 GB for stdio, 4 GB for HTTP daemon.
@@ -155,9 +156,10 @@ from omega.server.hook_server.core import _HOOK_EXECUTOR  # noqa: E402
 _RSS_LIMIT_DEFAULT = "8192" if _TRANSPORT == "http" else "1024"
 _RSS_LIMIT_BYTES = int(os.environ.get("OMEGA_RSS_LIMIT_MB", _RSS_LIMIT_DEFAULT)) * 1024 * 1024
 
-# Idle watchdog: exit after this many seconds without a tool call.
-# Override with OMEGA_IDLE_TIMEOUT env var. 0 = disabled.
+# Idle watchdog: exit after this many seconds without a tool call or a hook
+# request. Override with OMEGA_IDLE_TIMEOUT env var. 0 = disabled.
 _IDLE_TIMEOUT = int(os.environ.get("OMEGA_IDLE_TIMEOUT", "3600"))
+_IDLE_CHECK_INTERVAL_S = min(30.0, max(1.0, _IDLE_TIMEOUT / 2))
 _last_activity: float = time.monotonic()
 
 # Shutdown flag — set True during graceful shutdown to reject new tool calls
@@ -185,6 +187,10 @@ def _close_on_exit():
         unregister_pid()
     except Exception:
         pass
+    # The watchdogs leave through os._exit, which skips the stdio loop's
+    # stop_hook_server; a socket file left behind makes every later hook wait
+    # on a dead socket.
+    _hook_core.release_socket_file()
     try:
         from omega.bridge import _close_store
 
@@ -487,11 +493,20 @@ def _get_usage_tracker():
     return _usage_tracker_instance
 
 
+def _idle_seconds(now: float) -> float:
+    """Seconds since the last tool call or hook request, whichever came later.
+
+    Hook traffic counts: a session that uses hooks but never calls an OMEGA
+    tool is still being served, and exiting under it silences every hook.
+    """
+    return now - max(_last_activity, _hook_core.last_request_at())
+
+
 async def _idle_watchdog():
-    """Exit the process if no tool call has been received within the timeout."""
+    """Exit the process if neither a tool call nor a hook request arrived within the timeout."""
     while True:
-        await asyncio.sleep(30)
-        idle = time.monotonic() - _last_activity
+        await asyncio.sleep(_IDLE_CHECK_INTERVAL_S)
+        idle = _idle_seconds(time.monotonic())
         if idle >= _IDLE_TIMEOUT:
             logger.warning("Idle for %.0fs (limit %ds), shutting down.", idle, _IDLE_TIMEOUT)
             _close_on_exit()
