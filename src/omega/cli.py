@@ -60,6 +60,8 @@ MAGMA_DIR = Path.home() / ".magma"
 MAGMA_GRAPHS = Path.home() / ".claude" / "magma"
 BGE_MODEL_DIR = OMEGA_CACHE / "models" / "bge-small-en-v1.5-onnx"
 MINILM_MODEL_DIR = OMEGA_CACHE / "models" / "all-MiniLM-L6-v2-onnx"
+# Left behind by gnosis/MAGMA, OMEGA's predecessors.
+GNOSIS_MINILM_DIR = Path.home() / ".cache" / "gnosis" / "models" / "all-MiniLM-L6-v2-onnx"
 # Primary model dir — bge-small-en-v1.5, falls back to all-MiniLM-L6-v2
 ONNX_MODEL_DIR = BGE_MODEL_DIR
 
@@ -567,6 +569,27 @@ def _install_embedding_model(download_bge: bool, errors_ref: list, steps_done: l
         if _download_minilm_model(MINILM_MODEL_DIR, errors_ref):
             print("  TIP: Run 'omega setup --download-model' to upgrade to bge-small-en-v1.5")
             steps_done.append("Embedding model (repaired)")
+
+
+def _link_legacy_minilm_model(steps_done: list) -> None:
+    """Reuse a MiniLM model left by gnosis/MAGMA when no embedding model could be installed.
+
+    A fallback only: it runs after the download step, when neither model is
+    loadable, so search gets real embeddings instead of hash pseudo-embeddings.
+    """
+    if not (_missing_model_files(BGE_MODEL_DIR) and _missing_model_files(MINILM_MODEL_DIR)):
+        return
+    if _missing_model_files(GNOSIS_MINILM_DIR):
+        return
+    print(f"  Found existing model at {GNOSIS_MINILM_DIR}, creating symlink...")
+    if MINILM_MODEL_DIR.is_symlink():
+        MINILM_MODEL_DIR.unlink()
+    elif MINILM_MODEL_DIR.exists():
+        shutil.rmtree(MINILM_MODEL_DIR)  # an incomplete download: it cannot load
+    MINILM_MODEL_DIR.parent.mkdir(parents=True, exist_ok=True)
+    MINILM_MODEL_DIR.symlink_to(GNOSIS_MINILM_DIR, target_is_directory=True)
+    print("  Symlinked to existing model")
+    steps_done.append("Embedding model (linked existing all-MiniLM-L6-v2)")
 
 
 def _download_reranker_model(steps_done: list, steps_skipped: list) -> None:
@@ -1383,20 +1406,9 @@ def cmd_setup(args):
     _install_embedding_model(download_model, model_errors, steps_done, dry_run=dry_run)
     errors.extend(f"Embedding model: {error}" for error in model_errors)
 
-    # 3. Check for existing MAGMA model and symlink
-    gnosis_model = Path.home() / ".cache" / "gnosis" / "models" / "all-MiniLM-L6-v2-onnx"
-    minilm_model_path = MINILM_MODEL_DIR / "model.onnx"
-    if (
-        not dry_run
-        and gnosis_model.exists()
-        and not minilm_model_path.exists()
-        and not (BGE_MODEL_DIR / "model.onnx").exists()
-    ):
-        print(f"  Found existing model at {gnosis_model}, creating symlink...")
-        if MINILM_MODEL_DIR.exists():
-            shutil.rmtree(MINILM_MODEL_DIR)
-        MINILM_MODEL_DIR.symlink_to(gnosis_model)
-        print("  Symlinked to existing model")
+    # 3. No model could be installed: reuse one left by gnosis/MAGMA, if any
+    if not dry_run:
+        _link_legacy_minilm_model(steps_done)
 
     # 3b. Reranker: fetch it now rather than during the first capture of a session
     if dry_run:

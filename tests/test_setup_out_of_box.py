@@ -37,6 +37,9 @@ def claude_home(tmp_path, monkeypatch):
     """Point every path setup and doctor touch at a temp home."""
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
+    # Hermetic: nothing here may depend on the machine's own home or caches.
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(cli, "GNOSIS_MINILM_DIR", home / ".cache" / "gnosis" / "models" / "all-MiniLM-L6-v2-onnx")
     monkeypatch.setattr(cli, "SETTINGS_JSON_PATH", home / ".claude" / "settings.json")
     monkeypatch.setattr(cli, "CLAUDE_MD_PATH", home / ".claude" / "CLAUDE.md")
     monkeypatch.setattr(cli, "CLAUDE_JSON_PATH", home / ".claude.json")
@@ -455,3 +458,75 @@ def test_doctor_warns_about_a_millisecond_timeout(claude_home, core_only_data_di
 
     assert any("3000" in m and "seconds" in m and "omega hooks setup" in m for m in _by_status(report, "warn"))
     assert "5/5 OMEGA hooks configured" in _by_status(report, "ok")
+
+
+# ---------------------------------------------------------------------------
+# A MiniLM model left by gnosis/MAGMA: reused only when nothing could be installed
+# ---------------------------------------------------------------------------
+
+
+def _legacy_model(home: Path) -> Path:
+    legacy = cli.GNOSIS_MINILM_DIR
+    legacy.mkdir(parents=True)
+    for name in cli._MODEL_LOAD_FILES:
+        (legacy / name).write_bytes(b"x")
+    return legacy
+
+
+def test_legacy_model_is_linked_when_no_model_could_be_installed(claude_home):
+    legacy = _legacy_model(claude_home)
+    assert not cli.MINILM_MODEL_DIR.parent.exists()  # the case that crashed: no models dir yet
+    done: list = []
+
+    cli._link_legacy_minilm_model(done)
+
+    assert cli.MINILM_MODEL_DIR.is_symlink()
+    assert cli.MINILM_MODEL_DIR.resolve() == legacy.resolve()
+    assert done == ["Embedding model (linked existing all-MiniLM-L6-v2)"]
+
+
+def test_legacy_model_replaces_a_broken_link_or_an_incomplete_download(claude_home):
+    legacy = _legacy_model(claude_home)
+    cli.MINILM_MODEL_DIR.parent.mkdir(parents=True)
+    cli.MINILM_MODEL_DIR.symlink_to(claude_home / "gone")  # dangling
+    cli._link_legacy_minilm_model([])
+    assert cli.MINILM_MODEL_DIR.resolve() == legacy.resolve()
+
+    cli.MINILM_MODEL_DIR.unlink()
+    cli.MINILM_MODEL_DIR.mkdir()
+    (cli.MINILM_MODEL_DIR / "tokenizer.json").write_bytes(b"x")  # weights never arrived
+    cli._link_legacy_minilm_model([])
+    assert cli.MINILM_MODEL_DIR.resolve() == legacy.resolve()
+
+
+def test_legacy_model_is_ignored_when_bge_is_installed(claude_home):
+    _legacy_model(claude_home)
+    cli.BGE_MODEL_DIR.mkdir(parents=True)
+    for name in cli._MODEL_LOAD_FILES:
+        (cli.BGE_MODEL_DIR / name).write_bytes(b"x")
+    done: list = []
+
+    cli._link_legacy_minilm_model(done)
+
+    assert not cli.MINILM_MODEL_DIR.exists() and not cli.MINILM_MODEL_DIR.is_symlink()
+    assert done == []
+
+
+def test_setup_falls_back_to_the_legacy_model_when_the_download_fails(claude_home, core_only_data_dir, monkeypatch, capsys):
+    _legacy_model(claude_home)
+
+    def offline(target_dir, errors_ref):
+        errors_ref.append("HTTP Error 503")
+        return False
+
+    monkeypatch.setattr(cli, "_download_bge_model", offline)
+    monkeypatch.setattr(cli, "_download_reranker_model", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_mcp_importable", lambda python_path: True)
+
+    with pytest.raises(SystemExit):
+        cli.cmd_setup(argparse.Namespace(client=None, hooks_only=False, dry_run=False, download_model=False))
+
+    out = capsys.readouterr().out
+    assert cli.MINILM_MODEL_DIR.is_symlink()
+    assert "[OK] Embedding model (linked existing all-MiniLM-L6-v2)" in out
+    assert "[FAIL] Embedding model: HTTP Error 503" in out
