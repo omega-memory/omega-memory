@@ -311,6 +311,58 @@ class TestTTL:
         removed = store.cleanup_expired()
         assert removed >= 1
 
+    def test_cleanup_expired_deletes_only_rows_past_their_expiry(self, store, monkeypatch):
+        """Expiry is compared at full timestamp precision (issue #83).
+
+        Cleanup used to compare SQLite datetime() text ('2026-09-29 10:00:00')
+        with isoformat() text ('2026-09-29T08:00:00...'); ' ' sorts before 'T',
+        so a row expiring later the same UTC day was deleted early.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        # A half-millisecond clock: SQLite's strftime() rounds it one way with a
+        # date modifier and the other way without one, and Python formatting
+        # truncates it, so the zero-TTL row below only expires when both sides
+        # of the comparison are formatted by the same SQLite path.
+        fixed_now = datetime(2026, 9, 29, 8, 0, 0, 123500, tzinfo=timezone.utc)
+
+        class FixedClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now.astimezone(tz)
+
+        monkeypatch.setattr("omega.sqlite_store._maintenance.datetime", FixedClock)
+
+        def store_with_expiry(content, created_at, ttl_seconds):
+            node_id = store.store(content=content)
+            store._conn.execute(
+                "UPDATE memories SET created_at = ?, ttl_seconds = ? WHERE node_id = ?",
+                (created_at.isoformat(), ttl_seconds, node_id),
+            )
+            return node_id
+
+        expires_later_today = store_with_expiry(
+            "Deploy window notes that expire at ten UTC", fixed_now - timedelta(hours=1), 3 * 3600,
+        )
+        already_expired = store_with_expiry(
+            "Standup scratchpad that expired at seven UTC", fixed_now - timedelta(hours=2), 3600,
+        )
+        zero_ttl_same_ms = store_with_expiry(
+            "Zero-TTL marker created in the cleanup millisecond", fixed_now, 0,
+        )
+        # Catches a regression to whole-second comparison: this row expires
+        # one millisecond after the cleanup runs.
+        zero_ttl_next_ms = store_with_expiry(
+            "Zero-TTL marker created one millisecond later", fixed_now + timedelta(milliseconds=1), 0,
+        )
+        store._conn.commit()
+
+        assert store.cleanup_expired() == 2
+        assert store.get_node(expires_later_today) is not None
+        assert store.get_node(already_expired) is None
+        assert store.get_node(zero_ttl_same_ms) is None
+        assert store.get_node(zero_ttl_next_ms) is not None
+
     def test_permanent_node(self, store):
         nid = store.store(content="Permanent", ttl_seconds=None)
         node = store.get_node(nid)

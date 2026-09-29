@@ -88,11 +88,16 @@ class MaintenanceMixin:
         """Remove expired memories. Returns count removed."""
         with self._lock:
             now = datetime.now(timezone.utc).isoformat()
-            # Find expired: created_at + ttl_seconds < now
+            # Find expired: created_at + ttl_seconds <= now. Both sides go through
+            # the same strftime() with a modifier (SQLite rounds sub-millisecond
+            # input differently without one) so they compare as identical UTC text
+            # to the millisecond; datetime() text against isoformat() text sorts
+            # ' ' before 'T' and deleted rows up to a day early (#83).
             rows = self._conn.execute(
                 """SELECT id, node_id, content, event_type FROM memories
                    WHERE ttl_seconds IS NOT NULL
-                   AND datetime(created_at, '+' || ttl_seconds || ' seconds') < ?""",
+                   AND strftime('%Y-%m-%d %H:%M:%f', created_at, '+' || ttl_seconds || ' seconds')
+                       <= strftime('%Y-%m-%d %H:%M:%f', ?, '+0 seconds')""",
                 (now,),
             ).fetchall()
 
