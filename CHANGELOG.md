@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.18] - 2026-09-29
+
+### Fixed
+
+- **Memories with a TTL were deleted up to a day before they expired.**
+  Expiry cleanup compared SQLite's `datetime()` text with Python's
+  `isoformat()` text; a space sorts before `T`, so any memory due to expire
+  later the same UTC day counted as expired. Cleanup runs at startup and
+  periodically during queries, so this happened routinely. Both timestamps
+  are now normalised the same way and compared to the millisecond. Thanks to
+  @QutritSystems for the report (#83).
+
 ## [1.5.17] - 2026-09-16
 
 ### Fixed
