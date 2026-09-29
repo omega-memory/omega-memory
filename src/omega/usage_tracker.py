@@ -6,7 +6,7 @@ and provides aggregated usage queries for the admin dashboard.
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -49,6 +49,15 @@ def _estimate_cost(model: str, input_tokens: int, output_tokens: int,
         + cache_write * pricing.get("cache_write", 3.75) / 1_000_000
     )
     return round(cost, 6)
+
+
+def _window_start(days: int) -> str:
+    """Start of a look-back window, in the isoformat() text created_at is stored as.
+
+    Comparing that column with SQLite datetime() text is wrong: ' ' sorts before
+    'T', so every call from the cutoff's calendar day counted as inside the window.
+    """
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
 
 class UsageTracker:
@@ -109,10 +118,10 @@ class UsageTracker:
                            SUM(estimated_cost_usd) as total_cost,
                            COUNT(*) as call_count
                     FROM llm_usage
-                    WHERE created_at > datetime('now', '-' || ? || ' days')
+                    WHERE created_at > ?
                     GROUP BY {group_by}
                     ORDER BY total_cost DESC""",
-                (days,),
+                (_window_start(days),),
             ).fetchall()
         return [
             {group_by: r[0], "total_input_tokens": r[1], "total_output_tokens": r[2],
@@ -126,8 +135,8 @@ class UsageTracker:
                 """SELECT SUM(estimated_cost_usd), SUM(input_tokens), SUM(output_tokens),
                           COUNT(*)
                    FROM llm_usage
-                   WHERE created_at > datetime('now', '-' || ? || ' days')""",
-                (days,),
+                   WHERE created_at > ?""",
+                (_window_start(days),),
             ).fetchone()
         return {
             "total_usd": round(row[0] or 0, 4),
@@ -145,11 +154,11 @@ class UsageTracker:
                           SUM(estimated_cost_usd) as total_cost,
                           COUNT(*) as call_count
                    FROM llm_usage
-                   WHERE created_at > datetime('now', '-' || ? || ' days')
+                   WHERE created_at > ?
                    GROUP BY tool_name
                    ORDER BY call_count DESC
                    LIMIT ?""",
-                (days, limit),
+                (_window_start(days), limit),
             ).fetchall()
         return [
             {"tool_name": r[0], "total_tokens": r[1], "total_cost_usd": r[2], "call_count": r[3]}

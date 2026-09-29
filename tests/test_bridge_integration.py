@@ -295,3 +295,77 @@ def test_status():
     assert "node_count" in result
     assert "backend" in result
     assert result["backend"] == "sqlite"
+
+
+# ============================================================================
+# 13. diagnostic_report windows
+# ============================================================================
+
+
+def test_diagnostic_windows_count_only_rows_inside_them(monkeypatch):
+    """Every diagnostic window compares timestamps in the stored format.
+
+    Rows store isoformat text ('2026-09-22T08:00:00+00:00'); comparing it with
+    SQLite datetime() text ('2026-09-22 08:00:01') sorted 'T' after ' ', so rows
+    from the cutoff's calendar day landed on the wrong side of every window.
+    """
+    import sqlite3
+    import sys
+    import types
+    from datetime import datetime, timedelta, timezone
+
+    from omega.bridge import _get_store, diagnostic_report
+
+    now = datetime.now(timezone.utc)
+
+    def just_outside(days):
+        return (now - timedelta(days=days, seconds=1)).isoformat()
+
+    def just_inside(days):
+        return (now - timedelta(days=days) + timedelta(hours=1)).isoformat()
+
+    db = _get_store()
+    node_ids = []
+    for content, created_at in [
+        ("Postgres vacuum schedule for the analytics replica", just_outside(7)),
+        ("Redis eviction policy switched to allkeys-lru", just_inside(7)),
+        ("Terraform workspace naming convention for staging", just_outside(14)),
+        ("Grafana alert routing to the on-call rotation", just_inside(14)),
+    ]:
+        node_id = db.store(content=content)
+        db._conn.execute("UPDATE memories SET created_at = ? WHERE node_id = ?", (created_at, node_id))
+        node_ids.append(node_id)
+    db._conn.commit()
+    assert len(set(node_ids)) == 4
+
+    # Pro's coordination tables, which Pro writes with isoformat() timestamps.
+    coord = sqlite3.connect(":memory:")
+    coord.execute("CREATE TABLE coord_audit (tool_name TEXT, latency_ms REAL, created_at TEXT)")
+    coord.execute("CREATE TABLE coord_sessions (started_at TEXT)")
+    coord.executemany(
+        "INSERT INTO coord_audit VALUES ('mcp__omega-memory__omega_query', 5, ?)",
+        [(just_outside(30),), (just_inside(30),)],
+    )
+    coord.executemany(
+        "INSERT INTO coord_sessions VALUES (?)",
+        [(just_outside(7),), (just_inside(7),), (just_outside(30),), (just_inside(30),)],
+    )
+
+    class FakeManager:
+        def get_read_connection(self):
+            return coord
+
+    coordination = types.ModuleType("omega_platform.orchestrator.coordination")
+    coordination.get_manager = lambda: FakeManager()
+    monkeypatch.setitem(sys.modules, "omega_platform", types.ModuleType("omega_platform"))
+    monkeypatch.setitem(sys.modules, "omega_platform.orchestrator", types.ModuleType("omega_platform.orchestrator"))
+    monkeypatch.setitem(sys.modules, "omega_platform.orchestrator.coordination", coordination)
+
+    report = diagnostic_report(days=30)
+
+    assert report["memory_health"]["velocity_total_7d"] == 1
+    assert report["memory_health"]["dead_memories"] == 1
+    assert report["tool_usage"]["total_calls"] == 1
+    assert report["tool_usage"]["omega_calls"] == 1
+    assert report["tool_usage"]["top_tools"][0]["calls"] == 1
+    assert report["sessions"] == {"total": 4, "week": 1, "month": 3}

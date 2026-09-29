@@ -4657,6 +4657,15 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
     """
     report: Dict[str, Any] = {}
 
+    # Window bounds in the isoformat() text the timestamps are stored as.
+    # SQLite datetime() text sorts ' ' before 'T', which put rows from the
+    # cutoff's calendar day on the wrong side of every window.
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(days=days)).isoformat()
+    week_start = (now - timedelta(days=7)).isoformat()
+    dead_before = (now - timedelta(days=14)).isoformat()
+    month_start = (now - timedelta(days=30)).isoformat()
+
     # --- 1. Memory Health ---------------------------------------------------
     db = _get_store()
     rate_stats = access_rate_stats()
@@ -4664,8 +4673,9 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
     # Velocity: memories created in last 7 days by event type
     velocity_rows = db._conn.execute(
         """SELECT event_type, COUNT(*) FROM memories
-           WHERE created_at > datetime('now', '-7 days')
-           GROUP BY event_type ORDER BY COUNT(*) DESC"""
+           WHERE created_at > ?
+           GROUP BY event_type ORDER BY COUNT(*) DESC""",
+        (week_start,),
     ).fetchall()
     velocity = [{"event_type": r[0], "count": r[1]} for r in velocity_rows]
     week_total = sum(r[1] for r in velocity_rows)
@@ -4673,7 +4683,8 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
     # Dead memories: never accessed, older than 14 days
     dead_row = db._conn.execute(
         """SELECT COUNT(*) FROM memories
-           WHERE access_count = 0 AND created_at < datetime('now', '-14 days')"""
+           WHERE access_count = 0 AND created_at < ?""",
+        (dead_before,),
     ).fetchone()
     dead_count = dead_row[0] if dead_row else 0
     total = rate_stats["total_memories"]
@@ -4717,9 +4728,9 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
                 """SELECT tool_name, COUNT(*) as calls,
                           AVG(latency_ms) as avg_latency
                    FROM coord_audit
-                   WHERE created_at > datetime('now', '-' || ? || ' days')
+                   WHERE created_at > ?
                    GROUP BY tool_name ORDER BY calls DESC LIMIT 20""",
-                (days,),
+                (window_start,),
             ).fetchall()
             tool_usage["top_tools"] = [
                 {"tool": r[0], "calls": r[1], "avg_latency_ms": round(r[2]) if r[2] else None}
@@ -4729,8 +4740,8 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
             # Total call count
             total_row = mgr.get_read_connection().execute(
                 """SELECT COUNT(*) FROM coord_audit
-                   WHERE created_at > datetime('now', '-' || ? || ' days')""",
-                (days,),
+                   WHERE created_at > ?""",
+                (window_start,),
             ).fetchone()
             tool_usage["total_calls"] = total_row[0] if total_row else 0
 
@@ -4738,9 +4749,9 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
             omega_rows = mgr.get_read_connection().execute(
                 """SELECT tool_name, COUNT(*) FROM coord_audit
                    WHERE tool_name LIKE 'mcp__omega%'
-                     AND created_at > datetime('now', '-' || ? || ' days')
+                     AND created_at > ?
                    GROUP BY tool_name ORDER BY COUNT(*) DESC""",
-                (days,),
+                (window_start,),
             ).fetchall()
             tool_usage["omega_tools"] = [{"tool": r[0], "calls": r[1]} for r in omega_rows]
             tool_usage["omega_calls"] = sum(r[1] for r in omega_rows)
@@ -4757,9 +4768,10 @@ def diagnostic_report(days: int = 30) -> Dict[str, Any]:
             sess_row = mgr.get_read_connection().execute(
                 """SELECT
                      COUNT(*),
-                     SUM(CASE WHEN started_at > datetime('now', '-7 days') THEN 1 ELSE 0 END),
-                     SUM(CASE WHEN started_at > datetime('now', '-30 days') THEN 1 ELSE 0 END)
-                   FROM coord_sessions"""
+                     SUM(CASE WHEN started_at > ? THEN 1 ELSE 0 END),
+                     SUM(CASE WHEN started_at > ? THEN 1 ELSE 0 END)
+                   FROM coord_sessions""",
+                (week_start, month_start),
             ).fetchone()
             if sess_row:
                 sessions = {

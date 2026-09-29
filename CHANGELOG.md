@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Usage and diagnostic stats miscounted by up to a day.** Look-back windows
+  compared stored `isoformat()` timestamps with SQLite `datetime()` text, the
+  mismatch behind #83, which put rows from a window's first calendar day on
+  the wrong side of it. LLM usage and cost totals, the `omega_stats`
+  diagnostic's 7-day memory velocity and, with Pro, its tool-call and session
+  counts included up to a day of older rows; its dead-memory count missed
+  memories that crossed the 14-day mark that day. Window bounds are now
+  computed in the stored format.
+
 ## [1.5.18] - 2026-09-29
 
 ### Fixed

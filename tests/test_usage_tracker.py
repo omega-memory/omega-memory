@@ -62,3 +62,32 @@ def test_local_embedding_zero_cost(tmp_path):
     cost = tracker.get_cost_estimate(days=1)
     assert cost["total_usd"] == 0.0
     tracker.close()
+
+
+def test_usage_windows_exclude_calls_older_than_the_window(tmp_path):
+    """Windows compare stored isoformat text with a cutoff in the same format.
+
+    Comparing it with SQLite datetime() text sorted 'T' after ' ', so every
+    call from the cutoff's calendar day counted as inside the window.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from omega.usage_tracker import UsageTracker
+
+    tracker = UsageTracker(db_path=str(tmp_path / "usage.db"))
+    tracker.log_call("s1", "omega_store", "claude-sonnet-4-6", 100, 50)
+    tracker.log_call("s1", "omega_store", "claude-sonnet-4-6", 100, 50)
+    window_start = datetime.now(timezone.utc) - timedelta(days=7)
+    tracker._conn.executemany(
+        "UPDATE llm_usage SET created_at = ? WHERE id = ?",
+        [
+            ((window_start - timedelta(seconds=1)).isoformat(), 1),
+            ((window_start + timedelta(hours=1)).isoformat(), 2),
+        ],
+    )
+    tracker._conn.commit()
+
+    assert tracker.get_usage(days=7)[0]["call_count"] == 1
+    assert tracker.get_cost_estimate(days=7)["total_calls"] == 1
+    assert tracker.get_top_tools(days=7)[0]["call_count"] == 1
+    tracker.close()
