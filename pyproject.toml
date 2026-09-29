@@ -36,7 +36,8 @@ Changelog = "https://github.com/omega-memory/omega-memory/blob/main/CHANGELOG.md
 Issues = "https://github.com/omega-memory/omega-memory/issues"
 
 [project.optional-dependencies]
-server = ["mcp>=1.0.0,<2.0.0", "starlette>=0.36.0", "uvicorn>=0.27.0"]
+# mcp 1.10 added the DNS-rebinding protection the HTTP daemon requires.
+server = ["mcp>=1.10.0,<2.0.0", "starlette>=0.36.0", "uvicorn>=0.27.0"]
 encrypt = ["cryptography>=41.0.0", "keyring>=25.0.0"]
 full = [
     "omega-memory[server]",
