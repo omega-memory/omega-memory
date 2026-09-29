@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hook-injected memories are no longer called "ground truth".** The
   CLAUDE.md block setup installs, and the memory text the session-start and
   file hooks inject, now say it is stored data to weigh, not instructions.
+- **An unused HTTP server module is removed.** `omega.server.http_server`
+  had the same missing Host/Origin checks and took its key in the URL;
+  nothing shipped or called it.
 - **The Stop hook script no longer contains a usage upload.** An unused code
   path could post session usage to a Supabase project named in the
   environment; it is removed.
@@ -82,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A fresh install's first search found nothing.** New installs now get the
   bge-small-en-v1.5 embedding model, which the search thresholds are tuned
   for, instead of all-MiniLM. Existing installs keep their model.
+- **Setup crashed on machines with the old gnosis model cache** when no
+  model could be downloaded. It now links that model safely as a fallback.
 - **Setup and doctor said OK without the MCP server package.** Without the
   `[server]` extra they now fail and say how to install it.
 - **Hooks failed when OMEGA was installed under a path with a space.** Hook
@@ -94,6 +99,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it; a session that exited removed the socket another session was using.
   Servers now remove only the socket they created, hook traffic keeps a
   server alive, and hooks skip a dead socket at once.
+- **A stuck hook could hold Claude Code for over an hour.** Setup wrote hook
+  timeouts in milliseconds (5000, 3000) but Claude Code reads seconds. They
+  are now 10 to 15 seconds, just above what the hook client itself waits,
+  and `omega setup` / `omega hooks setup` rewrite the old values in
+  settings.json; `omega doctor` warns about any left.
 - **Hooks waited behind tool calls.** Tool calls ran on the loop that serves
   hooks, and the first session start of the day ran maintenance before
   answering. Both now happen off the hook path.
