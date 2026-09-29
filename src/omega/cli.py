@@ -4065,7 +4065,7 @@ def main():
     setup_parser.add_argument(
         "--hooks-only",
         action="store_true",
-        help="Configure hooks and CLAUDE.md WITHOUT MCP server (saves ~600MB RAM per session)",
+        help="Configure hooks and CLAUDE.md without registering the MCP server (hooks then run only while some OMEGA MCP server is running)",
     )
 
     status_parser = subparsers.add_parser("status", help="Show memory count, store size, model status")
