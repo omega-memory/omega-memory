@@ -6,6 +6,7 @@ then producing structured findings via LLM analysis.
 """
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,15 @@ COUNCIL_DOMAINS = ("platform_health", "security", "innovation")
 
 # Resolve config dir relative to package root
 _CONFIG_DIR = Path(__file__).parent.parent.parent / "config" / "councils"
+
+
+def _window_start(days: int) -> str:
+    """Start of a look-back window, in the isoformat() text Pro stores timestamps as.
+
+    Comparing those columns with SQLite datetime() text is wrong: ' ' sorts before
+    'T', so every row from the cutoff's calendar day counted as inside the window.
+    """
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
 
 class Council:
@@ -97,10 +107,11 @@ class Council:
                     """SELECT tool_name, COUNT(*) as fail_count
                        FROM coord_audit
                        WHERE result_summary LIKE '%error%'
-                         AND created_at > datetime('now', '-1 day')
+                         AND created_at > ?
                        GROUP BY tool_name
                        ORDER BY fail_count DESC
-                       LIMIT 10"""
+                       LIMIT 10""",
+                    (_window_start(1),),
                 ).fetchall()
             return [{"tool": r[0], "failures": r[1]} for r in rows]
         except Exception:
@@ -140,8 +151,9 @@ class Council:
                 rows = mgr.get_read_connection().execute(
                     """SELECT action_type, action_target, status, created_at
                        FROM coord_external_actions
-                       WHERE created_at > datetime('now', '-1 day')
-                       ORDER BY created_at DESC LIMIT 20"""
+                       WHERE created_at > ?
+                       ORDER BY created_at DESC LIMIT 20""",
+                    (_window_start(1),),
                 ).fetchall()
             return [{"type": r[0], "target": r[1], "status": r[2], "at": r[3]} for r in rows]
         except Exception:
@@ -163,9 +175,10 @@ class Council:
                 rows = mgr.get_read_connection().execute(
                     """SELECT tool_name, COUNT(*) as calls
                        FROM coord_audit
-                       WHERE created_at > datetime('now', '-7 days')
+                       WHERE created_at > ?
                        GROUP BY tool_name
-                       ORDER BY calls DESC"""
+                       ORDER BY calls DESC""",
+                    (_window_start(7),),
                 ).fetchall()
             return [{"tool": r[0], "calls_7d": r[1]} for r in rows]
         except Exception:
