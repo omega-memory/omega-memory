@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from typing import NamedTuple
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -283,6 +284,16 @@ def _find_hook_command(hooks: dict, event: str, identity: tuple[str, tuple[str, 
     )
 
 
+# Claude Code reads a hook's `timeout` in seconds. Setup before 1.5.19 wrote
+# milliseconds (5000, 3000): no hook needs 1000 seconds, so a value this large
+# on one of OMEGA's own entries is one of those and is rewritten.
+_MILLISECOND_TIMEOUT_FLOOR = 1000
+
+
+def _is_millisecond_timeout(timeout) -> bool:
+    return isinstance(timeout, (int, float)) and timeout >= _MILLISECOND_TIMEOUT_FLOOR
+
+
 def _read_settings_json() -> dict:
     """Load ~/.claude/settings.json; a file we cannot parse is an error, never overwritten."""
     if not SETTINGS_JSON_PATH.exists():
@@ -303,8 +314,9 @@ def _merge_hook_entries(settings: dict, manifest: dict, hooks_src: Path, python_
 
     Returns ``(configured, repaired, already_configured)``. An existing entry
     for the same script and arguments is rewritten in place when its command
-    differs (moved install, or left unquoted by an older setup) rather than
-    duplicated.
+    differs (moved install, or left unquoted by an older setup) or its
+    timeout is in milliseconds, rather than duplicated. A timeout the user
+    set in seconds is kept.
     """
     hooks = settings.setdefault("hooks", {})
     configured = repaired = skipped = 0
@@ -317,11 +329,17 @@ def _merge_hook_entries(settings: dict, manifest: dict, hooks_src: Path, python_
                 "matcher": hook_def.get("matcher", ""),
             })
             configured += 1
-        elif existing["command"] != command:
-            existing["command"] = command
-            repaired += 1
         else:
-            skipped += 1
+            stale_timeout = (
+                _is_millisecond_timeout(existing.get("timeout")) and existing.get("timeout") != hook_def["timeout"]
+            )
+            if existing["command"] == command and not stale_timeout:
+                skipped += 1
+                continue
+            existing["command"] = command
+            if stale_timeout:
+                existing["timeout"] = hook_def["timeout"]
+            repaired += 1
     return configured, repaired, skipped
 
 
@@ -343,7 +361,7 @@ def _inject_settings_hooks(hooks_src: Path):
     if configured > 0:
         print(f"  settings.json: {configured} hook(s) configured")
     if repaired > 0:
-        print(f"  settings.json: {repaired} hook(s) repaired (paths updated)")
+        print(f"  settings.json: {repaired} hook(s) repaired (paths or timeouts updated)")
     if skipped > 0:
         print(f"  settings.json: {skipped} hook(s) already configured")
 
@@ -360,35 +378,52 @@ def _plan_settings_hooks(hooks_src: Path) -> None:
     )
 
 
-def _check_settings_hooks(hooks_src: Path) -> tuple[int, int, list[str]]:
+class HookProblem(NamedTuple):
+    """One way settings.json differs from what setup would write."""
+
+    label: str  # e.g. "SessionStart session_start"
+    kind: str  # "missing", "broken" (interpreter or script gone) or "timeout"
+    detail: str
+
+    def __str__(self) -> str:
+        return f"{self.label}: {self.detail}"
+
+
+def _check_settings_hooks(hooks_src: Path) -> tuple[int, int, list[HookProblem]]:
     """Compare settings.json against the manifest setup would install.
 
     Returns ``(wired, expected, problems)``. A hook counts as wired only when
     an entry runs the manifest's script with the manifest's arguments; a
-    command that merely mentions "omega" does not. Missing hooks, and wired
-    hooks whose interpreter or script no longer exists, are listed in
-    ``problems``. Raises :class:`HookSetupError` for an unreadable settings.json.
+    command that merely mentions "omega" does not. Missing hooks, wired hooks
+    whose interpreter or script no longer exists, and timeouts written in
+    milliseconds are listed in ``problems``. Raises :class:`HookSetupError`
+    for an unreadable settings.json.
     """
     manifest = json.loads(_hooks_manifest_path().read_text())
     hooks = _read_settings_json().get("hooks", {})
     wired = expected = 0
-    problems: list[str] = []
+    problems: list[HookProblem] = []
     for event, hook_def in _manifest_hooks(manifest):
         expected += 1
         identity = _manifest_identity(hook_def["script"])
         label = f"{event} {' '.join(identity[1]) or identity[0]}"
         hook = _find_hook_command(hooks, event, identity)
         if hook is None:
-            problems.append(f"{label}: not configured")
+            problems.append(HookProblem(label, "missing", "not configured"))
             continue
         wired += 1
         words = _shell_split(hook["command"])
         interpreter = words[0]
         if not (Path(interpreter).exists() or ("/" not in interpreter and shutil.which(interpreter))):
-            problems.append(f"{label}: Python not found: {interpreter}")
+            problems.append(HookProblem(label, "broken", f"Python not found: {interpreter}"))
         script_path = next(word for word in words if _file_name(word) == identity[0])
         if not Path(script_path).exists():
-            problems.append(f"{label}: script not found: {script_path}")
+            problems.append(HookProblem(label, "broken", f"script not found: {script_path}"))
+        if _is_millisecond_timeout(hook.get("timeout")):
+            problems.append(HookProblem(
+                label, "timeout",
+                f"timeout {hook['timeout']} was written in milliseconds but Claude Code reads seconds",
+            ))
     return wired, expected, problems
 
 
@@ -3108,14 +3143,16 @@ def cmd_doctor(args):
             fail(str(error))
         else:
             summary = f"{wired}/{expected} OMEGA hooks configured"
-            if wired == expected and not problems:
-                ok(summary)
-            elif wired < expected:
-                missing = [p for p in problems if p.endswith("not configured")]
+            missing = [str(p) for p in problems if p.kind == "missing"]
+            if missing:
                 report_missing(f"{summary} (missing: {'; '.join(missing)}). Run: omega hooks setup")
+            else:
+                ok(summary)
             for problem in problems:
-                if not problem.endswith("not configured"):
+                if problem.kind == "broken":
                     fail(f"Hook {problem}. Run: omega hooks setup")
+                elif problem.kind == "timeout":
+                    warn(f"Hook {problem}; a stuck hook would hold Claude Code that long. Run: omega hooks setup")
 
     # 6. Python path
     if not use_json:

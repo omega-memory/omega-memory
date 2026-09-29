@@ -72,6 +72,12 @@ _BEST_EFFORT_HOOKS = {
     "trace_capture",         # captures content that would otherwise be lost
 }
 
+# How long to wait on the daemon before giving up. hooks-core.json's timeouts
+# (seconds, read by Claude Code) sit above this plus the retry window, so
+# Claude Code never cancels a hook this client would still wait for.
+_DAEMON_TIMEOUT_S = 5.0
+_SLOW_DAEMON_TIMEOUT_S = 20.0
+
 # Retry settings for startup race (hook fires before MCP server opens socket)
 _CONNECT_RETRIES = 4
 _CONNECT_RETRY_DELAY = 0.5  # seconds between retries
@@ -298,9 +304,7 @@ def main():
     is_batch = len(hook_names) > 1
 
     # Use longer timeout for hooks with network operations (e.g., git fetch)
-    timeout = 5.0
-    if _SLOW_HOOKS.intersection(hook_names):
-        timeout = 20.0
+    timeout = _SLOW_DAEMON_TIMEOUT_S if _SLOW_HOOKS.intersection(hook_names) else _DAEMON_TIMEOUT_S
 
     result = _delegate_with_retries(hook_names if is_batch else hook_names[0], payload, timeout)
 

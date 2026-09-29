@@ -379,3 +379,79 @@ def test_claude_md_dry_run_writes_nothing_even_when_a_backup_already_exists(clau
     cli._inject_claude_md(dry_run=True)
 
     assert claude_md.read_text() == "# mine\n"
+
+
+# ---------------------------------------------------------------------------
+# Hook timeouts: Claude Code reads `timeout` in seconds
+# ---------------------------------------------------------------------------
+
+
+def _fast_hook_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("fast_hook_limits", SRC_DIR / "omega" / "hooks" / "fast_hook.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_core_manifest_timeouts_are_seconds_just_above_fast_hooks_own_limit():
+    """1.5.18 shipped 5000/3000, meant as milliseconds: Claude Code waited up to 83 minutes.
+
+    A timed-out hook's output is discarded, so each timeout must exceed what
+    fast_hook itself will wait (its socket timeout plus the connect-retry
+    window); beyond that it only has to be a backstop.
+    """
+    fast_hook = _fast_hook_module()
+    own_limit = fast_hook._DAEMON_TIMEOUT_S + fast_hook._CONNECT_RETRIES * fast_hook._CONNECT_RETRY_DELAY
+    for event, entries in CORE_MANIFEST.items():
+        for entry in entries:
+            assert own_limit < entry["timeout"] <= 30, (event, entry)
+
+
+def test_setup_rewrites_millisecond_timeouts_left_by_older_setups(claude_home, core_only_data_dir, capsys):
+    command = f"/usr/bin/python3 {claude_home / 'hooks' / 'fast_hook.py'} session_start"
+    (claude_home / ".claude" / "settings.json").write_text(json.dumps({
+        "hooks": {"SessionStart": [{"hooks": [{"command": command, "timeout": 5000, "type": "command"}], "matcher": ""}]}
+    }))
+
+    cli._inject_settings_hooks(claude_home / "hooks")
+
+    entries = _settings(claude_home)["hooks"]["SessionStart"]
+    assert len(entries) == 1
+    assert entries[0]["hooks"][0]["timeout"] == CORE_MANIFEST["SessionStart"][0]["timeout"]
+    assert "1 hook(s) repaired" in capsys.readouterr().out
+
+    cli._inject_settings_hooks(claude_home / "hooks")
+
+    assert "5 hook(s) already configured" in capsys.readouterr().out
+
+
+def test_setup_keeps_a_timeout_the_user_chose_in_seconds(claude_home, core_only_data_dir):
+    command = f"/usr/bin/python3 {claude_home / 'hooks' / 'fast_hook.py'} session_start"
+    (claude_home / ".claude" / "settings.json").write_text(json.dumps({
+        "hooks": {"SessionStart": [{"hooks": [{"command": command, "timeout": 45, "type": "command"}], "matcher": ""}]}
+    }))
+
+    cli._inject_settings_hooks(claude_home / "hooks")
+
+    assert _settings(claude_home)["hooks"]["SessionStart"][0]["hooks"][0]["timeout"] == 45
+
+
+def test_doctor_warns_about_a_millisecond_timeout(claude_home, core_only_data_dir, monkeypatch, capsys):
+    python = claude_home / "python3"
+    python.write_text("")
+    hooks_src = claude_home / "hooks"
+    hooks_src.mkdir()
+    (hooks_src / "fast_hook.py").write_text("")
+    monkeypatch.setattr(cli, "_resolve_python_path", lambda: str(python))
+    monkeypatch.setattr(cli, "_resolve_hooks_src", lambda: hooks_src)
+    cli._inject_settings_hooks(hooks_src)
+    settings = _settings(claude_home)
+    settings["hooks"]["Stop"][0]["hooks"][0]["timeout"] = 3000
+    (claude_home / ".claude" / "settings.json").write_text(json.dumps(settings))
+
+    report = _doctor_report(claude_home, monkeypatch, capsys)
+
+    assert any("3000" in m and "seconds" in m and "omega hooks setup" in m for m in _by_status(report, "warn"))
+    assert "5/5 OMEGA hooks configured" in _by_status(report, "ok")
