@@ -143,3 +143,119 @@ class TestAutoCaptureAfterDedup:
 
         assert result.startswith("Deduped")
         assert enriched == []
+
+
+# ---------------------------------------------------------------------------
+# B3: auto_capture's word-overlap dedup and evolution
+# ---------------------------------------------------------------------------
+#
+# The Jaccard comparison ignores words shorter than 4 characters, so "100" vs
+# "300", "not", and "on"/"off" were invisible: 4 of these 6 updates were
+# dropped as duplicates of the memory they were updating. It also compared
+# against memories in any project or entity.
+
+UPDATES_BY_VALUE = [
+    ("decision", "Rate limit for the public API is 100 requests per minute.",
+     "Rate limit for the public API is 300 requests per minute."),
+    ("decision", "We will deploy on Fridays.", "We will not deploy on Fridays."),
+    ("user_fact", "User's monthly budget for cloud hosting is $200.",
+     "User's monthly budget for cloud hosting is $500."),
+    ("decision", "Feature flag checkout_v2 is on in production.",
+     "Feature flag checkout_v2 is off in production."),
+    ("memory", "The staging database password rotates every 30 days.",
+     "The staging database password rotates every 90 days."),
+    ("lesson_learned", "Set the worker timeout to 30s for large uploads.",
+     "Set the worker timeout to 120s for large uploads."),
+]
+
+
+@pytest.mark.usefixtures("_reset_bridge")
+class TestWordOverlapDedup:
+    @pytest.mark.parametrize("event_type,older,newer", UPDATES_BY_VALUE)
+    def test_update_differing_in_numbers_or_negation_is_stored(self, event_type, older, newer):
+        import omega.bridge as bridge
+
+        bridge.store(older, event_type=event_type, project="/work/alpha")
+        result = bridge.store(newer, event_type=event_type, project="/work/alpha")
+
+        assert result.startswith("Stored"), result
+        contents = {
+            row[0] for row in bridge._get_store()._conn.execute("SELECT content FROM memories")
+        }
+        assert {older, newer} <= contents
+
+    def test_restatement_in_same_project_still_dedups(self):
+        import omega.bridge as bridge
+
+        text = "Rate limit for the public API is 100 requests per minute."
+        first = bridge.store(text, event_type="decision", project="/work/alpha")
+        again = bridge.store(text + " ", event_type="decision", project="/work/alpha")
+        assert again == f"Deduped → {first.split()[1]}"
+
+    def test_same_decision_in_another_project_is_stored_there(self):
+        import omega.bridge as bridge
+
+        text = "Rate limit for the public API is 100 requests per minute."
+        bridge.store(text, event_type="decision", project="/work/client-a")
+        result = bridge.store(text, event_type="decision", project="/work/client-b")
+
+        assert result.startswith("Stored"), result
+        projects = sorted(
+            row[0] for row in bridge._get_store()._conn.execute("SELECT project FROM memories")
+        )
+        assert projects == ["/work/client-a", "/work/client-b"]
+
+    def test_same_decision_for_another_entity_is_stored_for_it(self):
+        import omega.bridge as bridge
+
+        text = "Invoices are due within 30 days of issue."
+        bridge.store(text, event_type="decision", project="/p", entity_id="acme")
+        result = bridge.store(text, event_type="decision", project="/p", entity_id="globex")
+        assert result.startswith("Stored"), result
+
+    def test_evolution_never_rewrites_another_projects_memory(self):
+        import omega.bridge as bridge
+
+        base = (
+            "Always run the database migrations before deploying the API service "
+            "to production and verify the schema version."
+        )
+        first = bridge.store(base, event_type="lesson_learned", project="/work/client-a")
+        old_id = first.split()[1]
+
+        result = bridge.store(
+            base + " Record the migration duration in the release notes.",
+            event_type="lesson_learned", project="/work/client-b",
+        )
+
+        assert result.startswith("Stored"), result
+        old = bridge._get_store().get_node(old_id, track_access=False)
+        assert old.content == base
+
+    def test_reconfirmation_needs_the_same_numbers(self):
+        """Phase 2 used to answer 'Reconfirmed' when only a number changed."""
+        import omega.bridge as bridge
+
+        bridge.store(
+            "Always set the worker timeout to 30s for large uploads, and retry twice on failure.",
+            event_type="lesson_learned", project="/work/alpha",
+        )
+        result = bridge.store(
+            "Set the worker timeout to 90s for large uploads, and retry on failure.",
+            event_type="lesson_learned", project="/work/alpha",
+        )
+        assert result.startswith("Stored"), result
+
+    def test_error_patterns_still_dedup_across_line_numbers(self):
+        """error_pattern normalizes numbers on purpose: line numbers vary per run."""
+        import omega.bridge as bridge
+
+        first = bridge.store(
+            "ValueError: invalid literal for int() at parser.py line 42 while reading config",
+            event_type="error_pattern", project="/work/alpha",
+        )
+        again = bridge.store(
+            "ValueError: invalid literal for int() at parser.py line 57 while reading config",
+            event_type="error_pattern", project="/work/alpha",
+        )
+        assert again == f"Deduped → {first.split()[1]}"

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from omega import json_compat as json
+from omega.contradictions import distinguishing_tokens
 from omega.dedup_config import load_dedup_thresholds
 from omega.exceptions import ValidationError
 from omega.llm import llm_complete  # noqa: F401 — used in distill_trajectory, module-level for test patchability
@@ -761,6 +762,21 @@ def _jaccard(text_a: str, text_b: str, min_word_len: int = 4) -> float:
     return len(words_a & words_b) / len(words_a | words_b)
 
 
+def _same_values(content: str, existing: str, event_type: str) -> bool:
+    """Whether two texts agree on every number and polarity word.
+
+    _jaccard() ignores words shorter than four characters, so "100" vs "300",
+    "not" and "on"/"off" were invisible to dedup and to reconfirmation, and an
+    update was dropped as a duplicate of the memory it updated (audit finding
+    B3). error_pattern keeps ignoring numbers: _normalize_for_dedup() masks them
+    on purpose because line numbers and counts vary between runs.
+    """
+    include_numbers = event_type != AutoCaptureEventType.ERROR_PATTERN
+    return distinguishing_tokens(content, include_numbers) == distinguishing_tokens(
+        existing, include_numbers
+    )
+
+
 def _auto_relate(store, node_id: str, max_related: int = 3, min_similarity: float = 0.65) -> int:
     """Create typed edges from node_id to its most similar existing memories.
 
@@ -1146,11 +1162,22 @@ def auto_capture(
             logger.debug(f"Pre-computed embedding generation failed: {e}")
 
     if dedup_threshold is not None or event_type in EVOLUTION_TYPES:
+        # Dedup, evolution and conflict checks compare only against memories
+        # this write would share a scope with: collapsing into, or rewriting,
+        # another project's or entity's memory hides the write from its own
+        # scope and changes someone else's (audit finding B3).
+        scope_project, scope_entity = store.resolve_scope(meta, entity_id)
         try:
             _similar_results = store.query(
                 content[:200], limit=8,
                 query_embedding=_precomputed_embedding,
+                project_path=scope_project, scope="project", entity_id=scope_entity,
             )
+            scopes = store.get_scopes([r.id for r in _similar_results])
+            _similar_results = [
+                r for r in _similar_results
+                if scopes.get(r.id) == (scope_project, scope_entity)
+            ]
         except Exception as e:
             logger.debug(f"Similar-content query failed: {e}")
 
@@ -1173,6 +1200,8 @@ def auto_capture(
                     existing_session = (existing.metadata or {}).get("session_id", "")
                     if existing_session and existing_session != session_id:
                         continue
+                if not _same_values(content, existing.content, event_type):
+                    continue
                 if event_type == AutoCaptureEventType.ERROR_PATTERN:
                     sim = _jaccard(_normalize_for_dedup(content), _normalize_for_dedup(existing.content))
                 else:
@@ -1212,6 +1241,8 @@ def auto_capture(
         try:
             for existing in _similar_results[:3]:
                 if (existing.metadata or {}).get("event_type", "") != event_type:
+                    continue
+                if not _same_values(content, existing.content, event_type):
                     continue
                 sim = _jaccard(content.lower(), existing.content.lower())
                 if EVOLUTION_THRESHOLD <= sim < (dedup_threshold or 0.95):

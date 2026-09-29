@@ -7,7 +7,7 @@ import time as _time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from omega import json_compat as json
 from omega.exceptions import StorageError
@@ -194,9 +194,7 @@ class StoreMixin:
                     logger.warning(self._capacity_warning)
             self._invalidate_query_cache(new_content=content)
 
-            project = meta.get("project") or os.getcwd()
-            # Wire entity_id from metadata if not passed directly
-            effective_entity_id = entity_id or meta.get("entity_id")
+            project, effective_entity_id = self.resolve_scope(meta, entity_id)
 
             # Dedup only against a live memory in the same project and entity.
             # Collapsing into another scope's row hid the write from this
@@ -364,6 +362,24 @@ class StoreMixin:
 
         self._record_timing("write", (_time.monotonic() - _t0_agency) * 1000)
         return node_id
+
+    @staticmethod
+    def resolve_scope(
+        metadata: Dict[str, Any], entity_id: Optional[str] = None
+    ) -> Tuple[str, Optional[str]]:
+        """The (project, entity_id) a store() call with these arguments writes."""
+        return metadata.get("project") or os.getcwd(), entity_id or metadata.get("entity_id")
+
+    def get_scopes(self, node_ids: List[str]) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+        """The stored (project, entity_id) of each existing node in ``node_ids``."""
+        if not node_ids:
+            return {}
+        placeholders = ",".join("?" * len(node_ids))
+        rows = self._conn.execute(
+            f"SELECT node_id, project, entity_id FROM memories WHERE node_id IN ({placeholders})",
+            node_ids,
+        ).fetchall()
+        return {row[0]: (row[1], row[2]) for row in rows}
 
     def get_last_contradiction_results(self) -> list:
         """Return contradiction results from the most recent store() call. Consume-once."""

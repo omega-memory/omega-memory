@@ -31,6 +31,7 @@ from typing import Optional
 __all__ = [
     "detect_contradictions",
     "detect_update_signal",
+    "distinguishing_tokens",
     "ContradictionResult",
 ]
 
@@ -375,6 +376,8 @@ for _a, _b in _UPDATE_ANTONYM_PAIRS:
     _UPDATE_ANTONYMS.setdefault(_a, set()).add(_b)
     _UPDATE_ANTONYMS.setdefault(_b, set()).add(_a)
 
+_POLARITY_WORDS = _UPDATE_NEGATIONS | set(_UPDATE_ANTONYMS)
+
 _DIGIT_RUN = re.compile(r"\d+(?:[.,:]\d+)*")
 _STOPWORDS = frozenset({
     "the", "and", "for", "with", "from", "that", "this", "are", "was", "were",
@@ -424,6 +427,20 @@ def detect_update_signal(new_content: str, old_content: str) -> Optional[str]:
         return "replacement"
 
     return None
+
+
+def distinguishing_tokens(text: str, include_numbers: bool = True) -> frozenset[str]:
+    """Numbers and polarity words in ``text``.
+
+    Word-overlap similarity treats these as noise because they are short and
+    change little of the wording, yet each one flips what a statement says:
+    "100" vs "300", "deploy" vs "not deploy", "on" vs "off". Two texts whose
+    distinguishing tokens differ are not duplicates of each other.
+    """
+    tokens = {w for w in _words(text) if w in _POLARITY_WORDS}
+    if include_numbers:
+        tokens.update(_DIGIT_RUN.findall(text))
+    return frozenset(tokens)
 
 
 def _words(text: str) -> list[str]:
