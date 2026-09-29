@@ -2337,7 +2337,8 @@ def _serve_install(args):
     if result.returncode == 0:
         print("Daemon loaded. It will start automatically on login.")
         print(f"\nVerify: curl http://{_DEFAULT_HTTP_HOST}:{_DEFAULT_HTTP_PORT}/health")
-        print("\nTo use with Claude Code, run: omega serve migrate-config")
+        print("\nThe daemon requires a bearer key, kept in mcp_api_key in the OMEGA home.")
+        print("To use it with Claude Code, run: omega serve migrate-config")
     else:
         print(f"launchctl load failed: {result.stderr.strip()}")
         sys.exit(1)
@@ -2391,9 +2392,53 @@ def _serve_status(args):
         print(f"\nHealth: unreachable ({url})")
 
 
+def _omega_mcp_entries(config: dict) -> Iterator[dict]:
+    """Every ``mcpServers`` block in ~/.claude.json that holds an omega-memory entry.
+
+    ``claude mcp add -s user`` (what ``omega setup`` runs) writes the top-level
+    block; project-scoped registrations live under ``projects.<path>``.
+    """
+    blocks = [config.get("mcpServers", {})]
+    blocks += [project.get("mcpServers", {}) for project in config.get("projects", {}).values()]
+    return (block for block in blocks if isinstance(block, dict) and "omega-memory" in block)
+
+
+def _daemon_entry_problems(config: dict) -> list[str]:
+    """Reasons the HTTP daemon would refuse the omega-memory http entries in ``config``.
+
+    Read-only: never creates a key.
+    """
+    from omega.server.mcp_auth import authorization_header, resolve_api_key
+
+    key = resolve_api_key(create=False)
+    problems: set[str] = set()
+    for servers in _omega_mcp_entries(config):
+        entry = servers["omega-memory"]
+        if entry.get("type") != "http":
+            continue
+        sent = (entry.get("headers") or {}).get("Authorization")
+        if not sent:
+            problems.add(
+                f"omega-memory ({entry.get('url')}) sends no bearer key, so the daemon refuses it. "
+                "Run: omega serve migrate-config"
+            )
+        elif key is not None and sent != authorization_header(key)["Authorization"]:
+            problems.add(
+                f"omega-memory ({entry.get('url')}) sends a key that does not match mcp_api_key. "
+                "Run: omega serve migrate-config"
+            )
+    return sorted(problems)
+
+
 def _serve_migrate_config(args):
-    """Migrate ~/.claude.json omega-memory entries from stdio to http."""
-    claude_json = Path.home() / ".claude.json"
+    """Point ~/.claude.json omega-memory entries at the HTTP daemon, with its bearer key.
+
+    Converts stdio entries, and adds the key to http entries written before
+    the daemon required one (those get 401 from 1.5.19 on).
+    """
+    from omega.server.mcp_auth import authorization_header, resolve_api_key
+
+    claude_json = CLAUDE_JSON_PATH
     if not claude_json.exists():
         print("No ~/.claude.json found.")
         return
@@ -2401,38 +2446,31 @@ def _serve_migrate_config(args):
     content = claude_json.read_text()
     config = json.loads(content)
 
-    # Create backup
-    backup = claude_json.with_suffix(".json.bak")
-    backup.write_text(content)
-    print(f"Backup saved to {backup}")
-
     url = f"http://{_DEFAULT_HTTP_HOST}:{_DEFAULT_HTTP_PORT}/mcp"
+    wanted = {"type": "http", "url": url, "headers": authorization_header(resolve_api_key(create=True))}
     changed = 0
-
-    projects = config.get("projects", {})
-    for proj_path, proj_config in projects.items():
-        servers = proj_config.get("mcpServers", {})
-        if "omega-memory" in servers:
-            entry = servers["omega-memory"]
-            if entry.get("type") == "stdio":
-                servers["omega-memory"] = {
-                    "type": "http",
-                    "url": url,
-                }
-                changed += 1
+    for servers in _omega_mcp_entries(config):
+        entry = servers["omega-memory"]
+        is_ours = entry.get("type") == "stdio" or (entry.get("type") == "http" and entry.get("url") == url)
+        if is_ours and entry != wanted:
+            servers["omega-memory"] = dict(wanted)
+            changed += 1
 
     if changed > 0:
+        backup = claude_json.with_suffix(".json.bak")
+        backup.write_text(content)
+        print(f"Backup saved to {backup}")
         claude_json.write_text(json.dumps(config, indent=2) + "\n")
-        print(f"Migrated {changed} project(s) from stdio to http.")
+        print(f"Pointed {changed} omega-memory entr{'y' if changed == 1 else 'ies'} at the daemon, with its key.")
         print(f"MCP endpoint: {url}")
         print("\nRestart Claude Code terminals to use the daemon.")
     else:
-        print("No stdio omega-memory entries found to migrate.")
+        print("No omega-memory entries needed changing.")
 
 
 def _serve_restore_config(args):
     """Restore ~/.claude.json from backup."""
-    claude_json = Path.home() / ".claude.json"
+    claude_json = CLAUDE_JSON_PATH
     backup = claude_json.with_suffix(".json.bak")
 
     if not backup.exists():
@@ -2850,6 +2888,16 @@ def cmd_doctor(args):
             warn("Claude Code CLI not found (cannot verify MCP registration)")
         except Exception as e:
             warn(f"MCP check failed: {e}")
+    # HTTP daemon entries (omega serve migrate-config) must carry its bearer key
+    if CLAUDE_JSON_PATH.exists():
+        try:
+            claude_config = json.loads(CLAUDE_JSON_PATH.read_text())
+        except (json.JSONDecodeError, OSError) as error:
+            warn(f"Cannot read {CLAUDE_JSON_PATH}: {error}")
+        else:
+            for problem in _daemon_entry_problems(claude_config):
+                fail(problem)
+
     # Claude Desktop config check
     if not use_json:
         print_section("Claude Desktop")

@@ -5,7 +5,7 @@ Supports two transports:
 - **http** (daemon): One shared process serving all sessions via Streamable HTTP.
   Set OMEGA_TRANSPORT=http or use `omega serve --daemon`.
 
-Requires the 'server' extra: pip install omega-memory[server]
+Requires the 'server' extra: pip install "omega-memory[server]"
 """
 
 import atexit
@@ -28,8 +28,8 @@ try:
 except ImportError:
     print(
         "Error: MCP server requires the 'mcp' package.\n"
-        "Install with: pip install omega-memory[server]\n"
-        "Or directly: pip install mcp>=1.0.0",
+        'Install with: pip install "omega-memory[server]"\n'
+        'Or directly: pip install "mcp>=1.10.0"',
         file=sys.stderr,
     )
     sys.exit(1)
@@ -934,6 +934,91 @@ def _check_port_available(host: str, port: int) -> bool:
         return False
 
 
+class _NormalizeMCPPath:
+    """Serve ``/mcp`` as ``/mcp/``.
+
+    Starlette answers ``/mcp`` with a 307 to the mounted ``/mcp/``, and not
+    every MCP client follows a redirect on POST; ``omega serve
+    migrate-config`` writes the URL without the slash.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") == "/mcp":
+            scope = {**scope, "path": "/mcp/"}
+        await self.app(scope, receive, send)
+
+
+def _build_http_app(host: str, port: int, api_key: str, on_shutdown=None):
+    """The daemon's ASGI app: Host/Origin-checked, bearer-key protected.
+
+    Raises ImportError when the installed MCP SDK predates DNS-rebinding
+    protection (mcp < 1.10); the daemon must not serve without it.
+    """
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    from omega.server.mcp_auth import BearerKeyMiddleware, allowed_hosts, allowed_origins
+
+    hosts = allowed_hosts(host, port)
+    session_manager = StreamableHTTPSessionManager(
+        app=server,
+        json_response=False,
+        # Stateless mode: each request is self-contained. OMEGA tool calls are
+        # already stateless (state lives in SQLite). This makes daemon restarts
+        # invisible to clients — no more "Session not found" errors after crash.
+        stateless=True,
+        # Any web page can reach loopback; Host/Origin checks stop DNS rebinding.
+        security_settings=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=hosts,
+            allowed_origins=allowed_origins(host, port),
+        ),
+    )
+
+    async def health(request):
+        """Health check endpoint with process diagnostics (no key needed, Host still checked)."""
+        if request.headers.get("host", "") not in hosts:
+            return JSONResponse({"error": "invalid host"}, status_code=421)
+        rss = _get_current_rss_bytes()
+        return JSONResponse({
+            "status": "ok",
+            "pid": os.getpid(),
+            "rss_mb": round(rss / 1024**2, 1),
+            "uptime_s": round(time.monotonic() - _start_time, 1),
+            "tool_count": len(TOOL_SCHEMAS),
+            "transport": "http",
+        })
+
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        async with session_manager.run():
+            logger.info("OMEGA MCP daemon listening on http://%s:%d/mcp", host, port)
+            yield
+        if on_shutdown is not None:
+            await on_shutdown()
+
+    return Starlette(
+        routes=[
+            Route("/health", health, methods=["GET"]),
+            Mount("/mcp", app=session_manager.handle_request),
+        ],
+        lifespan=lifespan,
+        middleware=[
+            Middleware(BearerKeyMiddleware, api_key=api_key),
+            Middleware(_NormalizeMCPPath),
+        ],
+    )
+
+
 async def _run_http_transport(hook_srv) -> None:
     """Run the MCP server as a Streamable HTTP daemon via uvicorn.
 
@@ -942,14 +1027,12 @@ async def _run_http_transport(hook_srv) -> None:
     """
     try:
         import uvicorn
-        from starlette.applications import Starlette
-        from starlette.responses import JSONResponse
-        from starlette.routing import Mount, Route
-        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+        import starlette  # noqa: F401
+        from mcp.server.transport_security import TransportSecuritySettings  # noqa: F401
     except ImportError as e:
         print(
             f"Error: HTTP transport requires additional packages: {e}\n"
-            "Install with: pip install omega-memory[server] starlette uvicorn",
+            'Install with: pip install -U "omega-memory[server]" (needs mcp>=1.10 for DNS-rebinding protection)',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -963,52 +1046,25 @@ async def _run_http_transport(hook_srv) -> None:
         )
         sys.exit(1)
 
-    session_manager = StreamableHTTPSessionManager(
-        app=server,
-        json_response=False,
-        # Stateless mode: each request is self-contained. OMEGA tool calls are
-        # already stateless (state lives in SQLite). This makes daemon restarts
-        # invisible to clients — no more "Session not found" errors after crash.
-        stateless=True,
-    )
-
-    async def health(request):
-        """Health check endpoint with process diagnostics."""
-        rss = _get_current_rss_bytes()
-        return JSONResponse({
-            "status": "ok",
-            "pid": os.getpid(),
-            "rss_mb": round(rss / 1024**2, 1),
-            "uptime_s": round(time.monotonic() - _start_time, 1),
-            "tool_count": len(TOOL_SCHEMAS),
-            "transport": "http",
-        })
-
-    import contextlib
-
     try:
         from omega.server.hook_server import stop_hook_server as _stop_hook_srv
     except ImportError:
         async def _stop_hook_srv(*args, **kwargs):
             pass
 
-    @contextlib.asynccontextmanager
-    async def lifespan(app):
-        async with session_manager.run():
-            logger.info(
-                "OMEGA MCP daemon listening on http://%s:%d/mcp",
-                _HTTP_HOST, _HTTP_PORT,
-            )
-            yield
+    from omega.server.mcp_auth import api_key_path, resolve_api_key
+
+    api_key = resolve_api_key(create=True)
+    logger.warning(
+        "MCP HTTP auth enforced: clients must send the bearer key from %s "
+        "(run 'omega serve migrate-config' to configure Claude Code)",
+        api_key_path(),
+    )
+
+    async def _on_shutdown():
         await _stop_hook_srv(hook_srv)
 
-    app = Starlette(
-        routes=[
-            Route("/health", health, methods=["GET"]),
-            Mount("/mcp", app=session_manager.handle_request),
-        ],
-        lifespan=lifespan,
-    )
+    app = _build_http_app(_HTTP_HOST, _HTTP_PORT, api_key, on_shutdown=_on_shutdown)
 
     config = uvicorn.Config(
         app,
