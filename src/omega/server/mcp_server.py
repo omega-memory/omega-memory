@@ -530,6 +530,18 @@ def _idle_seconds(now: float) -> float:
     return now - max(_last_activity, _hook_core.last_request_at())
 
 
+def _exit_on_sigterm() -> None:
+    """Stop a stdio server on SIGTERM with the same cleanup as the watchdogs.
+
+    Claude Code, and `claude mcp list` (which starts the server to probe
+    it), end a stdio server with SIGTERM, whose default action skips atexit
+    and left the hook socket behind.
+    """
+    logger.info("SIGTERM received, shutting down.")
+    _close_on_exit()
+    os._exit(0)
+
+
 async def _idle_watchdog():
     """Exit the process if neither a tool call nor a hook request arrived within the timeout."""
     while True:
@@ -1269,6 +1281,8 @@ async def main():
     if _TRANSPORT == "http":
         await _run_http_transport(hook_srv)
     else:
+        if sys.platform != "win32":
+            loop.add_signal_handler(signal.SIGTERM, _exit_on_sigterm)
         try:
             async with stdio_server() as (read_stream, write_stream):
                 await server.run(

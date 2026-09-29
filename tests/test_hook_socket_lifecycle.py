@@ -228,3 +228,31 @@ def test_fast_hook_still_retries_while_the_owner_is_alive(short_dir, monkeypatch
 
     assert fast_hook._delegate_with_retries("session_start", {}, timeout=1.0) is None
     assert len(sleeps) == fast_hook._CONNECT_RETRIES
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix socket lifecycle")
+def test_sigterm_removes_the_hook_socket(short_dir):
+    """`claude mcp list` starts the server to probe it, then terminates it: no stale socket either."""
+    home = short_dir / "t"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home), "OMEGA_HOME": str(home / ".omega"),
+           "PYTHONPATH": str(SRC_DIR), "OMEGA_SKIP_EMBEDDINGS": "1"}
+    sock_path = home / ".omega" / "hook.sock"
+    server = subprocess.Popen(
+        [sys.executable, "-m", "omega.server.mcp_server"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while not sock_path.exists() and server.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert sock_path.exists(), "no socket"
+
+        server.terminate()
+        server.wait(timeout=15)
+
+        assert not sock_path.exists(), "SIGTERM left a stale hook socket"
+    finally:
+        if server.poll() is None:
+            server.kill()
+        server.wait()
