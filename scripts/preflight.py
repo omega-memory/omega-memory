@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -21,7 +22,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.request
 import venv
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -35,6 +38,12 @@ VERIFIER = REPO / "scripts" / "verify_core_release_artifact.py"
 # the 1.6 and 1.7 lines are reserved as internal milestone labels and must not
 # be used as public Core versions.
 CORE_VERSION_CEILING = (1, 6)
+
+# At most one OMEGA release in any 7 days (owner directive, 2026-09-29): a 1.5.19
+# minutes after a 1.5.18 confuses users. Finished fixes wait and ship together
+# when the window opens. Only the owner can approve an early release.
+RELEASE_INTERVAL = timedelta(days=7)
+PYPI_JSON_URL = "https://pypi.org/pypi/omega-memory/json"
 
 _results: list[tuple[str, bool, str]] = []
 
@@ -57,6 +66,44 @@ def gate(name: str, ok: bool, detail: str = "") -> bool:
 
 def run(*args: str, cwd: Path | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(args, cwd=cwd or REPO, env=env, capture_output=True, text=True)
+
+
+# ---------------------------------------------------------------------------
+# 0. Release cadence
+# ---------------------------------------------------------------------------
+def last_pypi_upload(url: str = PYPI_JSON_URL) -> tuple[str, datetime]:
+    """The most recent omega-memory upload on PyPI, as (version, upload time)."""
+    with urllib.request.urlopen(url, timeout=30) as response:
+        releases = json.load(response)["releases"]
+    uploads = [
+        (version, datetime.fromisoformat(file["upload_time_iso_8601"]))
+        for version, files in releases.items()
+        for file in files
+    ]
+    return max(uploads, key=lambda upload: upload[1])
+
+
+def check_release_cadence(early_release: str | None = None, now: datetime | None = None) -> None:
+    """Block a release until RELEASE_INTERVAL has passed since the last one.
+
+    early_release is the owner's explicit approval to ship inside the window,
+    for this one release; it is printed so the exception is on the record.
+    """
+    print("\n[0] Release cadence")
+    try:
+        version, uploaded = last_pypi_upload()
+    except (OSError, ValueError, KeyError) as exc:
+        gate("last PyPI release is known", False, f"{PYPI_JSON_URL}: {exc}")
+        return
+
+    now = now or datetime.now(timezone.utc)
+    window_opens = uploaded + RELEASE_INTERVAL
+    detail = (f"{version} uploaded {uploaded:%Y-%m-%d %H:%M} UTC; "
+              f"next window opens {window_opens:%Y-%m-%d %H:%M} UTC")
+    in_window = now >= window_opens
+    if not in_window and early_release:
+        print(f"  NOTE  early release approved by the owner: {early_release}")
+    gate("7 days since the last release", in_window or bool(early_release), detail)
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +273,13 @@ def main() -> int:
     parser.add_argument("version", help="version about to be released, e.g. 1.5.16")
     parser.add_argument("--fast", action="store_true", help="skip the clean-venv paywall gates")
     parser.add_argument("--skip-tests", action="store_true", help="skip lint and the test suite")
+    parser.add_argument("--early-release", metavar="APPROVAL",
+                        help="release inside the 7-day window; only with the owner's explicit "
+                             "approval for this release, which APPROVAL records")
     args = parser.parse_args()
 
     print(f"=== OMEGA Core preflight for {args.version} ===")
+    check_release_cadence(args.early_release)
     check_version(args.version)
     check_git()
     wheel = check_artifacts(args.version)

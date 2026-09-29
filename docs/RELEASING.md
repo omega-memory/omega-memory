@@ -16,7 +16,7 @@ that needs a human.
 | Pro | `omega-platform` | private monorepo | `pro-v*` | licensed |
 | Internal | — | private branches | never tagged | nobody outside |
 
-Three rules that are easy to get wrong:
+Four rules that are easy to get wrong:
 
 1. **Core versions stay below 1.6.** The Pro wheel pins
    `omega-memory>=1.5.13,<1.6`, so publishing Core 1.6.0 breaks dependency
@@ -26,6 +26,14 @@ Three rules that are easy to get wrong:
 3. **Version axes are independent.** Core version, Pro version, schema version
    and internal milestone are four different numbers. Never infer one from
    another, and never print a bare version without saying which one it is.
+4. **At most one release in any 7 days.** Shipping 1.5.18 and then 1.5.19
+   minutes later confuses users, so finished fixes wait on their branches, their
+   changelog entries collect under `[Unreleased]`, and everything ready ships
+   together when the window opens. Core and Pro going out together count as one
+   release. `preflight.py` and `release.py` fail until 7 days have passed since
+   the last `omega-memory` upload on PyPI. Only the owner can approve an early
+   release, for that one release: pass `--early-release "<who approved, and
+   why>"`.
 
 ## Before you release
 
@@ -33,8 +41,9 @@ Three rules that are easy to get wrong:
 python3.11 scripts/preflight.py <version>
 ```
 
-It builds the artifacts and runs every automated gate: version agreement, the
-1.6 ceiling, changelog entry, unused tag, branch hygiene, the artifact privacy
+It builds the artifacts and runs every automated gate: the 7-day release
+cadence, version agreement, the 1.6 ceiling, changelog entry, unused tag,
+branch hygiene, the artifact privacy
 and Core/Pro boundary scan, the free-tier cap, the paywall, lint and tests.
 Add `--fast` to skip the clean-venv gates while iterating; never skip them for
 a real release.

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Releases are at most one a week.** `scripts/preflight.py` and
+  `scripts/release.py` now refuse to publish until 7 days have passed since
+  the last `omega-memory` upload on PyPI, so fixes ship together instead of as
+  back-to-back versions. `--early-release` records an owner-approved exception.
+
 ## [1.5.18] - 2026-09-29
 
 ### Fixed
