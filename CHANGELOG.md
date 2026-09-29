@@ -16,6 +16,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Storing a memory could silently retire a different one, including
+  another project's or client's.** Any older memory of the same type at
+  embedding similarity 0.75 was retired, with no check that the new text
+  actually updated it and no project or entity check, and the store result
+  never said so: in testing, 11 of 30 related-but-distinct pairs were
+  retired. A memory is now retired only when both share the project and
+  the entity and the new text carries explicit update evidence (a changed
+  number, "now" / "no longer" / "switched from", a negation, an on/off
+  style flip, or "X instead of <old value>"). Otherwise the older memory
+  stays active and is recorded as a possible replacement. Store results
+  report both, as `[SUPERSEDED]` and `[POSSIBLE UPDATE]` with the
+  `omega_memory(action="supersede")` call to confirm one. Memories in
+  other projects or entities are never touched.
+- **Updates that changed only a number, a "not" or an on/off were dropped
+  as duplicates.** Dedup compared long words only, so "limit is 100" and
+  "limit is 300" matched, and a one-word change such as "now uses SQLite"
+  could still clear the threshold. A text that changes a number or polarity
+  word, or reads as an update, is no longer a duplicate. Dedup, and the
+  memory evolution that appends to an existing memory, now stay within the
+  same project and entity.
+- **Re-stating a retired memory, or storing the same text in another
+  project, collapsed into the wrong memory.** Exact-text dedup matched
+  retired memories and other projects' memories, and the steps that enrich
+  a new memory then rewrote the existing one. Dedup now matches only a live
+  memory in the same project and entity, and a dedup changes nothing.
+- **The prompt hook saved questions, and secrets pasted into prompts, as
+  decisions.** Questions ("let's use Redis? actually wait ...", "can you
+  remember that ...") are no longer captured, keys and passwords in any
+  hook-captured text are replaced with `[REDACTED]`, and hook captures can
+  flag a possible replacement but never retire a memory.
+- **Rules (`constraint` memories) were shown in every project.** They were
+  injected into every session, query and welcome briefing regardless of
+  project or entity, without a length cap. They now reach only their own
+  project and entity, capped at 300 characters.
+- **Storing a memory counted its own searches as "helpful" feedback.** The
+  similar-memory search behind dedup, and the decision-trail search after a
+  decision, were recorded as retrievals, so each store boosted the
+  memories nearest to it.
+- **Reminder auto-dismiss never ran.** It now dismisses a pending reminder
+  only when an explicit task completion in the same project clearly
+  matches it, and the store result names the reminder.
 - **Usage, diagnostic and council stats miscounted by up to a day.** Look-back
   windows compared stored `isoformat()` timestamps with SQLite `datetime()`
   text, the mismatch behind #83, which put rows from a window's first calendar
