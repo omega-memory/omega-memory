@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.19] - 2026-09-29
+
 ### Changed
 
 - **Releases are at most one a week.** `scripts/preflight.py` and
