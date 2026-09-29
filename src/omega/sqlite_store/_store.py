@@ -193,13 +193,27 @@ class StoreMixin:
                         )
                     logger.warning(self._capacity_warning)
             self._invalidate_query_cache(new_content=content)
+
+            project = meta.get("project") or os.getcwd()
+            # Wire entity_id from metadata if not passed directly
+            effective_entity_id = entity_id or meta.get("entity_id")
+
+            # Dedup only against a live memory in the same project and entity.
+            # Collapsing into another scope's row hid the write from this
+            # scope's queries, and collapsing into a retired row returned a
+            # memory that queries no longer show (audit finding B4).
+            dedup_scope = """
+                   AND project IS ? AND entity_id IS ?
+                   AND COALESCE(status, 'active') != 'superseded'
+                   AND COALESCE(json_extract(metadata, '$.superseded'), 0) = 0
+                   AND (ttl_seconds IS NULL
+                        OR datetime(created_at, '+' || ttl_seconds || ' seconds') > datetime('now'))"""
+
             # Canonical dedup (#6): catch reformatted duplicates
             canonical_existing = self._exec(
-                """SELECT node_id, id FROM memories WHERE canonical_hash = ?
-                   AND (ttl_seconds IS NULL
-                        OR datetime(created_at, '+' || ttl_seconds || ' seconds') > datetime('now'))
-                   LIMIT 1""",
-                (canonical_hash,),
+                "SELECT node_id, id FROM memories WHERE canonical_hash = ?"
+                + dedup_scope + " LIMIT 1",
+                (canonical_hash, project, effective_entity_id),
             ).fetchone()
             if canonical_existing:
                 self.stats.setdefault("dedup_canonical", 0)
@@ -208,13 +222,11 @@ class StoreMixin:
                 self._record_timing("write", (_time.monotonic() - _t0_agency) * 1000)
                 return canonical_existing[0]
 
-            # Exact-match dedup via content hash (skip expired memories)
+            # Exact-match dedup via content hash
             existing = self._exec(
-                """SELECT node_id, id FROM memories WHERE content_hash = ?
-                   AND (ttl_seconds IS NULL
-                        OR datetime(created_at, '+' || ttl_seconds || ' seconds') > datetime('now'))
-                   LIMIT 1""",
-                (content_hash,),
+                "SELECT node_id, id FROM memories WHERE content_hash = ?"
+                + dedup_scope + " LIMIT 1",
+                (content_hash, project, effective_entity_id),
             ).fetchone()
             if existing:
                 self.stats.setdefault("dedup_exact", 0)
@@ -227,7 +239,6 @@ class StoreMixin:
             node_id = f"mem-{uuid.uuid4().hex[:12]}"
 
             event_type = meta.get("event_type") or meta.get("type")
-            project = meta.get("project") or os.getcwd()
             now = datetime.now(timezone.utc).isoformat()
 
             # Determine priority from metadata or event type default. Coerce
@@ -240,9 +251,6 @@ class StoreMixin:
             else:
                 priority = self._DEFAULT_PRIORITY.get(event_type, 3)
             referenced_date = meta.get("referenced_date")
-
-            # Wire entity_id from metadata if not passed directly
-            effective_entity_id = entity_id or meta.get("entity_id")
 
             # Wire agent_type from metadata if not passed directly
             effective_agent_type = agent_type or meta.get("agent_type")

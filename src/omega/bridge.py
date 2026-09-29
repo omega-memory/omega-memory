@@ -1341,9 +1341,10 @@ def auto_capture(
     except AttributeError:
         _deduped = False
     if _deduped:
-        output = f"Deduped → {node_id}"
-    else:
-        output = f"Stored {node_id} ({event_type}, {ttl_str})"
+        # Nothing new was written. The phases below enrich a new memory, so
+        # running them here would rewrite the existing one (audit finding B4).
+        return f"Deduped → {node_id}"
+    output = f"Stored {node_id} ({event_type}, {ttl_str})"
 
     # Supersession is settled inside store(): same project and entity only,
     # and an older memory is retired only on an explicit update signal. A
