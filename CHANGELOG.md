@@ -32,9 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An unused HTTP server module is removed.** `omega.server.http_server`
   had the same missing Host/Origin checks and took its key in the URL;
   nothing shipped or called it.
-- **The Stop hook script no longer contains a usage upload.** An unused code
-  path could post session usage to a Supabase project named in the
-  environment; it is removed.
+- **Session stop no longer uploads usage to Supabase.** When `SUPABASE_URL`
+  and `SUPABASE_SERVICE_ROLE_KEY` were set, in the environment or in
+  `~/.omega/secrets.json`, every session stop posted that session's cost,
+  token counts, duration, project path and recent files, tasks and commits
+  to a `session_usage` table in that Supabase project. It went only to the
+  project those settings named, never to OMEGA, and did nothing without
+  them. It is removed.
 
 ### Fixed
 
