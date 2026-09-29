@@ -69,3 +69,22 @@ def test_untracked_lookup_is_not_recorded(store):
     assert store.get_retrieval_context() == []
     store.query("product listings CDN cache", limit=5, use_cache=False)
     assert store.get_retrieval_context()
+
+
+def test_decision_trail_lookup_does_not_reward_the_new_memory():
+    """omega_store's decision-trail search finds the memory it just stored."""
+    import asyncio
+
+    import omega.bridge as bridge
+    from omega.server.handlers import handle_omega_store
+
+    def store(text):
+        response = asyncio.run(
+            handle_omega_store({"content": text, "event_type": "decision", "project": "/work/alpha"})
+        )
+        return response["content"][0]["text"].split()[1]
+
+    first = store("Rate-limit the public API to 100 requests per minute per key.")
+    store("Rate-limit the admin API to 20 requests per minute per user.")
+
+    assert _implicit_signals(bridge._get_store(), first) == []

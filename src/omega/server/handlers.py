@@ -495,16 +495,20 @@ async def handle_omega_store(arguments: dict) -> dict:
         # Surface prior decision trail for consistency awareness
         if event_type == "decision" and content:
             try:
-                from omega.bridge import query_structured
+                from omega.bridge import _get_store, query_structured
                 from omega.server.hook_server.cards import format_decision_trail_card
 
-                prior = query_structured(
-                    query_text=content[:200],
-                    event_type="decision",
-                    limit=5,
-                    project=project,
-                    entity_id=entity_id,
-                )
+                # A search the store makes for itself: recording it as a
+                # retrieval credits the memory just stored as "helpful" on
+                # the next related store (audit finding B6).
+                with _get_store().untracked_lookup():
+                    prior = query_structured(
+                        query_text=content[:200],
+                        event_type="decision",
+                        limit=5,
+                        project=project,
+                        entity_id=entity_id,
+                    )
                 # Exclude the memory we just stored (result contains its ID)
                 new_id = ""
                 if result and "mem-" in result:
