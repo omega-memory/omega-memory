@@ -4,7 +4,7 @@ import json
 import os
 import time
 import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from omega.hooks._output import emit
@@ -377,148 +377,6 @@ def _auto_feedback_on_surfaced(session_id: str):
             pass
 
 
-def _capture_usage_to_supabase(session_id: str, project_dir: str):
-    """Push session usage data from ~/.claude.json to Supabase. Fire-and-forget."""
-    if not session_id:
-        return
-    try:
-        import urllib.request
-        import urllib.error
-
-        # Read ~/.claude.json for last* session metrics
-        claude_json_path = Path.home() / ".claude.json"
-        if not claude_json_path.exists():
-            return
-
-        claude_data = json.loads(claude_json_path.read_text())
-        projects = claude_data.get("projects", {})
-
-        # Find the project entry; keys are absolute project paths.
-        project_entry = None
-        for path_key, entry in projects.items():
-            # Exact match or normalized match (avoid substring false positives)
-            if project_dir and (path_key == project_dir or path_key.rstrip("/") == project_dir.rstrip("/")):
-                project_entry = entry
-                break
-
-        if not project_entry:
-            return
-
-        last_session_id = project_entry.get("lastSessionId", "")
-        # Only capture if this matches our session (avoid stale data)
-        if last_session_id and last_session_id != session_id:
-            # Fall back: use the data anyway if session_id looks like a subagent
-            if not session_id.startswith("agent-"):
-                return
-
-        # Load Supabase credentials from env vars or ~/.omega/secrets.json
-        sb_url = os.environ.get("SUPABASE_URL", "")
-        sb_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-        if not sb_url or not sb_key:
-            secrets_file = Path.home() / ".omega" / "secrets.json"
-            if secrets_file.exists():
-                try:
-                    secrets_data = json.loads(secrets_file.read_text())
-                    if not sb_url:
-                        sb_url = secrets_data.get("SUPABASE_URL", secrets_data.get("supabase_url", ""))
-                    if not sb_key:
-                        sb_key = secrets_data.get("SUPABASE_SERVICE_ROLE_KEY", secrets_data.get("supabase_key", ""))
-                except (json.JSONDecodeError, OSError):
-                    pass
-        if not sb_url or not sb_key:
-            return
-
-        # Extract project name from path
-        project_name = Path(project_dir).name if project_dir else None
-
-        # Build model cost breakdown from lastModelUsage
-        model_usage = project_entry.get("lastModelUsage", {})
-        cost_by_model = {}
-        for model_id, stats in model_usage.items():
-            cost = stats.get("costUSD", 0)
-            if cost:
-                # Clean up model ID for display
-                short_name = model_id
-                if "opus" in model_id.lower():
-                    short_name = "Claude Opus"
-                elif "sonnet" in model_id.lower():
-                    short_name = "Claude Sonnet"
-                elif "haiku" in model_id.lower():
-                    short_name = "Claude Haiku"
-                cost_by_model[short_name] = round(cost, 6)
-
-        # Compute session timestamps from duration
-        duration_ms = project_entry.get("lastDuration", 0)
-        duration_s = round(duration_ms / 1000, 2) if duration_ms else None
-        now = datetime.now(timezone.utc)
-        session_end = now.isoformat()
-        session_start = None
-        if duration_ms:
-            session_start = (now - timedelta(milliseconds=duration_ms)).isoformat()
-
-        # Try to read rich metadata from session-summaries.jsonl
-        files_modified = []
-        tasks_completed = []
-        git_commits = []
-        try:
-            summaries_path = Path.home() / ".claude" / "session-summaries.jsonl"
-            if summaries_path.exists():
-                # Read last line matching this session_id
-                for line in reversed(summaries_path.read_text().splitlines()):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        s = json.loads(line)
-                        sid = s.get("sessionId") or s.get("id", "")
-                        if sid == session_id:
-                            files_modified = s.get("filesModified", [])
-                            tasks_completed = s.get("tasksCompleted", [])
-                            git_commits = s.get("gitCommits", [])
-                            # Use more precise timestamps if available
-                            if s.get("startTime"):
-                                session_start = s["startTime"]
-                            if s.get("endTime"):
-                                session_end = s["endTime"]
-                            break
-                    except json.JSONDecodeError:
-                        continue
-        except Exception:
-            pass
-
-        row = {
-            "session_id": session_id,
-            "project_name": project_name,
-            "project_path": project_dir,
-            "total_cost_usd": project_entry.get("lastCost", 0),
-            "input_tokens": project_entry.get("lastTotalInputTokens", 0),
-            "output_tokens": project_entry.get("lastTotalOutputTokens", 0),
-            "cache_read_tokens": project_entry.get("lastTotalCacheReadInputTokens", 0),
-            "cache_miss_tokens": project_entry.get("lastTotalCacheCreationInputTokens", 0),
-            "duration_seconds": duration_s,
-            "cost_by_model": json.dumps(cost_by_model),
-            "files_modified": json.dumps(files_modified[:50] if isinstance(files_modified, list) else []),
-            "tasks_completed": json.dumps(tasks_completed[:20] if isinstance(tasks_completed, list) else []),
-            "git_commits": json.dumps(git_commits[:20] if isinstance(git_commits, list) else []),
-            "session_start": session_start,
-            "session_end": session_end,
-        }
-
-        url = f"{sb_url}/rest/v1/session_usage?on_conflict=session_id"
-        headers = {
-            "apikey": sb_key,
-            "Authorization": f"Bearer {sb_key}",
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates",
-        }
-        body = json.dumps([row]).encode("utf-8")
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        urllib.request.urlopen(req, timeout=3)
-
-    except Exception as e:
-        _log_hook_error("capture_usage_supabase", e)
-
-
 def _build_project_status(session_id: str, project: str):
     """Build a project status snapshot from session activity.
 
@@ -565,7 +423,6 @@ def run(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     project = payload.get("project") or payload.get("cwd") or os.getcwd()
 
-    _capture_usage_to_supabase(session_id, project)
     _auto_feedback_on_surfaced(session_id)
     _print_activity_report(session_id)
 
