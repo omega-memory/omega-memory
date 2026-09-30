@@ -408,10 +408,9 @@ def _get_reranker_model():
         tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
         tokenizer.enable_truncation(max_length=512)
 
-        sess_opts = ort.SessionOptions()
-        sess_opts.log_severity_level = 4
-        sess_opts.log_verbosity_level = 0
-        sess_opts.enable_cpu_mem_arena = False  # Save RAM
+        from omega.onnx_session import make_session_options
+
+        sess_opts = make_session_options(ort)
 
         # CPU-only: CoreML leaks memory on long-running processes
         providers = ["CPUExecutionProvider"]

@@ -303,10 +303,9 @@ def _get_embedding_model():
                     pad_id=_EMBEDDING_CONFIG.pad_id, pad_token=_EMBEDDING_CONFIG.pad_token
                 )
                 tokenizer.enable_truncation(max_length=512)
-                sess_opts = ort.SessionOptions()
-                sess_opts.log_severity_level = 4
-                sess_opts.log_verbosity_level = 0
-                sess_opts.enable_cpu_mem_arena = False  # Save ~50MB RAM
+                from omega.onnx_session import make_session_options
+
+                sess_opts = make_session_options(ort)
                 # CPU-only: CoreML leaks ~700KB/op in native memory on long-running
                 # processes (profiled Feb 2026). Speed difference is negligible for
                 # single 384-dim embeddings (<5ms either way).

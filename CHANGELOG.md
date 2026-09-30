@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+Measured on one machine (14-core Apple M4 Pro) against a fixed-seed corpus of
+10,000 memories, with the models a default install uses (bge-small-en-v1.5
+and ms-marco-MiniLM-L-6-v2). "CPU" is processor time across all threads.
+
+- **The embedding and reranker models use far less CPU.** ONNX Runtime ran one
+  thread per core and kept them spinning after each inference. Each model now
+  uses at most 4 threads (`OMEGA_ONNX_THREADS` overrides) that sleep when idle.
+  Embedding one memory: 38.5 → 16.5 ms of CPU. Embedding 32: 1,899 → 697 ms
+  of CPU, 283 → 220 ms wall. Reranking 10 results: 204 → 96 ms of CPU,
+  29 → 27 ms wall. The 45 ms of CPU burned in the 200 ms after every
+  inference, with nothing running, is gone. A single embedding takes about
+  1.5 ms longer, because a sleeping thread has to wake.
+
 ## [1.5.19] - 2026-09-29
 
 ### Changed
