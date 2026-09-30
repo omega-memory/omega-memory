@@ -8,9 +8,29 @@
     <!-- No admin privileges required -->
     <volume-check>
         <allowed-os-versions>
-            <os-version min="12.0"/>
+            <os-version min="14.0"/>
         </allowed-os-versions>
     </volume-check>
+
+    <!-- The pkg carries a Python for each kind of Mac; the postinstall script
+         keeps the matching one. Apple Silicon needs macOS 14 and Intel needs
+         macOS 15 (build-macos-pkg.sh, min_macos): keep the numbers in step. -->
+    <installation-check script="macOSVersionIsSupported()"/>
+    <script><![CDATA[
+function macOSVersionIsSupported() {
+    var appleSilicon = system.sysctl('hw.optional.arm64') == 1;
+    var minimum = appleSilicon ? '14.0' : '15.0';
+    if (system.compareVersions(system.version.ProductVersion, minimum) >= 0) {
+        return true;
+    }
+    my.result.type = 'Fatal';
+    my.result.title = 'OMEGA needs macOS ' + minimum + ' or later';
+    my.result.message = 'On ' + (appleSilicon ? 'an Apple Silicon' : 'an Intel') +
+        ' Mac, OMEGA needs macOS ' + minimum + ' or later. Update macOS in ' +
+        'System Settings, then run this installer again.';
+    return false;
+}
+    ]]></script>
 
     <!-- Installer pages -->
     <welcome file="welcome.html" mime-type="text/html"/>

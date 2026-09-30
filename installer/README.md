@@ -2,7 +2,7 @@
 
 One-click installers for non-technical Claude Desktop users.
 
-- **macOS**: `.pkg` installer (arm64 + Intel)
+- **macOS**: `.pkg` installer (one download for Apple Silicon and Intel)
 - **Windows**: `.exe` installer (64-bit)
 
 ---
@@ -15,10 +15,25 @@ One-click installers for non-technical Claude Desktop users.
 2. Configures Claude Desktop to use OMEGA as an MCP server
 3. No admin privileges required (per-user install)
 
+The pkg carries two Pythons, one built for Apple Silicon and one for Intel,
+each with its own copy of OMEGA's packages. The postinstall script keeps the
+one that matches the Mac (`sysctl hw.optional.arm64`) and replaces any
+previous `~/Library/OMEGA/python` instead of installing over it, so an
+upgrade never mixes two versions of the packages.
+
 ## Prerequisites
 
-- macOS 12 (Monterey) or later
-- Apple Silicon (M1+) or Intel Mac
+- Apple Silicon Mac with macOS 14 (Sonoma) or later, or
+- Intel Mac with macOS 15 (Sequoia) or later
+
+The floors come from the binaries OMEGA depends on, not from their wheel
+tags, which claim older: onnxruntime since 1.24 and sqlite-vec need macOS 14
+on Apple Silicon, and sqlite-vec since 0.1.7 needs macOS 15 on Intel.
+onnxruntime has published no Intel build since 1.23.2, which the Intel
+payload therefore uses. `macos/check_payload.py` reads every binary in both
+payloads during the build and fails it if one lacks the architecture or needs
+a newer macOS; `macos/Distribution.xml` refuses to install below the floors.
+The two must change together.
 - Claude Desktop installed
 - Internet connection (for embedding model download on first use)
 
@@ -27,28 +42,33 @@ One-click installers for non-technical Claude Desktop users.
 ### Requirements
 
 - macOS machine
-- Internet connection (downloads ~60 MB python-build-standalone)
-- No additional tools needed (uses built-in `pkgbuild`/`productbuild`)
+- Internet connection (downloads python-build-standalone for both architectures, ~2 x 60 MB)
+- No additional tools needed (uses built-in `pkgbuild`/`productbuild`); an
+  Intel runner is not needed, because pip installs the Intel packages by
+  platform tag
 
 ### Steps
 
 ```bash
 cd installer
-./build-macos-pkg.sh 1.5.4
+./build-macos-pkg.sh 1.5.20
 ```
 
-Output: `build/macos/dist/OMEGA-Memory.pkg`
+Output: `build/macos/dist/OMEGA-Memory.pkg` (about 175 MB). Set
+`OMEGA_PKG_BUILD_DIR` to build somewhere else, such as an external drive; the
+build directory needs about 800 MB.
 
 ### Automated build
 
-Push a release tag or trigger the `Build macOS Installer` workflow manually in GitHub Actions. The workflow runs on `macos-latest`, builds `OMEGA-Memory.pkg`, verifies the packaged `omega.__version__`, uploads an artifact, and attaches it to `v*` GitHub releases.
+Push a release tag or trigger the `Build macOS Installer` workflow manually in GitHub Actions. The workflow runs on `macos-latest`, builds `OMEGA-Memory.pkg`, checks `omega.__version__` in both payloads (the Intel one under Rosetta when the runner has it), uploads an artifact, and attaches it to `v*` GitHub releases.
 
 The installer is intentionally version-pinned. A `v1.5.4` installer should
 install `omega-memory[server]==1.5.4`, not whatever PyPI latest is later.
 
 ## Testing checklist
 
-- [ ] Run `OMEGA-Memory.pkg` on a clean macOS install (no Python installed)
+- [ ] Run `OMEGA-Memory.pkg` on a clean macOS install (no Python installed), on Apple Silicon and on Intel
+- [ ] Check `lipo -archs ~/Library/OMEGA/python/bin/python3.12` matches the Mac, and `~/Library/OMEGA` has no `python-arm64` or `python-x86_64` left
 - [ ] Verify install completes without errors
 - [ ] Check `~/Library/OMEGA/python/bin/python3` exists
 - [ ] Check `~/Library/Application Support/Claude/claude_desktop_config.json` has `omega-memory` entry
@@ -62,8 +82,9 @@ install `omega-memory[server]==1.5.4`, not whatever PyPI latest is later.
 
 ```
 ~/Library/OMEGA/                    <- install directory
-  python/                           <- python-build-standalone 3.12
-    bin/python3
+  python/                           <- python-build-standalone 3.12 for this Mac
+    bin/python3                        (the pkg installs python-arm64/ and
+                                        python-x86_64/; postinstall keeps one)
     lib/python3.12/site-packages/   <- omega-memory package
   configure_claude.py               <- post-install/uninstall config script
   uninstall-omega.sh                <- uninstall script

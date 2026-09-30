@@ -11,6 +11,28 @@ CONFIGURE="$INSTALL_DIR/configure_claude.py"
 
 echo "OMEGA: Running post-install configuration..."
 
+# The pkg carries a Python for Apple Silicon and one for Intel. Keep the one
+# this Mac runs natively. hw.optional.arm64 is 1 on Apple Silicon even in a
+# shell running under Rosetta, where uname -m says x86_64; Intel Macs do not
+# have the key.
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+    ARCH="arm64"
+else
+    ARCH="x86_64"
+fi
+echo "OMEGA: Using the $ARCH Python"
+
+# Replace the previous Python instead of installing over it. Installer keeps
+# files the new payload does not have, so an upgrade would mix two versions
+# of OMEGA's packages, and an Intel Mac given the Apple Silicon Python by an
+# earlier pkg would keep code it cannot run.
+rm -rf "$INSTALL_DIR/python.previous"
+if [ -d "$INSTALL_DIR/python" ]; then
+    mv "$INSTALL_DIR/python" "$INSTALL_DIR/python.previous"
+fi
+mv "$INSTALL_DIR/python-$ARCH" "$INSTALL_DIR/python"
+rm -rf "$INSTALL_DIR/python-arm64" "$INSTALL_DIR/python-x86_64" "$INSTALL_DIR/python.previous"
+
 # Configure Claude Desktop (inject MCP server entry)
 if [ -f "$CONFIGURE" ]; then
     "$PYTHON" "$CONFIGURE" --install-dir "$INSTALL_DIR"

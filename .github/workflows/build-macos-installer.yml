@@ -37,14 +37,23 @@ jobs:
 
       - name: Verify packaged omega version
         run: |
-          installer/build/macos/payload/python/bin/python3 - <<'PY'
-          import omega
-          expected = "${{ steps.version.outputs.version }}"
-          actual = omega.__version__
-          if actual != expected:
-              raise SystemExit(f"omega version mismatch: {actual} != {expected}")
-          print(f"omega {actual}")
-          PY
+          expected="${{ steps.version.outputs.version }}"
+          payload=installer/build/macos/payload
+          # The Apple Silicon Python runs natively. The Intel one runs under
+          # Rosetta when the runner has it; otherwise read its package metadata.
+          for arch in arm64 x86_64; do
+            python="$payload/python-$arch/bin/python3"
+            if [ "$arch" = arm64 ] || arch -x86_64 /usr/bin/true 2>/dev/null; then
+              actual="$(arch "-$arch" "$python" -c 'import omega, onnxruntime; print(omega.__version__)')"
+            else
+              actual="$(sed -n 's/^Version: //p' "$payload"/python-$arch/lib/python3.12/site-packages/omega_memory-*.dist-info/METADATA)"
+            fi
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$arch payload has omega $actual, expected $expected"
+              exit 1
+            fi
+            echo "$arch: omega $actual"
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
