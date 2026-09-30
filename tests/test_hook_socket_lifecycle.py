@@ -17,6 +17,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -228,6 +229,99 @@ def test_fast_hook_still_retries_while_the_owner_is_alive(short_dir, monkeypatch
 
     assert fast_hook._delegate_with_retries("session_start", {}, timeout=1.0) is None
     assert len(sleeps) == fast_hook._CONNECT_RETRIES
+
+
+# ---------------------------------------------------------------------------
+# SessionStart fires as the MCP server starts: wait for its socket to appear
+# ---------------------------------------------------------------------------
+
+
+def _answer_once(sock_path: Path, reply: dict) -> threading.Thread:
+    """Listen at ``sock_path`` and answer one hook request with ``reply``, as the hook server would."""
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(sock_path))
+    listener.listen(1)
+
+    def serve() -> None:
+        with listener:
+            connection, _ = listener.accept()
+            with connection:
+                while connection.recv(65536):
+                    pass
+                connection.sendall(json.dumps(reply).encode())
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    return thread
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix socket lifecycle")
+def test_session_start_waits_for_a_socket_that_appears_after_it_fires(short_dir, monkeypatch):
+    sock_path = short_dir / "hook.sock"
+    fast_hook, _ = _load_fast_hook(sock_path, short_dir / "owner.json", monkeypatch)
+    sleeps: list[float] = []
+
+    def server_starts_meanwhile(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            _answer_once(sock_path, {"output": "briefing", "error": None})
+
+    monkeypatch.setattr(fast_hook.time, "sleep", server_starts_meanwhile)
+
+    assert fast_hook._delegate_with_retries("session_start", {}, timeout=1.0) == {"output": "briefing", "error": None}
+    assert sleeps == [fast_hook._CONNECT_RETRY_DELAY] * 2
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix socket lifecycle")
+@pytest.mark.parametrize("hook_names", ["session_start", ["session_start", "coord_session_start"]])
+def test_session_start_stops_waiting_for_a_socket_at_the_end_of_the_window(hook_names, short_dir, monkeypatch):
+    fast_hook, sleeps = _load_fast_hook(short_dir / "hook.sock", short_dir / "owner.json", monkeypatch)
+
+    assert fast_hook._delegate_with_retries(hook_names, {}, timeout=1.0) is None
+    assert sleeps == [fast_hook._CONNECT_RETRY_DELAY] * fast_hook._CONNECT_RETRIES
+    # The whole wait plus the answer fits inside the hook's timeout in hooks-core.json.
+    hooks_json = json.loads((SRC_DIR / "omega" / "data" / "hooks-core.json").read_text())
+    assert sum(sleeps) + fast_hook._DAEMON_TIMEOUT_S < hooks_json["SessionStart"][0]["timeout"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix socket lifecycle")
+def test_other_hooks_do_not_wait_for_a_missing_socket(short_dir, monkeypatch):
+    fast_hook, sleeps = _load_fast_hook(short_dir / "hook.sock", short_dir / "owner.json", monkeypatch)
+
+    assert fast_hook._delegate_with_retries("surface_memories", {}, timeout=1.0) is None
+    assert sleeps == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix socket lifecycle")
+async def test_the_briefing_arrives_when_the_hook_server_starts_after_session_start_fired(short_dir, monkeypatch):
+    """End to end: the real client process starts first, the real hook server 0.7 s later."""
+    omega_dir = short_dir / ".omega"
+    omega_dir.mkdir()
+    monkeypatch.setattr(hook_server, "SOCK_PATH", omega_dir / "hook.sock")
+    monkeypatch.setattr(owner_state, "OWNER_STATE_PATH", omega_dir / "hook.sock.owner.json")
+    monkeypatch.setitem(core.HOOK_HANDLERS, "session_start", lambda payload: {"output": "briefing", "error": None})
+
+    client = await asyncio.create_subprocess_exec(
+        sys.executable, str(SRC_DIR / "omega" / "hooks" / "fast_hook.py"), "session_start",
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env={**os.environ, "HOME": str(short_dir)},
+    )
+    # Claude Code writes the payload at once; the client then looks for the socket.
+    client.stdin.write(json.dumps({"hook_event_name": "SessionStart", "session_id": "s1"}).encode())
+    await client.stdin.drain()
+    client.stdin.close()
+    await asyncio.sleep(0.7)
+    assert not (omega_dir / "hook.sock").exists()
+    server = await hook_server.start_hook_server()
+    try:
+        stdout = await asyncio.wait_for(client.stdout.read(), timeout=15)
+        stderr = await client.stderr.read()
+        await client.wait()
+    finally:
+        await hook_server.stop_hook_server(server)
+
+    assert client.returncode == 0, stderr.decode()
+    assert stdout.decode() == "briefing\n"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix socket lifecycle")

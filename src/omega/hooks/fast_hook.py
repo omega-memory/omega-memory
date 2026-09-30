@@ -169,16 +169,28 @@ def _delegate_with_retries(hook_names, payload, timeout):
     """Send the request to the daemon; return its response, or None if none is reachable.
 
     Retries a refused connection only while the socket's owner is alive (the
-    startup race). A missing socket, a slow daemon, or an owner that has
-    exited returns None at once.
+    startup race). A slow daemon or an owner that has exited returns None at
+    once, and so does a missing socket, except for session_start.
+
+    Claude Code starts the SessionStart hook and the MCP server that creates
+    the socket at the same moment, so the hook can find no socket yet. Giving
+    up there loses the session's briefing, so session_start waits for it
+    within the same retry window: 4 retries of 0.5 s, then at most 5 s for
+    the answer, inside the hook's 10 s timeout. Other hooks fire later, once
+    the server is up; for them a missing socket means no server.
     """
+    names = hook_names if isinstance(hook_names, list) else [hook_names]
+    wait_for_socket = "session_start" in names
     for attempt in range(_CONNECT_RETRIES + 1):
         try:
             return delegate(hook_names, payload, timeout=timeout)
         except socket.timeout:
             return None  # daemon exists but slow — don't retry, fall through
         except FileNotFoundError:
-            return None  # socket file missing — daemon not started
+            # Socket file missing: the server has not started, or not yet.
+            if not wait_for_socket or attempt == _CONNECT_RETRIES:
+                return None
+            time.sleep(_CONNECT_RETRY_DELAY)
         except OSError:
             # ConnectionRefusedError and friends: nobody is accepting.
             if attempt == _CONNECT_RETRIES or not _socket_owner_alive():
