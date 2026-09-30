@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.5.19] - 2026-09-29
+### Fixed
+
+- **Memories surfaced after reading, editing or running a command never
+  reached the AI.** Claude Code passes a hook's plain output to the model
+  only at session start and when you send a prompt. After a tool call it
+  keeps plain output in its debug log, and text reaches the model only in
+  a JSON `additionalContext` field. The file and command hook printed plain
+  text, so the memories it found were never seen. They now go out in that
+  field after Read, Edit, Write, NotebookEdit and Bash, still labelled as
+  stored data, and at most 2,000 characters at a time.
+- **The session-start briefing was lost when the hook ran before OMEGA's
+  server was up.** Claude Code starts the session-start hook and OMEGA's
+  server at the same time. If the hook found no hook socket yet, it gave up
+  at once and the session started without its briefing. It now waits up to
+  2 seconds for the socket, well inside the hook's 10-second limit. Other
+  hooks still give up at once.
+- **A stuck hook could make the hook server stop answering.** A connection
+  was closed only when its hook finished, with no time limit, so a hook
+  stuck on the database kept its own connection open, and every connection
+  waiting behind it, after their callers had given up. Enough of them and
+  the server could not accept new ones. Each connection now closes within
+  30 seconds whatever its hook does, and closing no longer waits on a
+  caller that stopped reading.
+
+## [1.5.19] - 2026-09-30
 
 ### Changed
 
