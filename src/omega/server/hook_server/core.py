@@ -8,6 +8,10 @@ Protocol (one request per connection, client half-closes after sending):
 A response may carry ``exit_code``; a non-zero value tells ``fast_hook.py``
 to exit with it, which is how blocking guards veto a tool call. In a batch,
 the first non-zero ``exit_code`` short-circuits the remaining hooks.
+
+A response may also carry ``context``: text for the model. On PreToolUse and
+PostToolUse ``fast_hook.py`` prints it as Claude Code's additionalContext
+JSON, the only way text reaches the model around a tool call.
 """
 
 from __future__ import annotations

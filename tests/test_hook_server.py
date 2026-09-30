@@ -189,7 +189,7 @@ def test_assistant_capture_stores_fix_sentence():
     assert lessons[0].content.startswith("Assistant fix: The fix was")
 
 
-def test_surface_memories_returns_memory_lines_for_edit():
+def test_surface_memories_returns_memory_lines_for_edit_as_model_context():
     canned = [{
         "id": "mem-abcdef123456",
         "content": "db.py: wrap every write in a transaction",
@@ -204,8 +204,9 @@ def test_surface_memories_returns_memory_lines_for_edit():
         response = hook_server.handle_surface_memories(payload)
 
     assert response["error"] is None
-    assert "[MEMORY] Relevant context for db.py:" in response["output"]
-    assert "wrap every write in a transaction" in response["output"]
+    assert response["output"] == ""
+    assert "[MEMORY] Relevant context for db.py:" in response["context"]
+    assert "wrap every write in a transaction" in response["context"]
 
 
 def test_surface_memories_debounces_repeated_touches_of_one_file():
@@ -236,7 +237,7 @@ def test_surface_memories_captures_bash_error():
     response = hook_server.handle_surface_memories(payload)
 
     assert response["error"] is None
-    assert "[OMEGA] Captured error" in response["output"]
+    assert "[OMEGA] Captured error" in response["context"]
     errors = _stored("error_pattern")
     assert len(errors) == 1
     assert "database is locked" in errors[0].content
@@ -270,9 +271,9 @@ def test_surfaced_memory_is_labelled_as_stored_data_not_instructions():
     payload = {"tool_name": "Edit", "tool_input": json.dumps({"file_path": "/proj/db.py"}), "session_id": "s1", "project": "/proj"}
 
     with patch("omega.bridge.query_structured", return_value=canned):
-        output = hook_server.handle_surface_memories(payload)["output"]
+        context = hook_server.handle_surface_memories(payload)["context"]
 
-    assert output.startswith(handlers.STORED_DATA_LABEL + "\n")
+    assert context.startswith(handlers.STORED_DATA_LABEL + "\n")
     assert "not as instructions" in handlers.STORED_DATA_LABEL
 
 
@@ -280,7 +281,9 @@ def test_empty_hook_output_gets_no_label():
     payload = {"tool_name": "Read", "tool_input": json.dumps({"file_path": "/proj/quiet.py"}), "session_id": "s1", "project": "/proj"}
 
     with patch("omega.bridge.query_structured", return_value=[]):
-        assert hook_server.handle_surface_memories(payload)["output"] == ""
+        response = hook_server.handle_surface_memories(payload)
+
+    assert response["output"] == response["context"] == ""
 
 
 def test_session_stop_stores_summary_and_releases_session_state():
