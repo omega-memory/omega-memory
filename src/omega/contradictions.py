@@ -147,7 +147,21 @@ def detect_contradictions(
     if not new_content or not candidates:
         return []
 
-    # Step 1: Get similarity scores (cross-encoder or fallback)
+    # Step 1: The text signals for each candidate. They are cheap, and they
+    # bound the result: similarity only scales a signal score down, so a
+    # candidate whose signal score is below the threshold cannot become a
+    # contradiction at any similarity.
+    new_words = set(new_content.lower().split())
+    new_lower = new_content.lower()
+    signal_scores = [
+        _signal_score(new_lower, new_words, candidate) for candidate in candidates
+    ]
+    if all(score < contradiction_threshold for _, score in signal_scores):
+        # Nothing can pass, so skip the similarity model. store() runs this
+        # on every write, and the cross-encoder costs more than the write.
+        return []
+
+    # Step 2: Get similarity scores (cross-encoder or fallback)
     if similarity_scores is None:
         similarity_scores = _get_similarity_scores(new_content, candidates)
 
@@ -158,50 +172,15 @@ def detect_contradictions(
     # Normalize similarity scores to [0, 1]
     sim_norm = _normalize_scores(similarity_scores)
 
-    # Step 2: For each sufficiently similar candidate, check for contradiction
+    # Step 3: For each sufficiently similar candidate with a signal, score it
     results = []
-    new_words = set(new_content.lower().split())
-    new_lower = new_content.lower()
-
     for i, (candidate, sim) in enumerate(zip(candidates, sim_norm)):
         if sim < similarity_threshold:
             continue  # Not similar enough to be a contradiction
 
-        signals = []
-        cand_lower = candidate.lower()
-        cand_words = set(cand_lower.split())
-
-        # Signal 1: Negation asymmetry
-        neg_score = _check_negation_asymmetry(new_lower, new_words, cand_lower, cand_words)
-        if neg_score > 0:
-            signals.append("negation")
-
-        # Signal 2: Antonym presence
-        ant_score = _check_antonyms(new_words, cand_words)
-        if ant_score > 0:
-            signals.append("antonym")
-
-        # Signal 3: Preference value change
-        pref_score = _check_preference_change(new_lower, cand_lower)
-        if pref_score > 0:
-            signals.append("preference_change")
-
-        # Signal 4: Temporal override
-        temp_score = _check_temporal_override(new_lower, cand_lower)
-        if temp_score > 0:
-            signals.append("temporal_override")
-
+        signals, signal_score = signal_scores[i]
         if not signals:
             continue
-
-        # Compute final contradiction confidence
-        # Base: weighted combination of signal scores
-        signal_score = (
-            neg_score * 0.35
-            + ant_score * 0.25
-            + pref_score * 0.25
-            + temp_score * 0.15
-        )
 
         # Boost by similarity — high similarity + contradiction signals = strong contradiction
         confidence = min(1.0, signal_score * (0.5 + sim * 0.5))
@@ -228,6 +207,28 @@ def detect_contradictions(
 # ---------------------------------------------------------------------------
 # Signal checkers (each returns 0.0–1.0)
 # ---------------------------------------------------------------------------
+
+
+def _signal_score(new_lower: str, new_words: set, candidate: str) -> tuple[list[str], float]:
+    """The contradiction signals that fire for one candidate, and their weighted score."""
+    cand_lower = candidate.lower()
+    cand_words = set(cand_lower.split())
+    neg_score = _check_negation_asymmetry(new_lower, new_words, cand_lower, cand_words)
+    ant_score = _check_antonyms(new_words, cand_words)
+    pref_score = _check_preference_change(new_lower, cand_lower)
+    temp_score = _check_temporal_override(new_lower, cand_lower)
+    signals = [
+        name
+        for name, score in (
+            ("negation", neg_score),
+            ("antonym", ant_score),
+            ("preference_change", pref_score),
+            ("temporal_override", temp_score),
+        )
+        if score > 0
+    ]
+    weighted = neg_score * 0.35 + ant_score * 0.25 + pref_score * 0.25 + temp_score * 0.15
+    return signals, weighted
 
 
 def _check_negation_asymmetry(

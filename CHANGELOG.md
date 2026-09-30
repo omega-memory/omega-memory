@@ -21,6 +21,16 @@ and ms-marco-MiniLM-L-6-v2). "CPU" is processor time across all threads.
   29 → 27 ms wall. The 45 ms of CPU burned in the 200 ms after every
   inference, with nothing running, is gone. A single embedding takes about
   1.5 ms longer, because a sleeping thread has to wake.
+- **Saving a memory no longer runs the reranker.** The cross-encoder ran
+  inside every store: once to rank the similar memories the store checks for
+  duplicates, and once to score contradiction candidates that could not
+  become contradictions at any score. The duplicate check now uses vector and
+  text similarity, and contradiction scoring runs only when a candidate's
+  wording could make it one. Reranker calls per store: 0.57 → 0.01. With the
+  thread change above, CPU per store: 111 → 39 ms (median), 284 → 75 ms (p90).
+  Across 120 test writes (restatements, updates, extensions and new facts),
+  every dedup, evolution, retirement and contradiction outcome was the same as
+  before. Searches still use the reranker.
 
 ## [1.5.19] - 2026-09-29
 

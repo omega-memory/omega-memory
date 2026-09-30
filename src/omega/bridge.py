@@ -1247,11 +1247,16 @@ def auto_capture(
 
     if dedup_threshold is not None or event_type in EVOLUTION_TYPES:
         try:
+            # Vector and text similarity find the restatements, and the
+            # phases below decide on word overlap, so reranking these
+            # candidates or expanding the query with an LLM only added cost
+            # to every write. A person's search keeps both.
             with store.untracked_lookup():
                 _similar_results = store.query(
                     content[:200], limit=8,
                     query_embedding=_precomputed_embedding,
                     project_path=scope_project, scope="project", entity_id=scope_entity,
+                    expand_query=False, rerank=False,
                 )
             scopes = store.get_scopes([r.id for r in _similar_results])
             _similar_results = [

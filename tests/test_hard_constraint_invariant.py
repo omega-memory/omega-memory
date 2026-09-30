@@ -239,8 +239,9 @@ class TestInvariantBackstop:
         original = SQLiteStore._query_phase_rerank
 
         def leaky(self, query_text, all_results, node_scores, limit, pw_graph,
-                  constraints=None):
-            original(self, query_text, all_results, node_scores, limit, pw_graph, None)
+                  constraints=None, rerank=True):
+            original(self, query_text, all_results, node_scores, limit, pw_graph, None,
+                     rerank=rerank)
             row = self.get_node(intruder)
             all_results[intruder] = row
             node_scores[intruder] = 99.0
