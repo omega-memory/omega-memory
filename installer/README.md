@@ -60,7 +60,7 @@ build directory needs about 800 MB.
 
 ### Automated build
 
-Push a release tag or trigger the `Build macOS Installer` workflow manually in GitHub Actions. The workflow runs on `macos-latest`, builds `OMEGA-Memory.pkg`, checks `omega.__version__` in both payloads (the Intel one under Rosetta when the runner has it), uploads an artifact, and attaches it to `v*` GitHub releases.
+Push a release tag or trigger the `Build macOS Installer` workflow manually in GitHub Actions. The workflow runs on `macos-latest`, waits until pip can fetch the release from PyPI (`wait_for_pypi.py`, up to 15 minutes: the tag is pushed seconds after the upload, before PyPI's index lists it), builds `OMEGA-Memory.pkg`, checks `omega.__version__` in both payloads (the Intel one under Rosetta when the runner has it), uploads an artifact, and attaches it to `v*` GitHub releases.
 
 The installer is intentionally version-pinned. A `v1.5.4` installer should
 install `omega-memory[server]==1.5.4`, not whatever PyPI latest is later.
@@ -136,18 +136,20 @@ Remove-Item build\python.zip
 # 2. Download get-pip.py
 Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile build\get-pip.py
 
-# 3. Build installer
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" omega-setup.iss
+# 3. Build installer for a given omega-memory release
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.5.20 omega-setup.iss
 ```
 
 Output: `dist\omega-setup.exe`
 
 ### Automated build
 
-Push a release tag or trigger the `Build Windows Installer` workflow manually in GitHub Actions. The workflow installs Inno Setup, downloads embedded Python + `get-pip.py`, builds `omega-setup.exe`, uploads an artifact, and attaches it to `v*` GitHub releases.
+Push a release tag or trigger the `Build Windows Installer` workflow manually in GitHub Actions. The workflow waits until pip can fetch the release from PyPI, installs Inno Setup, downloads embedded Python + `get-pip.py`, builds `omega-setup.exe`, uploads an artifact, and attaches it to `v*` GitHub releases.
 
-The Inno script pins the package version in its `pip install` step. Update
-`installer/omega-setup.iss` before each new installer release.
+The installer pip-installs exactly the release it was built for. The
+workflow passes the tag's version to ISCC as `/DMyAppVersion`; the script has
+no default, because a pinned default kept every installer from v1.5.4 to
+v1.5.19 on Core 1.5.4.
 
 ## Testing checklist
 
@@ -166,16 +168,14 @@ The Inno script pins the package version in its `pip install` step. Update
 # Release checklist
 
 1. Publish and verify `omega-memory` on PyPI.
-2. Update installer pins and metadata:
-   - `installer/build-macos-pkg.sh` default version
-   - `installer/omega-setup.iss` `MyAppVersion`
-   - `installer/omega-setup.iss` pinned `pip install omega-memory[server]==...`
-3. Build macOS and Windows installers from a `v*` tag or manual workflow.
-4. Smoke test both installers on clean machines or VMs.
-5. Attach artifacts to the matching GitHub release:
+2. Build macOS and Windows installers from a `v*` tag or manual workflow.
+   Both take the version from the tag (or the `version` input) and wait for
+   PyPI to list it; nothing in the repository needs a version bump.
+3. Smoke test both installers on clean machines or VMs.
+4. Attach artifacts to the matching GitHub release:
    - `OMEGA-Memory.pkg`
    - `omega-setup.exe`
-6. Update website `INSTALLER_VERSION` only after both artifact URLs return 200.
+5. Update website `INSTALLER_VERSION` only after both artifact URLs return 200.
 
 ## Architecture
 

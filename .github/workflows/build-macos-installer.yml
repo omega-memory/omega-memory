@@ -29,7 +29,17 @@ jobs:
           else
             VERSION="${GITHUB_REF_NAME#v}"
           fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$VERSION' is not a release version (X.Y.Z)"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # The tag is pushed seconds after the PyPI upload, before PyPI's index
+      # lists the version; without this the build's pip install fails.
+      - name: Wait for the release on PyPI
+        timeout-minutes: 20
+        run: python3 installer/wait_for_pypi.py "${{ steps.version.outputs.version }}"
 
       - name: Build package
         working-directory: installer

@@ -2,6 +2,10 @@ name: Build Windows Installer
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "omega-memory version the installer installs"
+        required: true
   push:
     tags:
       - "v*"
@@ -24,7 +28,18 @@ jobs:
           else
             VERSION="${GITHUB_REF_NAME#v}"
           fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$VERSION' is not a release version (X.Y.Z)"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # The installer pip-installs this exact version on the user's PC, so do
+      # not publish it before PyPI's index lists the version.
+      - name: Wait for the release on PyPI
+        timeout-minutes: 20
+        shell: bash
+        run: python installer/wait_for_pypi.py "${{ steps.version.outputs.version }}"
 
       - name: Install Inno Setup
         shell: powershell
@@ -43,7 +58,7 @@ jobs:
       - name: Build installer
         working-directory: installer
         shell: powershell
-        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" omega-setup.iss'
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ steps.version.outputs.version }}" omega-setup.iss'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
