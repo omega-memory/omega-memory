@@ -2912,9 +2912,13 @@ def cmd_doctor(args):
     else:
         warn("omega.db not found (will be created on first use)")
 
-    # 4. MCP server: can it start at all, and is it registered (client-specific)
+    # 4. MCP server: can it start at all, and is it registered (client-specific).
+    # Claude Code is checked when it is the client asked about, or when no
+    # client was named and its CLI is installed. Naming another client means
+    # "check that one": a machine that also has the `claude` CLI must not fail
+    # `omega doctor --client claude-desktop` for having no Claude Code entry.
     client = getattr(args, "client", None)
-    check_claude = client == "claude-code" or shutil.which("claude")
+    check_claude = client == "claude-code" or (client is None and bool(shutil.which("claude")))
     if not use_json:
         print_section("MCP Server (Claude Code)" if check_claude else "MCP Server")
     server_python = _resolve_python_path()

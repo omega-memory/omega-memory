@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the upload, and the Mac build failed for v1.5.15, v1.5.17 and v1.5.19. Both
   builds now wait, up to 15 minutes, until the release can be downloaded.
 
+- **`omega doctor` failed a working Claude Desktop setup on a machine that
+  also had Claude Code.** With the `claude` command installed, doctor counted
+  "not registered in Claude Code" as an error even when asked about another
+  client, as in `omega doctor --client claude-desktop`. Naming a client now
+  checks that client. Plain `omega doctor` still checks Claude Code when its
+  command is installed.
+
 ### Added
 
 - **A script to sign and notarize the Mac installer.**
