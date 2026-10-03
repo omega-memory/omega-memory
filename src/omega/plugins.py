@@ -7,9 +7,17 @@ register via ``[project.entry-points."omega.plugins"]`` in their pyproject.toml.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Callable
 
 logger = logging.getLogger("omega.plugins")
+
+# How long a scan of installed plugins is reused for capability checks. A scan
+# reads every installed package's entry points (about 0.7 ms) and store()
+# asks for a capability several times per write, while the answer changes
+# only when a package is installed or removed.
+_DISCOVERY_REUSE_S = 60.0
+_capability_plugins_cache: tuple[Callable, float, list[OmegaPlugin]] | None = None
 
 
 class OmegaPlugin:
@@ -68,6 +76,29 @@ def discover_plugins() -> list[OmegaPlugin]:
     return plugins
 
 
+def reset_plugin_cache() -> None:
+    """Forget the plugins reused for capability checks, so the next check rescans."""
+    global _capability_plugins_cache
+    _capability_plugins_cache = None
+
+
+def _capability_plugins() -> list[OmegaPlugin]:
+    """The installed plugins, from a scan at most _DISCOVERY_REUSE_S old.
+
+    Only the scan is reused. Each plugin's capabilities are still read on
+    every call, so a license that starts or stops being valid takes effect
+    at once. A swapped-in discover_plugins (an embedder, a test) is scanned
+    afresh.
+    """
+    global _capability_plugins_cache
+    now = time.monotonic()
+    cached = _capability_plugins_cache
+    if cached is None or cached[0] is not discover_plugins or now - cached[1] >= _DISCOVERY_REUSE_S:
+        cached = (discover_plugins, now, discover_plugins())
+        _capability_plugins_cache = cached
+    return cached[2]
+
+
 def get_capabilities() -> set[str]:
     """Return capabilities advertised by installed OMEGA plugins.
 
@@ -76,7 +107,7 @@ def get_capabilities() -> set[str]:
     local license function to unlock behavior by itself.
     """
     capabilities: set[str] = set()
-    for plugin in discover_plugins():
+    for plugin in _capability_plugins():
         raw = getattr(plugin, "CAPABILITIES", None)
         if callable(raw):
             raw = raw()

@@ -4,7 +4,24 @@ import sys
 import types
 from unittest.mock import MagicMock, patch
 
-from omega.plugins import OmegaPlugin, discover_plugins, get_capabilities, has_capability
+import pytest
+
+import omega.plugins as plugins_module
+from omega.plugins import (
+    OmegaPlugin,
+    discover_plugins,
+    get_capabilities,
+    has_capability,
+    reset_plugin_cache,
+)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_plugin_scan():
+    """Capability checks reuse a plugin scan; start and leave each test without one."""
+    reset_plugin_cache()
+    yield
+    reset_plugin_cache()
 
 
 class TestOmegaPluginBase:
@@ -170,3 +187,67 @@ class TestPluginCapabilities:
         result = discover_plugins()
         assert len(result) == 1
         assert isinstance(result[0], GoodPlugin)
+
+
+class TestCapabilityChecksReuseTheScan:
+    """store() asks for a capability several times per write; the scan is not repeated."""
+
+    @staticmethod
+    def _counting_discovery(monkeypatch, plugin):
+        scans = []
+
+        def fake_discover_plugins():
+            scans.append(1)
+            return [plugin]
+
+        monkeypatch.setattr(plugins_module, "discover_plugins", fake_discover_plugins)
+        return scans
+
+    def test_repeated_checks_scan_once(self, monkeypatch):
+        class Plugin(OmegaPlugin):
+            CAPABILITIES = {"full_retrieval"}
+
+        scans = self._counting_discovery(monkeypatch, Plugin())
+
+        assert [has_capability("full_retrieval") for _ in range(5)] == [True] * 5
+        assert has_capability("unlimited_memory") is False
+        assert len(scans) == 1
+
+    def test_a_capability_change_shows_without_a_rescan(self, monkeypatch):
+        licensed = {"now": False}
+
+        class Plugin(OmegaPlugin):
+            def CAPABILITIES(self):
+                return {"pro_tools"} if licensed["now"] else set()
+
+        scans = self._counting_discovery(monkeypatch, Plugin())
+
+        assert has_capability("pro_tools") is False
+        licensed["now"] = True
+        assert has_capability("pro_tools") is True
+        licensed["now"] = False
+        assert has_capability("pro_tools") is False
+        assert len(scans) == 1
+
+    def test_the_scan_is_repeated_once_it_is_old(self, monkeypatch):
+        scans = self._counting_discovery(monkeypatch, OmegaPlugin())
+        clock = {"now": 1000.0}
+        monkeypatch.setattr(plugins_module.time, "monotonic", lambda: clock["now"])
+
+        has_capability("pro_tools")
+        clock["now"] += plugins_module._DISCOVERY_REUSE_S - 1
+        has_capability("pro_tools")
+        assert len(scans) == 1
+
+        clock["now"] += 2
+        has_capability("pro_tools")
+        assert len(scans) == 2
+
+    def test_reset_forces_a_rescan(self, monkeypatch):
+        scans = self._counting_discovery(monkeypatch, OmegaPlugin())
+
+        has_capability("pro_tools")
+        reset_plugin_cache()
+        has_capability("pro_tools")
+
+        assert len(scans) == 2

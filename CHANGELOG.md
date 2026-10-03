@@ -54,6 +54,22 @@ and ms-marco-MiniLM-L-6-v2). "CPU" is processor time across all threads.
   memories; database schema 15 → 16). On the test corpus the busiest memory's
   record shrank from 208 KB to 4.7 KB, recording feedback on it went from
   0.72 to 0.06 ms, and the database from 43.0 to 37.7 MB after compaction.
+- **Capability checks no longer rescan installed packages.** Saving a memory
+  asks up to three times whether a plugin provides a capability, and every
+  check reread the entry points of all installed packages: 0.9 ms each. The
+  scan is now reused for a minute (under 0.001 ms per check). What a plugin
+  reports is still read every time, so a license change shows at once.
+- **The reranker download keeps one copy of the model.** It left a second
+  copy of the model file in an `onnx/` folder, about 91 MB for the default
+  model. New downloads keep one, and an existing duplicate is removed the
+  next time the reranker loads (183 → 92 MB on disk).
+- **The memory watchdog no longer warns every 15 seconds.** Once a server was
+  above half its memory limit, which is normal with both models loaded, each
+  check forced a full garbage collection and logged a WARNING. It now acts
+  only when memory has grown by 64 MB since the last time, and warns only if
+  the server is still within 20% of its limit afterwards. Five minutes at
+  steady memory: 20 warnings and 20 forced collections → 1 info line and 1
+  collection.
 
 ## [1.5.19] - 2026-09-29
 

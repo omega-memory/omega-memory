@@ -16,9 +16,11 @@ Mirrors the loading patterns from omega.embedding.
 """
 
 import contextlib
+import filecmp
 import io
 import logging
 import os
+import shutil
 import time as _time_module
 from pathlib import Path
 from typing import Any
@@ -258,6 +260,7 @@ def download_model(
     )
     if all_present:
         logger.info(f"Cross-encoder model already exists at {target_path}")
+        _remove_leftover_downloads(target_path, files_to_download)
         return str(target_path)
 
     try:
@@ -279,9 +282,7 @@ def download_model(
             # /tmp, a linked ~/.cache) would otherwise be copied onto itself.
             downloaded_path = Path(downloaded)
             if downloaded_path.resolve() != dest.resolve() and downloaded_path.exists():
-                import shutil
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(downloaded_path), str(dest))
+                _place_download(downloaded_path, dest, target_path)
 
         if (target_path / "model.onnx").exists():
             logger.info(f"Cross-encoder model downloaded to {target_path}")
@@ -290,11 +291,12 @@ def download_model(
             # hf_hub_download may have put files in onnx/ subdir
             onnx_subdir = target_path / "onnx"
             if (onnx_subdir / "model.onnx").exists():
-                import shutil
-                shutil.copy2(str(onnx_subdir / "model.onnx"), str(target_path / "model.onnx"))
-                # Also copy sidecar data file if present (required by bge-reranker-v2-m3)
+                _place_download(onnx_subdir / "model.onnx", target_path / "model.onnx", target_path)
+                # Also place the sidecar data file if present (required by bge-reranker-v2-m3)
                 if (onnx_subdir / "model.onnx_data").exists():
-                    shutil.copy2(str(onnx_subdir / "model.onnx_data"), str(target_path / "model.onnx_data"))
+                    _place_download(
+                        onnx_subdir / "model.onnx_data", target_path / "model.onnx_data", target_path
+                    )
                 logger.info(f"Cross-encoder model downloaded to {target_path}")
                 return str(target_path)
             logger.error("model.onnx not found after download")
@@ -311,6 +313,66 @@ def download_model(
 # --------------------------------------------------------------------------
 # Internal helpers
 # --------------------------------------------------------------------------
+
+
+def _place_download(downloaded: Path, dest: Path, model_root: Path) -> None:
+    """Put a downloaded file where the loader reads it, without keeping two copies.
+
+    The hub writes ``onnx/model.onnx`` under the model directory and the
+    loader reads ``model.onnx`` beside it. Copying left both: a second 87 MB
+    for the default model, 2.2 GB for bge-reranker-v2-m3. A file the hub
+    returned from outside the model directory (its own cache) is copied, not
+    moved, because that copy is the hub's.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    root = model_root.resolve()
+    source = downloaded.resolve()
+    if root not in source.parents:
+        shutil.copy2(str(downloaded), str(dest))
+        return
+    shutil.move(str(downloaded), str(dest))
+    _remove_if_empty(source.parent, root)
+
+
+def _remove_if_empty(directory: Path, model_root: Path) -> None:
+    if directory != model_root and directory.is_dir() and not any(directory.iterdir()):
+        directory.rmdir()
+
+
+def _downloaded_files(model_dir: Path) -> list[tuple[str, str]]:
+    """The (hub path, local name) pairs download_model() fetches into ``model_dir``.
+
+    Empty for a directory that is not one of ours, such as one the user set
+    with OMEGA_CROSS_ENCODER_DIR: nothing there is ours to tidy.
+    """
+    for model in _AVAILABLE_MODELS.values():
+        for variant in model.get("precisions", {"": model}).values():
+            if Path(os.path.expanduser(variant["dir"])) == model_dir:
+                return variant["files"]
+    return []
+
+
+def _remove_leftover_downloads(model_root: Path, files: list[tuple[str, str]]) -> None:
+    """Delete second copies an earlier version's download left in the model directory.
+
+    Only a file at the hub's path that is byte-for-byte the file the loader
+    uses is removed.
+    """
+    for repo_path, local_name in files:
+        leftover = model_root / repo_path
+        placed = model_root / local_name
+        if leftover == placed or not leftover.is_file() or not placed.is_file():
+            continue
+        try:
+            if leftover.stat().st_size != placed.stat().st_size:
+                continue
+            if not filecmp.cmp(str(leftover), str(placed), shallow=False):
+                continue
+            leftover.unlink(missing_ok=True)
+            _remove_if_empty(leftover.parent, model_root)
+            logger.info("Removed duplicate model file %s", leftover)
+        except OSError as e:
+            logger.debug("Could not remove duplicate model file %s: %s", leftover, e)
 
 
 def _get_model_dir() -> str | None:
@@ -399,6 +461,8 @@ def _get_reranker_model():
         if model_dir is None:
             logger.error("Cross-encoder model still not found after download to %s", downloaded)
             return None
+
+    _remove_leftover_downloads(Path(model_dir), _downloaded_files(Path(model_dir)))
 
     try:
         import onnxruntime as ort
