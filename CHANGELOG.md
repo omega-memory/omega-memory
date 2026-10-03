@@ -31,6 +31,20 @@ and ms-marco-MiniLM-L-6-v2). "CPU" is processor time across all threads.
   Across 120 test writes (restatements, updates, extensions and new facts),
   every dedup, evolution, retirement and contradiction outcome was the same as
   before. Searches still use the reranker.
+- **Full-text search no longer scores nearly every memory.** The text half of
+  a search matched any word of the query, so common words made it rank almost
+  the whole store, and the cost grew with it. It now matches a memory that has
+  one of the query's rarest words (up to 8, within a fixed budget), or all of
+  its words together, or two adjacent words as a phrase; stopwords are left
+  out. On a short search: 5,470 → 646 SQL statements, 6.1 → 2.0 ms. On the
+  longer lookup a store runs: 11,116 → 2,447 statements, 22.9 → 5.6 ms. A
+  whole search: 14.7 → 10.3 ms (median). Results did not get worse: on 80
+  probe searches the right memory came first 58 times (was 50), and the
+  built-in `omega eval-retrieval` check scored the same or slightly higher on
+  three samples of 100 (hit rate 95/88/92% → 96/88/92%). In the 120 test
+  writes above, 119 outcomes were unchanged; in the other the lookup found
+  the exact original memory, which 1.5.19 had missed. Small stores match
+  every word, as before.
 
 ## [1.5.19] - 2026-09-29
 
