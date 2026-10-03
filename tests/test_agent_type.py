@@ -14,9 +14,9 @@ class TestAgentTypeSchema:
     """Test schema v4 migration and agent_type column."""
 
     def test_schema_version_is_4(self, store):
-        assert SCHEMA_VERSION == 15
+        assert SCHEMA_VERSION == 16
         row = store._conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
-        assert row[0] == 15
+        assert row[0] == 16
 
     def test_agent_type_column_exists(self, store):
         """The memories table should have an agent_type column."""
@@ -68,7 +68,7 @@ class TestAgentTypeSchema:
         assert "agent_type" in col_names
 
         row = s._conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
-        assert row[0] == 15  # v3 -> ... -> current schema
+        assert row[0] == 16  # v3 -> ... -> current schema
         s.close()
 
 

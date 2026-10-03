@@ -45,6 +45,15 @@ and ms-marco-MiniLM-L-6-v2). "CPU" is processor time across all threads.
   writes above, 119 outcomes were unchanged; in the other the lookup found
   the exact original memory, which 1.5.19 had missed. Small stores match
   every word, as before.
+- **A memory's feedback history is capped.** Every feedback signal was
+  appended to the memory and never removed, and each one rewrote the whole
+  list, so a memory that surfaced often carried thousands of entries. Each
+  memory now keeps its 20 most recent signals plus a running count per rating
+  (`feedback_counts`); its score and total are unchanged. The first start
+  after upgrading trims existing memories once (about 0.1 s for 10,000
+  memories; database schema 15 → 16). On the test corpus the busiest memory's
+  record shrank from 208 KB to 4.7 KB, recording feedback on it went from
+  0.72 to 0.06 ms, and the database from 43.0 to 37.7 MB after compaction.
 
 ## [1.5.19] - 2026-09-29
 

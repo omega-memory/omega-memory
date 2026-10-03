@@ -3604,7 +3604,9 @@ def _check_graduation(memory_id: str) -> Optional[str]:
     Graduation: memory was diff-correlated (positive) in 2+ feedback signals -> promote priority.
     Decay: memory was surfaced 3+ times with zero correlation -> demote priority.
 
-    Reads from the feedback_signals list stored in memory metadata by record_feedback().
+    Reads the feedback_signals list record_feedback() keeps in memory metadata,
+    which holds the most recent signals (omega.feedback_signals), so both
+    counts are over that recent window.
 
     Returns "graduated", "decayed", or None.
     """

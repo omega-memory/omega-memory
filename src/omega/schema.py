@@ -3,13 +3,16 @@
 Extracted from sqlite_store.py to isolate the ~400-line schema setup
 from the storage engine. All migrations and table definitions live here.
 """
+import json
 import logging
 import sqlite3
 from typing import Tuple
 
+from omega.feedback_signals import cap_feedback_signals
+
 logger = logging.getLogger("omega.schema")
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 def init_schema(
@@ -302,6 +305,29 @@ def init_schema(
         c.execute("UPDATE schema_version SET version = 15")
         c.commit()
         logger.info("Schema migrated v14 -> v15: added memory updated_at column")
+
+    # v15 -> v16: cap each memory's feedback history (the totals move to counters)
+    current_version = c.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+    if current_version and current_version[0] < 16:
+        # Read every candidate before the first write: an UPDATE while this
+        # cursor is still open fails the commit on some SQLite builds.
+        rows = c.execute(
+            "SELECT id, metadata FROM memories WHERE metadata LIKE '%\"feedback_signals\"%'"
+        ).fetchall()
+        capped = 0
+        for row_id, raw in rows:
+            try:
+                meta = json.loads(raw)
+            except ValueError:
+                continue  # Unreadable metadata is left as it is.
+            if isinstance(meta, dict) and cap_feedback_signals(meta):
+                c.execute(
+                    "UPDATE memories SET metadata = ? WHERE id = ?", (json.dumps(meta), row_id)
+                )
+                capped += 1
+        c.execute("UPDATE schema_version SET version = 16")
+        c.commit()
+        logger.info("Schema migrated v15 -> v16: capped feedback history on %d memories", capped)
 
     # ----------------------------------------------------------------
     # Table definitions (idempotent CREATE IF NOT EXISTS)
