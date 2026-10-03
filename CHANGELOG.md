@@ -12,22 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Measured on one machine (14-core Apple M4 Pro) against a fixed-seed corpus of
 10,000 memories, with the models a default install uses (bge-small-en-v1.5
 and ms-marco-MiniLM-L-6-v2). "CPU" is processor time across all threads.
+Together, saving a memory went from 37 to 18 ms and from 116 to 24 ms of CPU
+(medians), and a search from 12.9 to 9.6 ms.
 
 - **The embedding and reranker models use far less CPU.** ONNX Runtime ran one
   thread per core and kept them spinning after each inference. Each model now
   uses at most 4 threads (`OMEGA_ONNX_THREADS` overrides) that sleep when idle.
-  Embedding one memory: 38.5 → 16.5 ms of CPU. Embedding 32: 1,899 → 697 ms
-  of CPU, 283 → 220 ms wall. Reranking 10 results: 204 → 96 ms of CPU,
-  29 → 27 ms wall. The 45 ms of CPU burned in the 200 ms after every
-  inference, with nothing running, is gone. A single embedding takes about
-  1.5 ms longer, because a sleeping thread has to wake.
+  Embedding one memory: 52 → 16 ms of CPU. Embedding 32: 1,632 → 655 ms of
+  CPU, 237 → 209 ms wall. Reranking 10 results: 206 → 99 ms of CPU, 28 → 27 ms
+  wall. The 40 to 60 ms of CPU burned in the 200 ms after every inference,
+  with nothing running, is gone. A single embedding takes about 2 ms longer
+  (4.7 → 6.3 ms), because a sleeping thread has to wake.
 - **Saving a memory no longer runs the reranker.** The cross-encoder ran
   inside every store: once to rank the similar memories the store checks for
   duplicates, and once to score contradiction candidates that could not
   become contradictions at any score. The duplicate check now uses vector and
   text similarity, and contradiction scoring runs only when a candidate's
   wording could make it one. Reranker calls per store: 0.57 → 0.01. With the
-  thread change above, CPU per store: 111 → 39 ms (median), 284 → 75 ms (p90).
+  thread change above, CPU per store: 116 → 41 ms (median), 271 → 72 ms (p90).
   Across 120 test writes (restatements, updates, extensions and new facts),
   every dedup, evolution, retirement and contradiction outcome was the same as
   before. Searches still use the reranker.
@@ -36,10 +38,10 @@ and ms-marco-MiniLM-L-6-v2). "CPU" is processor time across all threads.
   the whole store, and the cost grew with it. It now matches a memory that has
   one of the query's rarest words (up to 8, within a fixed budget), or all of
   its words together, or two adjacent words as a phrase; stopwords are left
-  out. On a short search: 5,470 → 646 SQL statements, 6.1 → 2.0 ms. On the
-  longer lookup a store runs: 11,116 → 2,447 statements, 22.9 → 5.6 ms. A
-  whole search: 14.7 → 10.3 ms (median). Results did not get worse: on 80
-  probe searches the right memory came first 58 times (was 50), and the
+  out. On a short search: 5,710 → 772 SQL statements, 6.4 → 1.6 ms. On the
+  longer lookup a store runs: 12,206 → 3,020 statements, 24.3 → 5.6 ms. A
+  whole search: 12.9 → 9.6 ms (median). Results did not get worse: on 80
+  probe searches the right memory came first 57 times (was 50), and the
   built-in `omega eval-retrieval` check scored the same or slightly higher on
   three samples of 100 (hit rate 95/88/92% → 96/88/92%). In the 120 test
   writes above, 119 outcomes were unchanged; in the other the lookup found
@@ -50,13 +52,13 @@ and ms-marco-MiniLM-L-6-v2). "CPU" is processor time across all threads.
   list, so a memory that surfaced often carried thousands of entries. Each
   memory now keeps its 20 most recent signals plus a running count per rating
   (`feedback_counts`); its score and total are unchanged. The first start
-  after upgrading trims existing memories once (about 0.1 s for 10,000
+  after upgrading trims existing memories once (about 0.15 s for 10,000
   memories; database schema 15 → 16). On the test corpus the busiest memory's
   record shrank from 208 KB to 4.7 KB, recording feedback on it went from
-  0.72 to 0.06 ms, and the database from 43.0 to 37.7 MB after compaction.
+  0.52 to 0.04 ms, and the database from 43.0 to 37.7 MB after compaction.
 - **Capability checks no longer rescan installed packages.** Saving a memory
   asks up to three times whether a plugin provides a capability, and every
-  check reread the entry points of all installed packages: 0.9 ms each. The
+  check reread the entry points of all installed packages: 0.7 ms each. The
   scan is now reused for a minute (under 0.001 ms per check). What a plugin
   reports is still read every time, so a license change shows at once.
 - **The reranker download keeps one copy of the model.** It left a second
