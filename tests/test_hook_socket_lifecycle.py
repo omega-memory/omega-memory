@@ -297,6 +297,7 @@ async def test_the_briefing_arrives_when_the_hook_server_starts_after_session_st
     """End to end: the real client process starts first, the real hook server 0.7 s later."""
     omega_dir = short_dir / ".omega"
     omega_dir.mkdir()
+    monkeypatch.setenv("OMEGA_HOME", str(omega_dir))
     monkeypatch.setattr(hook_server, "SOCK_PATH", omega_dir / "hook.sock")
     monkeypatch.setattr(owner_state, "OWNER_STATE_PATH", omega_dir / "hook.sock.owner.json")
     monkeypatch.setitem(core.HOOK_HANDLERS, "session_start", lambda payload: {"output": "briefing", "error": None})

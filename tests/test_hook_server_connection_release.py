@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import sys
 import tempfile
 import threading
@@ -30,13 +31,17 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="counts Unix soc
 
 CLIENTS = 40
 PROBES = 10
-# Descriptors the event loop may legitimately open meanwhile (selector, pipes).
+# Sockets the event loop may legitimately open meanwhile.
 SLACK = 4
 
 
 @pytest.fixture
 async def running_server(monkeypatch):
-    """A hook server on a short socket path (macOS caps AF_UNIX paths at 104 bytes)."""
+    """A hook server on a short socket path (macOS caps AF_UNIX paths at 104 bytes).
+
+    OMEGA_HOME points into the same directory, so the server's timing log
+    stays out of the real home directory.
+    """
     directory = Path(tempfile.mkdtemp(prefix="omg", dir="/tmp"))
     probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
@@ -46,6 +51,7 @@ async def running_server(monkeypatch):
     finally:
         probe.close()
     sock_path = directory / "hook.sock"
+    monkeypatch.setenv("OMEGA_HOME", str(directory))
     monkeypatch.setattr(hook_server, "SOCK_PATH", sock_path)
     monkeypatch.setattr(owner_state, "OWNER_STATE_PATH", directory / "owner.json")
     server = await hook_server.start_hook_server()
@@ -55,8 +61,16 @@ async def running_server(monkeypatch):
     shutil.rmtree(directory, ignore_errors=True)
 
 
-def _open_fds() -> int:
-    return len(os.listdir("/dev/fd"))
+def _open_sockets() -> int:
+    """Sockets open in this process. Files other threads open meanwhile (a database, a log) don't count."""
+    count = 0
+    for name in os.listdir("/dev/fd"):
+        try:
+            if stat.S_ISSOCK(os.fstat(int(name)).st_mode):
+                count += 1
+        except OSError:
+            continue  # closed between the listing and the stat
+    return count
 
 
 async def _impatient_client(sock_path: Path, hook: str) -> None:
@@ -96,15 +110,15 @@ async def test_a_stuck_handler_releases_sockets_at_the_connection_deadline(runni
         lambda request: handler_released.wait(10) and {"output": "late", "error": None},
     )
     try:
-        before = _open_fds()
+        before = _open_sockets()
         await _drive_traffic(running_server, "stuck_probe")
         await asyncio.sleep(1.0)
-        leaked = _open_fds() - before
+        leaked = _open_sockets() - before
     finally:
         # Free both hook workers, or every later test that dispatches a hook waits on them.
         handler_released.set()
 
-    assert leaked <= SLACK, f"{leaked} descriptors still open past the connection deadline"
+    assert leaked <= SLACK, f"{leaked} sockets still open past the connection deadline"
 
 
 async def test_a_hook_that_answers_in_time_still_gets_its_reply(running_server, monkeypatch):
@@ -130,7 +144,7 @@ async def test_clients_that_stop_reading_cannot_hold_their_sockets(running_serve
     monkeypatch.setitem(core.HOOK_HANDLERS, "big_probe", lambda request: big_answer)
     silent_clients = 10
 
-    before = _open_fds()
+    before = _open_sockets()
     writers = []
     try:
         for _ in range(silent_clients):
@@ -141,7 +155,7 @@ async def test_clients_that_stop_reading_cannot_hold_their_sockets(running_serve
         # Never read: each drain() blocks until the connection deadline, and
         # the close after it must not wait for the answer to flush.
         await asyncio.sleep(1.5)
-        server_side_open = _open_fds() - before - silent_clients  # minus the clients' own sockets
+        server_side_open = _open_sockets() - before - silent_clients  # minus the clients' own sockets
     finally:
         for writer in writers:
             writer.transport.abort()
