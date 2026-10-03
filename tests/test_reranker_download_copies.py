@@ -101,3 +101,32 @@ def test_only_our_own_model_directories_are_tidied(tmp_path, monkeypatch):
 
     assert ("onnx/model.onnx", "model.onnx") in reranker._downloaded_files(ours)
     assert reranker._downloaded_files(tmp_path / "set-by-the-user") == []
+
+
+def test_a_large_pair_is_not_compared_while_the_model_loads(tmp_path, fake_hub, monkeypatch, caplog):
+    """Loading happens inside a search; reading gigabytes there would stall it."""
+    import logging
+
+    target = tmp_path / "model"
+    reranker.download_model(str(target), model_name=MODEL)
+    (target / "onnx").mkdir()
+    leftover = target / "onnx" / "model.onnx"
+    leftover.write_bytes(PAYLOAD)
+    files = [("onnx/model.onnx", "model.onnx")]
+    compared = []
+    monkeypatch.setattr(reranker.filecmp, "cmp", lambda *a, **k: compared.append(a) or True)
+
+    with caplog.at_level(logging.INFO, logger="omega.reranker"):
+        reranker._remove_leftover_downloads(target, files, compare_limit=len(PAYLOAD) - 1)
+
+    assert compared == []
+    assert leftover.exists()
+    assert "second copy" in caplog.text
+
+    reranker._remove_leftover_downloads(target, files, compare_limit=len(PAYLOAD))
+    assert not leftover.exists()
+
+
+def test_the_load_time_limit_covers_the_default_model():
+    default_model_bytes = 91_011_230
+    assert default_model_bytes < reranker._LOAD_TIME_COMPARE_LIMIT < 2_271_088_656

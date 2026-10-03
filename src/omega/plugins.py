@@ -77,7 +77,11 @@ def discover_plugins() -> list[OmegaPlugin]:
 
 
 def reset_plugin_cache() -> None:
-    """Forget the plugins reused for capability checks, so the next check rescans."""
+    """Forget the plugins reused for capability checks, so the next check rescans.
+
+    For code that changes what a scan would find without replacing
+    discover_plugins, such as a test that patches the entry-point lookup.
+    """
     global _capability_plugins_cache
     _capability_plugins_cache = None
 

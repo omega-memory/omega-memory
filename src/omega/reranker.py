@@ -352,11 +352,23 @@ def _downloaded_files(model_dir: Path) -> list[tuple[str, str]]:
     return []
 
 
-def _remove_leftover_downloads(model_root: Path, files: list[tuple[str, str]]) -> None:
+# Comparing two files byte for byte reads both. When the reranker loads, which
+# is inside someone's first search, only files up to this size are compared:
+# the default model (91 MB) takes about 0.2 s once, a 2.2 GB one would take
+# seconds. download_model() compares any size.
+_LOAD_TIME_COMPARE_LIMIT = 256 * 1024 * 1024
+
+
+def _remove_leftover_downloads(
+    model_root: Path,
+    files: list[tuple[str, str]],
+    compare_limit: int | None = None,
+) -> None:
     """Delete second copies an earlier version's download left in the model directory.
 
     Only a file at the hub's path that is byte-for-byte the file the loader
-    uses is removed.
+    uses is removed. A pair larger than ``compare_limit`` is left alone and
+    reported instead.
     """
     for repo_path, local_name in files:
         leftover = model_root / repo_path
@@ -364,7 +376,15 @@ def _remove_leftover_downloads(model_root: Path, files: list[tuple[str, str]]) -
         if leftover == placed or not leftover.is_file() or not placed.is_file():
             continue
         try:
-            if leftover.stat().st_size != placed.stat().st_size:
+            size = leftover.stat().st_size
+            if size != placed.stat().st_size:
+                continue
+            if compare_limit is not None and size > compare_limit:
+                logger.info(
+                    "%s looks like a second copy of %s (%d MB each); left in place, "
+                    "comparing files this large would delay the search",
+                    leftover, placed.name, size // (1024 * 1024),
+                )
                 continue
             if not filecmp.cmp(str(leftover), str(placed), shallow=False):
                 continue
@@ -462,7 +482,9 @@ def _get_reranker_model():
             logger.error("Cross-encoder model still not found after download to %s", downloaded)
             return None
 
-    _remove_leftover_downloads(Path(model_dir), _downloaded_files(Path(model_dir)))
+    _remove_leftover_downloads(
+        Path(model_dir), _downloaded_files(Path(model_dir)), _LOAD_TIME_COMPARE_LIMIT
+    )
 
     try:
         import onnxruntime as ort
