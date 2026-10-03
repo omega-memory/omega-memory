@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Mac installer gave Intel Macs a Python they could not run.**
+  `OMEGA-Memory.pkg` allowed Intel Macs and macOS 12 but carried only an
+  Apple Silicon Python, whose packages needed macOS 14 or 15, so on an Intel
+  Mac or an older macOS it installed and then OMEGA never started. One
+  download now carries a Python for each kind of Mac and keeps the right one.
+  It needs macOS 14 on Apple Silicon and macOS 15 on Intel, and on anything
+  older the installer says so instead of installing. The build checks every
+  binary against those limits.
+- **Upgrading with the Mac installer could leave two versions mixed
+  together.** macOS installs over what is there and keeps old files, so an
+  upgrade left the previous release's package files beside the new ones. The
+  installer now replaces its Python folder. Memories in `~/.omega` are not
+  touched.
+- **The Windows installer installed OMEGA 1.5.4 whichever release it came
+  from.** The version was written into the installer script and never
+  updated, so every `omega-setup.exe` from v1.5.4 to v1.5.19 installed 1.5.4.
+  It now installs the release it was built for.
+- **Installer builds failed when they started before PyPI listed the new
+  release.** The builds start the moment a release is tagged, seconds after
+  the upload, and the Mac build failed for v1.5.15, v1.5.17 and v1.5.19. Both
+  builds now wait, up to 15 minutes, until the release can be downloaded.
+
+### Added
+
+- **A script to sign and notarize the Mac installer.**
+  `installer/macos/sign-and-notarize.sh` signs every program inside a built
+  `OMEGA-Memory.pkg` and the pkg itself with Developer ID certificates, sends
+  it to Apple for notarization and attaches the result, so macOS opens it
+  without a warning. See `installer/README.md`.
+
 ## [1.5.19] - 2026-09-29
 
 ### Changed

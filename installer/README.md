@@ -98,6 +98,89 @@ install `omega-memory[server]==1.5.4`, not whatever PyPI latest is later.
   claude_desktop_config.json.bak    <- backup of original config
 ```
 
+## Signing and notarizing the macOS pkg
+
+CI builds the pkg unsigned, so macOS warns when someone opens it after a
+browser download. `macos/sign-and-notarize.sh` signs and notarizes the
+CI-built pkg on a Mac that holds Developer ID certificates. It is run by hand
+after the release workflow finishes; CI holds no certificates.
+
+Signing the pkg alone is not enough. Apple refuses to notarize a pkg unless
+every executable and library inside it is signed with a Developer ID
+Application certificate, the hardened runtime and a secure timestamp. The
+script therefore:
+
+1. takes the CI pkg apart (`pkgutil --expand-full`);
+2. signs every Mach-O file in the payload (found by content, about 68 files).
+   The two Python executables also get `macos/python.entitlements`: the
+   hardened runtime loads only libraries signed by the same team, and
+   `omega activate` later pip-installs the Pro package's dependencies, whose
+   native libraries are not, so without the entitlement Python would refuse
+   to import them;
+3. rebuilds the pkg from CI's own payload, scripts, package info and
+   Distribution, and checks it installs the same paths as the input. Nothing
+   is rebuilt from source or fetched again;
+4. signs the pkg with the Developer ID Installer certificate (`productsign`);
+5. submits it to Apple (`xcrun notarytool submit --wait`), staples the
+   ticket, and checks Gatekeeper accepts it (`spctl --assess --type install`).
+
+### One-time setup
+
+The Mac that signs needs a "Developer ID Application" and a "Developer ID
+Installer" certificate in its login keychain. To check (prints names, never
+keys):
+
+```bash
+security find-identity -v | grep "Developer ID"
+```
+
+With one of each, the script finds them itself. With several, name the ones
+to use in `OMEGA_APP_IDENTITY` and `OMEGA_INSTALLER_IDENTITY`.
+
+Notarization needs a credential stored once in the keychain. Create an
+app-specific password at account.apple.com (Sign-In and Security >
+App-Specific Passwords > Generate an app-specific password; the Apple Account
+needs two-factor authentication), then run this with your own Apple ID and
+team ID (the code in brackets at the end of the certificate names) and paste
+the password when asked:
+
+```bash
+xcrun notarytool store-credentials omega-notary --apple-id YOUR-APPLE-ID --team-id YOUR-TEAM-ID
+```
+
+The password goes into the keychain under the profile name `omega-notary`
+(pass `--profile NAME` to the script to use another). It is never written to
+this repository; the script only ever names the profile.
+
+### Each release
+
+After the `Build macOS Installer` workflow has attached the pkg to the
+release:
+
+```bash
+# 1. Download the pkg CI built
+gh release download v1.5.20 --repo omega-memory/omega-memory --pattern OMEGA-Memory.pkg --dir ~/Downloads/omega-v1.5.20
+
+# 2. Rehearse: takes the pkg apart, rebuilds it and prints the signing
+#    commands. Uses no certificate and contacts no one.
+installer/macos/sign-and-notarize.sh --dry-run ~/Downloads/omega-v1.5.20/OMEGA-Memory.pkg
+
+# 3. Sign, notarize and staple. Writes signed/OMEGA-Memory.pkg beside the input.
+installer/macos/sign-and-notarize.sh ~/Downloads/omega-v1.5.20/OMEGA-Memory.pkg
+
+# 4. Replace the unsigned pkg on the release (this changes a public download)
+gh release upload v1.5.20 ~/Downloads/omega-v1.5.20/signed/OMEGA-Memory.pkg --repo omega-memory/omega-memory --clobber
+```
+
+On the first run macOS may ask whether `codesign` and `productsign` may use
+the keys; choose Always Allow. The script needs about 1 GB of temporary space
+(set `TMPDIR` to use another drive) and a network connection for Apple's
+timestamp and notary services. If Apple rejects the pkg, its reasons, file by
+file, are saved to `signed/notary-log.json`.
+
+Finally, download the pkg from the release page in a browser and open it: it
+should start without a warning.
+
 ---
 
 # Windows Installer (.exe)
@@ -171,11 +254,13 @@ v1.5.19 on Core 1.5.4.
 2. Build macOS and Windows installers from a `v*` tag or manual workflow.
    Both take the version from the tag (or the `version` input) and wait for
    PyPI to list it; nothing in the repository needs a version bump.
-3. Smoke test both installers on clean machines or VMs.
-4. Attach artifacts to the matching GitHub release:
+3. Sign and notarize the macOS pkg (see "Signing and notarizing the macOS
+   pkg" above) and replace the unsigned `OMEGA-Memory.pkg` on the release.
+4. Smoke test both installers on clean machines or VMs.
+5. Attach artifacts to the matching GitHub release:
    - `OMEGA-Memory.pkg`
    - `omega-setup.exe`
-5. Update website `INSTALLER_VERSION` only after both artifact URLs return 200.
+6. Update website `INSTALLER_VERSION` only after both artifact URLs return 200.
 
 ## Architecture
 
