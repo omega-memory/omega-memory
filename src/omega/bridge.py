@@ -1859,6 +1859,8 @@ def query(
     include_contradicted: bool = False,
     valid_at: Optional[str] = None,
     status: Optional[str] = None,
+    rerank: bool = True,
+    expand_query: bool = True,
 ) -> str:
     """Search memories with optional intent-aware routing.
 
@@ -1869,6 +1871,8 @@ def query(
         temporal_range: Optional (start_iso, end_iso) tuple. Auto-inferred from query if not given.
         surfacing_context: SurfacingContext enum for context-aware scoring (error_debug, planning, etc.).
         strength_min: Minimum strength score (0.0-1.0). Filters out weak/decayed memories.
+        rerank: False skips the cross-encoder; the vector and text ranking remains.
+        expand_query: False skips LLM query expansion.
 
     Returns:
         Formatted markdown string with results.
@@ -1901,6 +1905,8 @@ def query(
             "query_hint": event_type,
             "temporal_boost_only": _temporal_boost_only,
             "scope": _scope,
+            "rerank": rerank,
+            "expand_query": expand_query,
         }
         if surfacing_context is not None:
             query_kwargs["surfacing_context"] = surfacing_context
