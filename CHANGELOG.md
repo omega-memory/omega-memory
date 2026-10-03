@@ -44,9 +44,11 @@ Together, saving a memory went from 37 to 18 ms and from 116 to 24 ms of CPU
   probe searches the right memory came first 57 times (was 50), and the
   built-in `omega eval-retrieval` check scored the same or slightly higher on
   three samples of 100 (hit rate 95/88/92% → 96/88/92%). In the 120 test
-  writes above, 119 outcomes were unchanged; in the other the lookup found
-  the exact original memory, which 1.5.19 had missed. Small stores match
-  every word, as before.
+  writes above, 119 outcomes were unchanged. The other was an existing memory
+  restated with one sentence added: the lookup now finds that exact memory,
+  which 1.5.19 had missed, and the unchanged duplicate rule then treats the
+  write as a repeat and drops it, where 1.5.19 had appended the new sentence
+  to an older near-copy. Small stores match every word, as before.
 - **A memory's feedback history is capped.** Every feedback signal was
   appended to the memory and never removed, and each one rewrote the whole
   list, so a memory that surfaced often carried thousands of entries. Each
@@ -63,8 +65,8 @@ Together, saving a memory went from 37 to 18 ms and from 116 to 24 ms of CPU
   reports is still read every time, so a license change shows at once.
 - **The reranker download keeps one copy of the model.** It left a second
   copy of the model file in an `onnx/` folder, about 91 MB for the default
-  model. New downloads keep one, and an existing duplicate is removed the
-  next time the reranker loads (183 → 92 MB on disk).
+  model. New downloads keep one, and an existing duplicate of the default
+  model is removed the next time the reranker loads (183 → 92 MB on disk).
 - **The memory watchdog no longer warns every 15 seconds.** Once a server was
   above half its memory limit, which is normal with both models loaded, each
   check forced a full garbage collection and logged a WARNING. It now acts
@@ -72,6 +74,16 @@ Together, saving a memory went from 37 to 18 ms and from 116 to 24 ms of CPU
   the server is still within 20% of its limit afterwards. Five minutes at
   steady memory: 20 warnings and 20 forced collections → 1 info line and 1
   collection.
+
+### Fixed
+
+- **The reduced Free-tier search would have found nothing.** The search that
+  Free installs are meant to fall back to above 2,000 memories matched the
+  whole question as one exact phrase, so 0 of 40 test questions returned
+  anything. It is now the normal ranked search without the reranker or query
+  expansion, cut to the top 3 results; 28 of the 40 found the right memory.
+  Nobody's results change: that fallback is not switched on in 1.5.19 or in
+  this release, and Free search above 2,000 memories remains the full search.
 
 ## [1.5.19] - 2026-09-29
 
