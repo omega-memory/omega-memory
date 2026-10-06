@@ -612,6 +612,7 @@ async def handle_omega_store(arguments: dict) -> dict:
 async def handle_omega_query(arguments: dict) -> dict:
     """Search memories — semantic (default), exact phrase match, timeline, or browse."""
     mode = arguments.get("mode", "semantic")
+    max_chars = _clamp_int(arguments.get("max_chars", 200), default=200, min_val=0, max_val=100000)
 
     # Timeline mode — delegate to handle_omega_timeline
     if mode == "timeline":
@@ -637,7 +638,9 @@ async def handle_omega_query(arguments: dict) -> dict:
         # Memory search
         try:
             from omega.bridge import query as memory_query
-            mem_result = memory_query(query_text=query_text, limit=limit, project=project, entity_id=entity_id)
+            mem_result = memory_query(
+                query_text=query_text, limit=limit, project=project, entity_id=entity_id, max_chars=max_chars
+            )
             if isinstance(mem_result, str):
                 results.append({"source": "memory", "data": mem_result})
             elif isinstance(mem_result, dict):
@@ -676,6 +679,7 @@ async def handle_omega_query(arguments: dict) -> dict:
                 event_type=event_type,
                 project=project,
                 case_sensitive=case_sensitive,
+                max_chars=max_chars,
             )
             return mcp_response(result)
         except Exception as e:
@@ -744,6 +748,7 @@ async def handle_omega_query(arguments: dict) -> dict:
                 limit=limit,
                 event_type=event_type,
                 project=project,
+                max_chars=max_chars,
             )
             if isinstance(result, str):
                 result = (
@@ -779,6 +784,7 @@ async def handle_omega_query(arguments: dict) -> dict:
                 include_contradicted=include_contradicted,
                 valid_at=valid_at,
                 status=status_filter,
+                max_chars=max_chars,
             )
 
         # Mark deploy gate as cleared when querying decisions
