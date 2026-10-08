@@ -8,6 +8,10 @@ Protocol (one request per connection, client half-closes after sending):
 A response may carry ``exit_code``; a non-zero value tells ``fast_hook.py``
 to exit with it, which is how blocking guards veto a tool call. In a batch,
 the first non-zero ``exit_code`` short-circuits the remaining hooks.
+
+A response may also carry ``context``: text for the model. On PreToolUse and
+PostToolUse ``fast_hook.py`` prints it as Claude Code's additionalContext
+JSON, the only way text reaches the model around a tool call.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
 import omega.server.hook_server as _pkg  # SOCK_PATH / HOOK_HOST / HOOK_PORT are read at call time so tests can override them
 from .handlers import (
@@ -53,6 +58,13 @@ HOOK_HANDLERS: dict[str, HookHandler] = dict(_CORE_HOOK_HANDLERS)
 _HOOK_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="omega-hook")
 
 _READ_TIMEOUT_S = 10.0
+# fast_hook.py waits at most 20 s for an answer (pre_push_guard; every other
+# hook 5 s). Past this deadline no client is listening, so the connection is
+# closed even when its handler is stuck. The handler's thread cannot be
+# cancelled: it runs to the end and only its answer is dropped.
+_CONNECTION_DEADLINE_S = 30.0
+# Closing flushes pending output first; a client that never reads could stall it.
+_CLOSE_TIMEOUT_S = 1.0
 
 # Monotonic time of the last real hook request (liveness probes excluded).
 # The MCP server's idle watchdog reads it: a session that uses hooks but no
@@ -101,12 +113,41 @@ async def _read_request(reader: asyncio.StreamReader) -> bytes:
         chunks.append(chunk)
 
 
+@dataclass
+class _HookExchange:
+    """What one connection asked for, for the timing log."""
+
+    hook_name: str = "unknown"
+    # False for the socket watchdog's empty liveness probe.
+    requested: bool = False
+
+
 async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Serve one hook client: read the request to EOF, dispatch, write the response."""
-    global _last_request_at
+    """Serve one hook client, then release its socket, even when a handler is stuck.
+
+    The socket used to be closed only once the handler returned. A handler
+    blocked on the store held its connection open, and so did every
+    connection queued behind it on the two hook workers, long after their
+    clients had given up. Each kept a file descriptor until the handler
+    came free.
+    """
     started = time.monotonic()
-    hook_name = "unknown"
-    data = b""
+    exchange = _HookExchange()
+    try:
+        await asyncio.wait_for(_serve_request(reader, writer, exchange), timeout=_CONNECTION_DEADLINE_S)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "hook connection passed its %g s deadline, closing: %s", _CONNECTION_DEADLINE_S, exchange.hook_name
+        )
+    finally:
+        await _close_connection(writer)
+        if exchange.requested:
+            _log_timing(exchange.hook_name, (time.monotonic() - started) * 1000)
+
+
+async def _serve_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, exchange: _HookExchange) -> None:
+    """Read one request to EOF, dispatch it, and write the response."""
+    global _last_request_at
     try:
         data = await _read_request(reader)
         if not data:
@@ -114,28 +155,35 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
             # we are alive. Nothing to dispatch, nothing worth logging.
             return
 
+        exchange.requested = True
         _last_request_at = time.monotonic()
         request = json.loads(data.decode("utf-8").strip())
-        hook_name = "+".join(request["hooks"]) if request.get("hooks") else request.get("hook", "unknown")
+        exchange.hook_name = "+".join(request["hooks"]) if request.get("hooks") else request.get("hook", "unknown")
         response = await _respond(request)
         writer.write(json.dumps(response).encode("utf-8"))
         await writer.drain()
     except (ConnectionResetError, BrokenPipeError):
         # The client gave up (Claude Code's hook timeout) before we answered.
-        logger.debug("hook client disconnected before response: %s", hook_name)
+        logger.debug("hook client disconnected before response: %s", exchange.hook_name)
     except asyncio.TimeoutError:
+        # Only the read times out here: the connection deadline cancels this
+        # coroutine instead.
         await _write_error(writer, "timeout")
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        _log_hook_error(f"connection/{hook_name}", error)
+        _log_hook_error(f"connection/{exchange.hook_name}", error)
         await _write_error(writer, str(error))
-    finally:
-        if data:
-            _log_timing(hook_name, (time.monotonic() - started) * 1000)
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except (ConnectionResetError, BrokenPipeError, OSError):
-            logger.debug("hook connection close raised", exc_info=True)
+
+
+async def _close_connection(writer: asyncio.StreamWriter) -> None:
+    """Close the client socket, dropping it if the final flush stalls."""
+    writer.close()
+    try:
+        await asyncio.wait_for(writer.wait_closed(), timeout=_CLOSE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        writer.transport.abort()
+    except OSError:
+        # ConnectionResetError / BrokenPipeError: the client already left.
+        logger.debug("hook connection close raised", exc_info=True)
 
 
 async def _write_error(writer: asyncio.StreamWriter, message: str) -> None:

@@ -82,6 +82,14 @@ _SLOW_DAEMON_TIMEOUT_S = 20.0
 _CONNECT_RETRIES = 4
 _CONNECT_RETRY_DELAY = 0.5  # seconds between retries
 
+# Claude Code hands a hook's plain stdout to the model only on a few events
+# (SessionStart, UserPromptSubmit among them). Around a tool call it writes
+# plain stdout to its debug log; text reaches the model only as
+# hookSpecificOutput.additionalContext, and only when that JSON is the whole
+# of stdout. Stop is left out on purpose: additionalContext there makes the
+# conversation continue.
+_ADDITIONAL_CONTEXT_EVENTS = frozenset({"PreToolUse", "PostToolUse"})
+
 
 def _detect_client() -> str:
     """Detect which AI coding client invoked this hook.
@@ -161,16 +169,28 @@ def _delegate_with_retries(hook_names, payload, timeout):
     """Send the request to the daemon; return its response, or None if none is reachable.
 
     Retries a refused connection only while the socket's owner is alive (the
-    startup race). A missing socket, a slow daemon, or an owner that has
-    exited returns None at once.
+    startup race). A slow daemon or an owner that has exited returns None at
+    once, and so does a missing socket, except for session_start.
+
+    Claude Code starts the SessionStart hook and the MCP server that creates
+    the socket at the same moment, so the hook can find no socket yet. Giving
+    up there loses the session's briefing, so session_start waits for it
+    within the same retry window: 4 retries of 0.5 s, then at most 5 s for
+    the answer, inside the hook's 10 s timeout. Other hooks fire later, once
+    the server is up; for them a missing socket means no server.
     """
+    names = hook_names if isinstance(hook_names, list) else [hook_names]
+    wait_for_socket = "session_start" in names
     for attempt in range(_CONNECT_RETRIES + 1):
         try:
             return delegate(hook_names, payload, timeout=timeout)
         except socket.timeout:
             return None  # daemon exists but slow — don't retry, fall through
         except FileNotFoundError:
-            return None  # socket file missing — daemon not started
+            # Socket file missing: the server has not started, or not yet.
+            if not wait_for_socket or attempt == _CONNECT_RETRIES:
+                return None
+            time.sleep(_CONNECT_RETRY_DELAY)
         except OSError:
             # ConnectionRefusedError and friends: nobody is accepting.
             if attempt == _CONNECT_RETRIES or not _socket_owner_alive():
@@ -235,6 +255,29 @@ def _fallback(hook_name, payload):
                 mod.main()
     except Exception as e:
         print(f"OMEGA hook fallback error ({hook_name}): {e}", file=sys.stderr)
+
+
+def _print_answer(payload, results):
+    """Print what the hooks said, where Claude Code hands it to the model.
+
+    A result's ``output`` is plain text, printed as always. Its ``context`` is
+    text meant for the model: on a tool event it goes out as the
+    additionalContext JSON, the only channel there that reaches the model, and
+    nothing else may be printed beside it. On any other event, or when the
+    payload names none (another client, a manual run), it is printed as plain
+    text.
+    """
+    contexts = [r["context"] for r in results if r.get("context")]
+    event = payload.get("hook_event_name")
+    if contexts and event in _ADDITIONAL_CONTEXT_EVENTS:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": event,
+            "additionalContext": "\n".join(contexts),
+        }}))
+        return
+    text = [r["output"] for r in results if r.get("output")] + contexts
+    if text:
+        print("\n".join(text))
 
 
 def _log_timing(hook_name, elapsed_ms, mode):
@@ -312,33 +355,21 @@ def main():
 
     if result is not None:
         # Daemon responded — process result
-        if is_batch:
-            outputs = []
-            blocking_outputs = []
-            exit_code = 0
-            for r in result.get("results", []):
-                if r.get("output"):
-                    outputs.append(r["output"])
-                    if r.get("exit_code"):
-                        blocking_outputs.append(r["output"])
-                if r.get("exit_code") and not exit_code:
-                    exit_code = r["exit_code"]
+        results = result.get("results", []) if is_batch else [result]
+        exit_code = next((r["exit_code"] for r in results if r.get("exit_code")), 0)
+        if exit_code:
+            # A block: Claude Code shows the blocking hook's stderr to the model.
+            outputs = [r["output"] for r in results if r.get("output")]
+            reasons = [r["output"] for r in results if r.get("exit_code") and r.get("output")]
             if outputs:
                 print("\n".join(outputs))
-            if exit_code and blocking_outputs:
-                print("\n".join(blocking_outputs), file=sys.stderr)
-            _log_timing("+".join(hook_names), elapsed_ms, "daemon")
-            if exit_code:
-                sys.exit(exit_code)
+            if reasons:
+                print("\n".join(reasons), file=sys.stderr)
         else:
-            if result.get("output"):
-                print(result["output"])
-                if result.get("exit_code"):
-                    print(result["output"], file=sys.stderr)
-            _log_timing(hook_names[0], elapsed_ms, "daemon")
-            exit_code = result.get("exit_code")
-            if exit_code:
-                sys.exit(exit_code)
+            _print_answer(payload, results)
+        _log_timing("+".join(hook_names), elapsed_ms, "daemon")
+        if exit_code:
+            sys.exit(exit_code)
     else:
         # Daemon unavailable after retries.
         # Run fallback for safety-critical blocking hooks (pre_* guards)
