@@ -121,7 +121,12 @@ TOOL_SCHEMAS = [
                 },
                 "event_type": {"type": "string", "description": "Filter by event type (also used as type filter in semantic mode for scoped search)"},
                 "project": {"type": "string"},
-                "session_id": {"type": "string"},
+                "session_id": {"type": "string", "description": "Your session id. Says who is asking; it does not narrow the search unless scope is 'session'."},
+                "scope": {
+                    "type": "string",
+                    "enum": ["project", "session"],
+                    "description": "'session' returns only memories stored by the session in session_id. Default: memories from every session.",
+                },
                 "context_file": {"type": "string", "description": "Current file being edited (boosts results)"},
                 "context_tags": {"type": "array", "items": {"type": "string"}, "description": "Context tags for boosting"},
                 "filter_tags": {"type": "array", "items": {"type": "string"}, "description": "Hard filter: ALL tags must match (AND logic)"},

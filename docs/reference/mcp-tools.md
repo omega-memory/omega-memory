@@ -10,7 +10,7 @@ All tools available through the OMEGA MCP server.
 |------|-------------|----------------|
 | `omega_remember` | Store a permanent memory from user instruction | `text` |
 | `omega_store` | Store typed memory with metadata | `content`, `event_type` (decision / lesson_learned / error_pattern / task_completion / session_summary / user_preference / checkpoint), `priority` (1-5), `session_id`, `entity_id` |
-| `omega_query` | Semantic search with filters and re-ranking | `query`, `limit`, `max_chars` (content per result, default 200; 0 = full), `event_type`, `filter_tags`, `temporal_range`, `context_file`, `context_tags`, `entity_id`, `project`, `session_id` |
+| `omega_query` | Semantic search with filters and re-ranking | `query`, `limit`, `max_chars` (content per result, default 200; 0 = full), `event_type`, `filter_tags`, `temporal_range`, `context_file`, `context_tags`, `entity_id`, `project`, `session_id` (who is asking), `scope` (`session` = only memories stored by `session_id`; default every session) |
 | `omega_phrase_search` | Exact substring match via FTS5 | `phrase`, `limit`, `event_type`, `project`, `case_sensitive` |
 | `omega_welcome` | Session briefing with recent memories and profile | `session_id`, `project` |
 | `omega_profile` | Show user profile built from memory patterns | (none) |

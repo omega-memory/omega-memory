@@ -197,10 +197,11 @@ def _surface_for_edit(file_path: str, session_id: str, project: str, count_surfa
         filename = os.path.basename(file_path)
         dirname = os.path.basename(os.path.dirname(file_path))
         context_tags = _ext_to_tags(file_path)
+        # No session_id: a search given one returns only that session's
+        # memories, and what is worth surfacing here was stored by earlier ones.
         results = query_structured(
             query_text=f"{filename} {dirname} {file_path}",
             limit=3,
-            session_id=session_id,
             project=project,
             context_file=file_path,
             context_tags=context_tags or None,

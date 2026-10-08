@@ -764,7 +764,10 @@ async def handle_omega_query(arguments: dict) -> dict:
             limit=min(limit, _REDUCED_SEARCH_LIMIT) if _search_reduced else limit,
             event_type=event_type,
             project=project,
-            session_id=session_id,
+            # A search given a session returns only that session's memories.
+            # Agents send session_id to say who is asking, so it narrows the
+            # search only when they also ask for scope="session".
+            session_id=session_id if scope == "session" else None,
             context_file=context_file,
             context_tags=context_tags,
             filter_tags=filter_tags,

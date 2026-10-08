@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Memories from earlier sessions were never surfaced for a file, or found
+  by a search that named its session.** A search given a session id returns
+  only that session's memories. The file hook passed the current session, so
+  reading or editing a file surfaced only what had been stored since the
+  session began, never a decision from yesterday. `omega_query` did the same
+  whenever the agent sent `session_id`. The file hook now searches every
+  session, and `omega_query` narrows to one session only when asked with the
+  new `scope: "session"`. Session-end summaries still cover their own
+  session only.
 - **Memories surfaced after reading, editing or running a command never
   reached the AI.** Claude Code passes a hook's plain output to the model
   only at session start and when you send a prompt. After a tool call it
