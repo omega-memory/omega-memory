@@ -26,9 +26,9 @@ from omega.bridge import store, query, remember, auto_capture
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `query` | `query(text, limit=10, event_type=None, filter_tags=None, temporal_range=None, context_file=None, context_tags=None, entity_id=None, project=None, session_id=None) -> str` | Semantic search with blended ranking (70% vector, 30% FTS5) and contextual re-ranking. Returns markdown-formatted results. |
+| `query` | `query(text, limit=10, event_type=None, filter_tags=None, temporal_range=None, context_file=None, context_tags=None, entity_id=None, project=None, session_id=None, max_chars=200) -> str` | Semantic search with blended ranking (70% vector, 30% FTS5) and contextual re-ranking. Returns markdown-formatted results. |
 | `query_structured` | `query_structured(text, limit=10, event_type=None, filter_tags=None, ...) -> list[dict]` | Same search pipeline as `query` but returns structured dicts instead of markdown. |
-| `phrase_search` | `phrase_search(phrase, limit=10, event_type=None, project=None, case_sensitive=False) -> str` | Exact substring match via FTS5 full-text search. |
+| `phrase_search` | `phrase_search(phrase, limit=10, event_type=None, project=None, case_sensitive=False, max_chars=200) -> str` | Exact substring match via FTS5 full-text search. `max_chars=0` renders each memory in full. |
 | `find_similar_memories` | `find_similar_memories(memory_id, limit=5) -> str` | Find memories similar to a given memory by embedding distance. |
 
 ---

@@ -1838,6 +1838,15 @@ def _extract_edit_observation(
 # Public API -- Query
 # ---------------------------------------------------------------------------
 
+DEFAULT_PREVIEW_CHARS = 200
+
+
+def _content_preview(content: str, max_chars: int = DEFAULT_PREVIEW_CHARS) -> str:
+    """Return ``content`` cut to ``max_chars`` with a ``...`` marker; ``max_chars <= 0`` returns it whole."""
+    if max_chars <= 0 or len(content) <= max_chars:
+        return content
+    return content[:max_chars] + "..."
+
 
 def query(
     query_text: str,
@@ -1861,6 +1870,7 @@ def query(
     status: Optional[str] = None,
     rerank: bool = True,
     expand_query: bool = True,
+    max_chars: int = DEFAULT_PREVIEW_CHARS,
 ) -> str:
     """Search memories with optional intent-aware routing.
 
@@ -1873,6 +1883,7 @@ def query(
         strength_min: Minimum strength score (0.0-1.0). Filters out weak/decayed memories.
         rerank: False skips the cross-encoder; the vector and text ranking remains.
         expand_query: False skips LLM query expansion.
+        max_chars: Characters of each memory's content to render (default 200). 0 renders the full content.
 
     Returns:
         Formatted markdown string with results.
@@ -1962,7 +1973,7 @@ def query(
         if results:
             for i, node in enumerate(results[:limit], 1):
                 ntype = (node.metadata or {}).get("event_type", "memory")
-                preview = node.content[:200] + "..." if len(node.content) > 200 else node.content
+                preview = _content_preview(node.content, max_chars)
                 _str = getattr(node, "strength", 0.0)
                 _meta = node.metadata or {}
                 _status = _meta.get("status", "active")
@@ -4569,8 +4580,11 @@ def phrase_search(
     event_type: Optional[str] = None,
     project: Optional[str] = None,
     case_sensitive: bool = False,
+    max_chars: int = DEFAULT_PREVIEW_CHARS,
 ) -> str:
     """Search memories for exact phrase matches using FTS5.
+
+    ``max_chars`` caps the rendered content per result (default 200); 0 renders the full content.
 
     Returns formatted markdown string.
     """
@@ -4593,7 +4607,7 @@ def phrase_search(
         if results:
             for i, node in enumerate(results[:limit], 1):
                 ntype = (node.metadata or {}).get("event_type", "memory")
-                preview = node.content[:200] + "..." if len(node.content) > 200 else node.content
+                preview = _content_preview(node.content, max_chars)
                 output += f"## {i}. [{ntype}] `{node.id}`\n"
                 output += f"{preview}\n"
                 tags = (node.metadata or {}).get("tags", [])

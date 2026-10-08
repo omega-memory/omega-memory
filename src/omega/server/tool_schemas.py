@@ -113,6 +113,12 @@ TOOL_SCHEMAS = [
                     "description": "Search mode: 'semantic' (default), 'phrase' for exact match, 'timeline' for recent memories by day, 'browse' for listing, 'trace' for session tool call timeline, 'unified' for cross-searching memories + knowledge documents",
                 },
                 "limit": {"type": "integer", "default": 10},
+                "max_chars": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 200,
+                    "description": "Characters of each memory's content to return (default 200, shown with a trailing '...' when cut). 0 returns the full content; pair it with a small limit to read a specific memory. Applies to semantic, phrase and unified modes.",
+                },
                 "event_type": {"type": "string", "description": "Filter by event type (also used as type filter in semantic mode for scoped search)"},
                 "project": {"type": "string"},
                 "session_id": {"type": "string"},

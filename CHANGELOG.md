@@ -72,6 +72,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OMEGA-Memory.pkg` and the pkg itself with Developer ID certificates, sends
   it to Apple for notarization and attaches the result, so macOS opens it
   without a warning. See `installer/README.md`.
+- **`omega_query` can return a memory's full text.** Results rendered each
+  memory as a fixed 200-character preview with no way to see the rest from an
+  MCP client; the CLI's `omega query --json` was the only full read. The tool
+  now takes `max_chars` (default 200, so existing output is unchanged): pass
+  `max_chars=0` to render the whole content, or another number to pick the
+  preview length. It applies to semantic, phrase and unified modes, and the
+  `query()` and `phrase_search()` Python API take the same parameter.
 
 ### Performance
 
