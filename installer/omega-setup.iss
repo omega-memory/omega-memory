@@ -3,11 +3,16 @@
 ; Bundles Python 3.12 embeddable, installs omega-memory[server] via pip,
 ; and auto-configures Claude Desktop's MCP config.
 ;
-; Build: iscc omega-setup.iss (or via GitHub Actions)
+; Build: iscc /DMyAppVersion=1.5.20 omega-setup.iss (or via GitHub Actions)
 ; Requires: build\python\ (embeddable Python), build\get-pip.py
 
 #define MyAppName "OMEGA Memory"
-#define MyAppVersion "1.5.4"
+; The omega-memory release this installer pip-installs on the user's PC. The
+; workflow passes the tag's version; there is no default, because a pinned
+; default kept every installer from v1.5.4 to v1.5.19 on Core 1.5.4.
+#ifndef MyAppVersion
+  #error Pass the omega-memory version: iscc /DMyAppVersion=X.Y.Z omega-setup.iss
+#endif
 #define MyAppPublisher "OMEGA Memory Maintainers"
 #define MyAppURL "https://omegamax.co"
 
@@ -67,7 +72,7 @@ Filename: "{app}\python\python.exe"; \
 
 ; Step 3: Install omega-memory with server dependencies
 Filename: "{app}\python\python.exe"; \
-  Parameters: "-m pip install omega-memory[server]==1.5.4 --no-warn-script-location"; \
+  Parameters: "-m pip install omega-memory[server]=={#MyAppVersion} --no-warn-script-location"; \
   StatusMsg: "Installing OMEGA Memory (this may take a minute)..."; \
   Flags: runhidden waituntilterminated
 

@@ -204,7 +204,17 @@ def test_hooks_doctor_parses_quoted_commands(claude_home, core_only_data_dir, mo
 # ---------------------------------------------------------------------------
 
 
-def _doctor_report(home: Path, monkeypatch, capsys, client: str | None = "claude-code", mcp_ok: bool = True) -> dict:
+def _doctor_report(
+    home: Path,
+    monkeypatch,
+    capsys,
+    client: str | None = "claude-code",
+    mcp_ok: bool = True,
+    claude_cli: bool = False,
+    registered: bool = True,
+) -> dict:
+    """Doctor's JSON report. ``claude_cli`` puts a `claude` command on PATH;
+    ``registered`` decides whether `claude mcp list` names omega-memory."""
     capsys.readouterr()  # drop output from arranging the test (hook injection)
     conn = sqlite3.connect(str(home / "omega.db"))
     conn.execute("CREATE TABLE memories (id TEXT, content TEXT, metadata TEXT)")
@@ -214,10 +224,13 @@ def _doctor_report(home: Path, monkeypatch, capsys, client: str | None = "claude
     monkeypatch.setattr(cli, "_probe_hook_daemon", lambda timeout=1.0: ("absent", "/x/hook.sock"))
     monkeypatch.setattr(cli, "_mcp_servers_running", lambda: False)
     monkeypatch.setattr(cli, "_mcp_importable", lambda python_path: mcp_ok)
-    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        cli.shutil, "which", lambda name: "/usr/local/bin/claude" if claude_cli and name == "claude" else None
+    )
+    mcp_list = "omega-memory: registered" if registered else "No MCP servers configured."
     monkeypatch.setattr(
         cli.subprocess, "run",
-        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="omega-memory: registered", stderr=""),
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=mcp_list, stderr=""),
     )
     with pytest.raises(SystemExit):
         cli.cmd_doctor(argparse.Namespace(json=True, client=client))
@@ -273,6 +286,32 @@ def test_doctor_fails_a_hook_whose_script_no_longer_exists(claude_home, core_onl
     report = _doctor_report(claude_home, monkeypatch, capsys)
 
     assert any("script not found" in m and "fast_hook.py" in m for m in _by_status(report, "fail"))
+
+
+# ---------------------------------------------------------------------------
+# Doctor checks the client it was asked about
+# ---------------------------------------------------------------------------
+# The Pro installer for Claude Desktop ends with `omega doctor`. On a machine
+# that also has the Claude Code CLI, doctor failed for a missing Claude Code
+# registration even when run with `--client claude-desktop`.
+
+
+@pytest.mark.parametrize("client", ["claude-desktop", "cursor"])
+def test_doctor_for_another_client_does_not_fail_on_a_missing_claude_code_entry(
+    client, claude_home, core_only_data_dir, monkeypatch, capsys
+):
+    report = _doctor_report(claude_home, monkeypatch, capsys, client=client, claude_cli=True, registered=False)
+
+    assert not [m for m in _by_status(report, "fail") if "Claude Code" in m]
+
+
+@pytest.mark.parametrize("client", [None, "claude-code"])
+def test_doctor_still_fails_an_unregistered_claude_code_when_that_is_the_client(
+    client, claude_home, core_only_data_dir, monkeypatch, capsys
+):
+    report = _doctor_report(claude_home, monkeypatch, capsys, client=client, claude_cli=True, registered=False)
+
+    assert "omega-memory NOT registered in Claude Code" in _by_status(report, "fail")
 
 
 # ---------------------------------------------------------------------------

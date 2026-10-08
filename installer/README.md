@@ -2,7 +2,7 @@
 
 One-click installers for non-technical Claude Desktop users.
 
-- **macOS**: `.pkg` installer (arm64 + Intel)
+- **macOS**: `.pkg` installer (one download for Apple Silicon and Intel)
 - **Windows**: `.exe` installer (64-bit)
 
 ---
@@ -15,10 +15,25 @@ One-click installers for non-technical Claude Desktop users.
 2. Configures Claude Desktop to use OMEGA as an MCP server
 3. No admin privileges required (per-user install)
 
+The pkg carries two Pythons, one built for Apple Silicon and one for Intel,
+each with its own copy of OMEGA's packages. The postinstall script keeps the
+one that matches the Mac (`sysctl hw.optional.arm64`) and replaces any
+previous `~/Library/OMEGA/python` instead of installing over it, so an
+upgrade never mixes two versions of the packages.
+
 ## Prerequisites
 
-- macOS 12 (Monterey) or later
-- Apple Silicon (M1+) or Intel Mac
+- Apple Silicon Mac with macOS 14 (Sonoma) or later, or
+- Intel Mac with macOS 15 (Sequoia) or later
+
+The floors come from the binaries OMEGA depends on, not from their wheel
+tags, which claim older: onnxruntime since 1.24 and sqlite-vec need macOS 14
+on Apple Silicon, and sqlite-vec since 0.1.7 needs macOS 15 on Intel.
+onnxruntime has published no Intel build since 1.23.2, which the Intel
+payload therefore uses. `macos/check_payload.py` reads every binary in both
+payloads during the build and fails it if one lacks the architecture or needs
+a newer macOS; `macos/Distribution.xml` refuses to install below the floors.
+The two must change together.
 - Claude Desktop installed
 - Internet connection (for embedding model download on first use)
 
@@ -27,28 +42,33 @@ One-click installers for non-technical Claude Desktop users.
 ### Requirements
 
 - macOS machine
-- Internet connection (downloads ~60 MB python-build-standalone)
-- No additional tools needed (uses built-in `pkgbuild`/`productbuild`)
+- Internet connection (downloads python-build-standalone for both architectures, ~2 x 60 MB)
+- No additional tools needed (uses built-in `pkgbuild`/`productbuild`); an
+  Intel runner is not needed, because pip installs the Intel packages by
+  platform tag
 
 ### Steps
 
 ```bash
 cd installer
-./build-macos-pkg.sh 1.5.4
+./build-macos-pkg.sh 1.5.20
 ```
 
-Output: `build/macos/dist/OMEGA-Memory.pkg`
+Output: `build/macos/dist/OMEGA-Memory.pkg` (about 175 MB). Set
+`OMEGA_PKG_BUILD_DIR` to build somewhere else, such as an external drive; the
+build directory needs about 800 MB.
 
 ### Automated build
 
-Push a release tag or trigger the `Build macOS Installer` workflow manually in GitHub Actions. The workflow runs on `macos-latest`, builds `OMEGA-Memory.pkg`, verifies the packaged `omega.__version__`, uploads an artifact, and attaches it to `v*` GitHub releases.
+Push a release tag or trigger the `Build macOS Installer` workflow manually in GitHub Actions. The workflow runs on `macos-latest`, waits until pip can fetch the release from PyPI (`wait_for_pypi.py`, up to 15 minutes: the tag is pushed seconds after the upload, before PyPI's index lists it), builds `OMEGA-Memory.pkg`, checks `omega.__version__` in both payloads (the Intel one under Rosetta when the runner has it), uploads an artifact, and attaches it to `v*` GitHub releases.
 
 The installer is intentionally version-pinned. A `v1.5.4` installer should
 install `omega-memory[server]==1.5.4`, not whatever PyPI latest is later.
 
 ## Testing checklist
 
-- [ ] Run `OMEGA-Memory.pkg` on a clean macOS install (no Python installed)
+- [ ] Run `OMEGA-Memory.pkg` on a clean macOS install (no Python installed), on Apple Silicon and on Intel
+- [ ] Check `lipo -archs ~/Library/OMEGA/python/bin/python3.12` matches the Mac, and `~/Library/OMEGA` has no `python-arm64` or `python-x86_64` left
 - [ ] Verify install completes without errors
 - [ ] Check `~/Library/OMEGA/python/bin/python3` exists
 - [ ] Check `~/Library/Application Support/Claude/claude_desktop_config.json` has `omega-memory` entry
@@ -62,8 +82,9 @@ install `omega-memory[server]==1.5.4`, not whatever PyPI latest is later.
 
 ```
 ~/Library/OMEGA/                    <- install directory
-  python/                           <- python-build-standalone 3.12
-    bin/python3
+  python/                           <- python-build-standalone 3.12 for this Mac
+    bin/python3                        (the pkg installs python-arm64/ and
+                                        python-x86_64/; postinstall keeps one)
     lib/python3.12/site-packages/   <- omega-memory package
   configure_claude.py               <- post-install/uninstall config script
   uninstall-omega.sh                <- uninstall script
@@ -76,6 +97,89 @@ install `omega-memory[server]==1.5.4`, not whatever PyPI latest is later.
   claude_desktop_config.json        <- Claude Desktop config (OMEGA entry injected)
   claude_desktop_config.json.bak    <- backup of original config
 ```
+
+## Signing and notarizing the macOS pkg
+
+CI builds the pkg unsigned, so macOS warns when someone opens it after a
+browser download. `macos/sign-and-notarize.sh` signs and notarizes the
+CI-built pkg on a Mac that holds Developer ID certificates. It is run by hand
+after the release workflow finishes; CI holds no certificates.
+
+Signing the pkg alone is not enough. Apple refuses to notarize a pkg unless
+every executable and library inside it is signed with a Developer ID
+Application certificate, the hardened runtime and a secure timestamp. The
+script therefore:
+
+1. takes the CI pkg apart (`pkgutil --expand-full`);
+2. signs every Mach-O file in the payload (found by content, about 68 files).
+   The two Python executables also get `macos/python.entitlements`: the
+   hardened runtime loads only libraries signed by the same team, and
+   `omega activate` later pip-installs the Pro package's dependencies, whose
+   native libraries are not, so without the entitlement Python would refuse
+   to import them;
+3. rebuilds the pkg from CI's own payload, scripts, package info and
+   Distribution, and checks it installs the same paths as the input. Nothing
+   is rebuilt from source or fetched again;
+4. signs the pkg with the Developer ID Installer certificate (`productsign`);
+5. submits it to Apple (`xcrun notarytool submit --wait`), staples the
+   ticket, and checks Gatekeeper accepts it (`spctl --assess --type install`).
+
+### One-time setup
+
+The Mac that signs needs a "Developer ID Application" and a "Developer ID
+Installer" certificate in its login keychain. To check (prints names, never
+keys):
+
+```bash
+security find-identity -v | grep "Developer ID"
+```
+
+With one of each, the script finds them itself. With several, name the ones
+to use in `OMEGA_APP_IDENTITY` and `OMEGA_INSTALLER_IDENTITY`.
+
+Notarization needs a credential stored once in the keychain. Create an
+app-specific password at account.apple.com (Sign-In and Security >
+App-Specific Passwords > Generate an app-specific password; the Apple Account
+needs two-factor authentication), then run this with your own Apple ID and
+team ID (the code in brackets at the end of the certificate names) and paste
+the password when asked:
+
+```bash
+xcrun notarytool store-credentials omega-notary --apple-id YOUR-APPLE-ID --team-id YOUR-TEAM-ID
+```
+
+The password goes into the keychain under the profile name `omega-notary`
+(pass `--profile NAME` to the script to use another). It is never written to
+this repository; the script only ever names the profile.
+
+### Each release
+
+After the `Build macOS Installer` workflow has attached the pkg to the
+release:
+
+```bash
+# 1. Download the pkg CI built
+gh release download v1.5.20 --repo omega-memory/omega-memory --pattern OMEGA-Memory.pkg --dir ~/Downloads/omega-v1.5.20
+
+# 2. Rehearse: takes the pkg apart, rebuilds it and prints the signing
+#    commands. Uses no certificate and contacts no one.
+installer/macos/sign-and-notarize.sh --dry-run ~/Downloads/omega-v1.5.20/OMEGA-Memory.pkg
+
+# 3. Sign, notarize and staple. Writes signed/OMEGA-Memory.pkg beside the input.
+installer/macos/sign-and-notarize.sh ~/Downloads/omega-v1.5.20/OMEGA-Memory.pkg
+
+# 4. Replace the unsigned pkg on the release (this changes a public download)
+gh release upload v1.5.20 ~/Downloads/omega-v1.5.20/signed/OMEGA-Memory.pkg --repo omega-memory/omega-memory --clobber
+```
+
+On the first run macOS may ask whether `codesign` and `productsign` may use
+the keys; choose Always Allow. The script needs about 1 GB of temporary space
+(set `TMPDIR` to use another drive) and a network connection for Apple's
+timestamp and notary services. If Apple rejects the pkg, its reasons, file by
+file, are saved to `signed/notary-log.json`.
+
+Finally, download the pkg from the release page in a browser and open it: it
+should start without a warning.
 
 ---
 
@@ -115,18 +219,20 @@ Remove-Item build\python.zip
 # 2. Download get-pip.py
 Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile build\get-pip.py
 
-# 3. Build installer
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" omega-setup.iss
+# 3. Build installer for a given omega-memory release
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.5.20 omega-setup.iss
 ```
 
 Output: `dist\omega-setup.exe`
 
 ### Automated build
 
-Push a release tag or trigger the `Build Windows Installer` workflow manually in GitHub Actions. The workflow installs Inno Setup, downloads embedded Python + `get-pip.py`, builds `omega-setup.exe`, uploads an artifact, and attaches it to `v*` GitHub releases.
+Push a release tag or trigger the `Build Windows Installer` workflow manually in GitHub Actions. The workflow waits until pip can fetch the release from PyPI, installs Inno Setup, downloads embedded Python + `get-pip.py`, builds `omega-setup.exe`, uploads an artifact, and attaches it to `v*` GitHub releases.
 
-The Inno script pins the package version in its `pip install` step. Update
-`installer/omega-setup.iss` before each new installer release.
+The installer pip-installs exactly the release it was built for. The
+workflow passes the tag's version to ISCC as `/DMyAppVersion`; the script has
+no default, because a pinned default kept every installer from v1.5.4 to
+v1.5.19 on Core 1.5.4.
 
 ## Testing checklist
 
@@ -145,11 +251,11 @@ The Inno script pins the package version in its `pip install` step. Update
 # Release checklist
 
 1. Publish and verify `omega-memory` on PyPI.
-2. Update installer pins and metadata:
-   - `installer/build-macos-pkg.sh` default version
-   - `installer/omega-setup.iss` `MyAppVersion`
-   - `installer/omega-setup.iss` pinned `pip install omega-memory[server]==...`
-3. Build macOS and Windows installers from a `v*` tag or manual workflow.
+2. Build macOS and Windows installers from a `v*` tag or manual workflow.
+   Both take the version from the tag (or the `version` input) and wait for
+   PyPI to list it; nothing in the repository needs a version bump.
+3. Sign and notarize the macOS pkg (see "Signing and notarizing the macOS
+   pkg" above) and replace the unsigned `OMEGA-Memory.pkg` on the release.
 4. Smoke test both installers on clean machines or VMs.
 5. Attach artifacts to the matching GitHub release:
    - `OMEGA-Memory.pkg`

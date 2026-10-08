@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the bundled Python executables when the pkg is signed for
+  notarization (sign-and-notarize.sh). Notarization requires the hardened
+  runtime, which by default loads only libraries signed by the same team.
+  `omega activate` pip-installs the Pro package and its dependencies after
+  installation, and their native libraries are not signed by that team, so
+  without this Python would refuse to import them.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>
