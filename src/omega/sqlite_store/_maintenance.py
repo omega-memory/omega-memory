@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from omega import json_compat as json
 from omega.exceptions import EmbeddingError, StorageError, ValidationError
+from omega.feedback_signals import add_feedback_signal, feedback_signal_total
 
 from ._types import (
     _serialize_f32,
@@ -881,8 +882,6 @@ class MaintenanceMixin:
             content = row[0] or ""
             meta = json.loads(row[1]) if row[1] else {}
 
-            if "feedback_signals" not in meta:
-                meta["feedback_signals"] = []
             if "feedback_score" not in meta:
                 meta["feedback_score"] = 0
 
@@ -900,7 +899,7 @@ class MaintenanceMixin:
                 retrieval_ctx = self._recent_query_context.get(node_id)
             if retrieval_ctx:
                 signal["retrieval_context"] = retrieval_ctx
-            meta["feedback_signals"].append(signal)
+            add_feedback_signal(meta, signal)
 
             if meta["feedback_score"] <= -3:
                 meta["flagged_for_review"] = True
@@ -930,7 +929,7 @@ class MaintenanceMixin:
             "node_id": node_id,
             "rating": rating,
             "new_score": meta["feedback_score"],
-            "total_signals": len(meta["feedback_signals"]),
+            "total_signals": feedback_signal_total(meta),
             "flagged": meta.get("flagged_for_review", False),
             "cache_invalidated": 0,
         }
@@ -953,8 +952,6 @@ class MaintenanceMixin:
                 content = row[0] or ""
                 meta = json.loads(row[1]) if row[1] else {}
 
-                if "feedback_signals" not in meta:
-                    meta["feedback_signals"] = []
                 if "feedback_score" not in meta:
                     meta["feedback_score"] = 0
 
@@ -967,7 +964,7 @@ class MaintenanceMixin:
                     "reason": reason,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
-                meta["feedback_signals"].append(signal)
+                add_feedback_signal(meta, signal)
 
                 if meta["feedback_score"] <= -3 and not was_flagged:
                     meta["flagged_for_review"] = True

@@ -887,6 +887,41 @@ def _get_current_rss_bytes() -> int:
     return rss
 
 
+# RSS after the last pressure relief. Relief runs again only once RSS has grown
+# this far past it. With both models loaded a server sits above half its limit
+# for good, and repeating the relief on every 15 s check freed nothing new,
+# forced a full garbage collection and logged a WARNING each time.
+_RELIEF_REGROWTH_BYTES = 64 * 1024 * 1024
+_relief_floor_bytes = 0
+
+
+def _relieve_memory_pressure(rss: int) -> int:
+    """Release freed memory once RSS is above half the limit. Returns RSS afterwards.
+
+    macOS malloc holds freed large allocations as MALLOC_LARGE_REUSABLE pages
+    (2-4 GB observed); malloc_zone_pressure_relief forces their release.
+    """
+    global _relief_floor_bytes
+    if rss <= _RSS_LIMIT_BYTES * 0.5 or rss < _relief_floor_bytes + _RELIEF_REGROWTH_BYTES:
+        return rss
+    import gc
+
+    gc.collect()
+    released = _force_malloc_release()
+    rss_after = _get_current_rss_bytes()
+    _relief_floor_bytes = rss_after
+    # Routine relief is information; still being near the limit afterwards is a warning.
+    level = logging.WARNING if rss_after > _RSS_LIMIT_BYTES * 0.8 else logging.INFO
+    logger.log(
+        level,
+        "Memory pressure relief: RSS %.1f MB -> %.1f MB "
+        "(malloc released %d bytes, limit %.0f MB)",
+        rss / 1024**2, rss_after / 1024**2,
+        released, _RSS_LIMIT_BYTES / 1024**2,
+    )
+    return rss_after
+
+
 async def _rss_watchdog():
     """Periodically check RSS and gracefully exit if it exceeds the limit.
 
@@ -894,27 +929,10 @@ async def _rss_watchdog():
     client (Claude Code) will automatically restart the server on next
     tool call.
     """
-    import gc
-
     while True:
         await asyncio.sleep(15)
         try:
-            rss = _get_current_rss_bytes()
-
-            # Proactive memory release when RSS exceeds 50% of limit.
-            # macOS malloc holds freed large allocations as MALLOC_LARGE_REUSABLE
-            # pages (2-4 GB observed). malloc_zone_pressure_relief forces release.
-            if rss > _RSS_LIMIT_BYTES * 0.5:
-                gc.collect()
-                released = _force_malloc_release()
-                rss_after = _get_current_rss_bytes()
-                logger.warning(
-                    "Memory pressure relief: RSS %.1f MB -> %.1f MB "
-                    "(malloc released %d bytes, limit %.0f MB)",
-                    rss / 1024**2, rss_after / 1024**2,
-                    released, _RSS_LIMIT_BYTES / 1024**2,
-                )
-                rss = rss_after
+            rss = _relieve_memory_pressure(_get_current_rss_bytes())
 
             # Tracemalloc snapshots: log top allocations periodically when RSS is high
             if os.environ.get("OMEGA_TRACEMALLOC") and rss > _RSS_LIMIT_BYTES * 0.3:

@@ -438,11 +438,11 @@ class TestEngramIntegration:
 
     def test_schema_version_is_5(self, store):
         """SCHEMA_VERSION should be 8 after retrieval improvements."""
-        assert SCHEMA_VERSION == 15
+        assert SCHEMA_VERSION == 16
         row = store._conn.execute(
             "SELECT version FROM schema_version LIMIT 1"
         ).fetchone()
-        assert row[0] == 15
+        assert row[0] == 16
 
     def test_stats_tracking(self, store):
         """Engram stats should be tracked."""

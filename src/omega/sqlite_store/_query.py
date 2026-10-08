@@ -439,6 +439,7 @@ class QueryMixin:
         valid_at: Optional[str] = None,
         _is_retry: bool = False,
         query_embedding: Optional[List[float]] = None,
+        rerank: bool = True,
     ) -> List[MemoryResult]:
         """Search memories using vector similarity + text matching.
 
@@ -450,6 +451,10 @@ class QueryMixin:
         window return cached results, avoiding the full vector+FTS5 pipeline.
 
         surfacing_context controls dynamic threshold profiles (#4 Engram).
+
+        rerank=False skips the cross-encoder, leaving the vector, text and
+        metadata ranking. It is for internal lookups, such as store()
+        looking for memories to dedup against, not for a person's search.
         """
         from ._types import (
             _QUERY_CACHE_MAX,
@@ -486,7 +491,7 @@ class QueryMixin:
                 context_file, tuple(context_tags) if context_tags else (),
                 temporal_range, entity_id, agent_type, query_hint,
                 surfacing_context, temporal_boost_only, perspective,
-                valid_at,
+                valid_at, expand_query, rerank,
             )
             with self._cache_lock:
                 cached = self._query_cache.get(_cache_key)
@@ -530,6 +535,7 @@ class QueryMixin:
                         agent_type=agent_type, query_hint=query_hint,
                         surfacing_context=surfacing_context,
                         temporal_boost_only=temporal_boost_only,
+                        rerank=rerank,
                     )
                     for r in sq_results:
                         if r.id not in merged or r.relevance > merged[r.id].relevance:
@@ -717,7 +723,7 @@ class QueryMixin:
         # Phase 6: Graph expansion + cross-encoder reranking
         self._query_phase_rerank(
             query_text, all_results, node_scores,
-            limit, pw_graph, constraints,
+            limit, pw_graph, constraints, rerank=rerank,
         )
 
         # Invariant backstop: hard constraints are monotonic, so nothing a
@@ -762,6 +768,7 @@ class QueryMixin:
                 ctx_min_vec=ctx_min_vec,
                 ctx_min_text=ctx_min_text,
                 ctx_min_composite=ctx_min_composite,
+                rerank=rerank,
             )
             if retry_result is not None:
                 _result = retry_result
@@ -1485,6 +1492,7 @@ class QueryMixin:
         limit: int,
         pw_graph: float,
         constraints: Optional["HardConstraints"] = None,
+        rerank: bool = True,
     ) -> None:
         """Phase 6: Graph expansion + cross-encoder reranking + plugin modifiers.
 
@@ -1535,7 +1543,7 @@ class QueryMixin:
 
         # Cross-encoder reranking (P2) — rescore top candidates
         _RERANK_CANDIDATES = 10
-        if node_scores and len(node_scores) > 1:
+        if rerank and node_scores and len(node_scores) > 1:
             try:
                 from omega.reranker import (
                     _RERANKER_MODEL_NAME,
@@ -1618,6 +1626,7 @@ class QueryMixin:
         ctx_min_vec: float,
         ctx_min_text: float,
         ctx_min_composite: float,
+        rerank: bool = True,
     ) -> Optional[List["MemoryResult"]]:
         """Retry query with relaxed parameters when confidence is low.
 
@@ -1649,6 +1658,7 @@ class QueryMixin:
             perspective=perspective,
             valid_at=valid_at,
             _is_retry=True,            # Prevent infinite loops
+            rerank=rerank,
         )
 
         if not retry_results:

@@ -1,6 +1,7 @@
 """Search, retrieval, and caching mixin for SQLiteStore."""
 
 import logging
+import sqlite3
 import time as _time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -95,6 +96,161 @@ class SearchMixin:
             return None
         return cleaned
 
+    # Words that name no topic. They appear in most memories, so an OR-match
+    # on them made the full-text query score nearly every row.
+    _FTS_STOPWORDS = frozenset("""
+        about above after again against all also any because before being
+        below between both but could did does doing done down during each
+        either else ever every few further get gets got had having her here
+        hers herself him himself his how however its itself just let might
+        mine more most much must myself nor now once only other ought our
+        ours ourselves out over own per same shall she should since some
+        such than their theirs them themselves then there these they those
+        though through thus too under until upon very via what whatever when
+        whether which while who whom whose why within without would yet you
+        your yours yourself yourselves
+    """.split())
+
+    # The full-text channel matches on at most this many query terms, rarest
+    # first. The vector channel covers the rest of the query's meaning.
+    _FTS_MAX_TERMS = 8
+    # ...and on terms whose memories add up to at most this many, so the
+    # rows scored stay bounded however large the store grows. The rarest
+    # term is always kept.
+    _FTS_MAX_POSTINGS = 2000
+
+    def _fts_doc_frequencies(self, terms: List[str]) -> Optional[Dict[str, int]]:
+        """How many memories contain each term, from the FTS5 index, or None.
+
+        Reads a per-connection temp fts5vocab table, so nothing is added to
+        the database file.
+        """
+        placeholders = ",".join("?" * len(terms))
+        sql = f"SELECT term, doc FROM temp.memories_fts_vocab WHERE term IN ({placeholders})"
+        for attempt in range(2):
+            try:
+                return dict(self._conn.execute(sql, terms).fetchall())
+            except sqlite3.OperationalError as e:
+                if attempt or "no such table" not in str(e):
+                    logger.debug("FTS5 term frequency lookup failed: %s", e)
+                    return None
+                try:
+                    self._conn.execute(
+                        "CREATE VIRTUAL TABLE IF NOT EXISTS temp.memories_fts_vocab "
+                        "USING fts5vocab(main, memories_fts, row)"
+                    )
+                except sqlite3.Error as create_error:
+                    logger.debug("FTS5 vocabulary table unavailable: %s", create_error)
+                    return None
+        return None
+
+    def _fts_match_expression(self, query_lower: str) -> Optional[str]:
+        """The FTS5 MATCH expression for a query, or None if no term can match.
+
+        Matching any of the query's terms scored nearly every row, a cost
+        that grew with the store. The expression now matches a memory that
+        has one of the query's rarest terms, or all of its terms:
+
+        - Stopwords go, and so do terms no memory contains.
+        - Terms are kept rarest first, up to _FTS_MAX_TERMS terms and
+          _FTS_MAX_POSTINGS matching memories.
+        - All remaining terms together, and the first _FTS_MAX_TERMS
+          adjacent pairs of them as phrases, are cheap matches (FTS5 skips
+          through the lists). They keep a memory whose words are each common
+          but whose combination is not, and rank its exact wording higher.
+        """
+        sequence = [w for w in (self._sanitize_fts5_word(w) for w in query_lower.split()) if w]
+        terms = list(dict.fromkeys(w for w in sequence if w not in self._FTS_STOPWORDS))
+        if not terms:
+            terms = list(dict.fromkeys(sequence))
+        if not terms:
+            return None
+
+        frequencies = self._fts_doc_frequencies(terms)
+        if frequencies is None:
+            # No frequencies: longer words are the better guess at rare ones.
+            present = terms
+            kept = sorted(terms, key=len, reverse=True)[: self._FTS_MAX_TERMS]
+        else:
+            present = sorted((t for t in terms if frequencies.get(t)), key=lambda t: frequencies[t])
+            if not present:
+                return None
+            kept = present[:1]
+            postings = frequencies[kept[0]]
+            for term in present[1 : self._FTS_MAX_TERMS]:
+                postings += frequencies[term]
+                if postings > self._FTS_MAX_POSTINGS:
+                    break
+                kept.append(term)
+
+        present_set = set(present)
+        phrases = [f'"{t}"' for t in kept]
+        if len(sequence) >= 3:
+            adjacent = [
+                f'"{a} {b}"'
+                for a, b in zip(sequence, sequence[1:])
+                if a in present_set and b in present_set and a != b
+            ]
+            phrases += adjacent[: self._FTS_MAX_TERMS]
+        if len(present) > len(kept):
+            phrases.append("(" + " AND ".join(f'"{t}"' for t in present) + ")")
+        return " OR ".join(dict.fromkeys(phrases))
+
+    def _fts_ranked_rows(self, match: str, entity_id: Optional[str], limit: int) -> list:
+        """Rows matching an FTS5 expression, best BM25 rank first."""
+        if entity_id:
+            return self._conn.execute(
+                """SELECT m.node_id, m.content, m.metadata, m.created_at,
+                           m.access_count, m.last_accessed, m.ttl_seconds,
+                           f.rank
+                    FROM memories_fts f
+                    JOIN memories m ON f.rowid = m.id
+                    WHERE memories_fts MATCH ?
+                    AND (m.entity_id = ? OR m.entity_id IS NULL)
+                    ORDER BY f.rank LIMIT ?""",
+                (match, entity_id, limit),
+            ).fetchall()
+        return self._conn.execute(
+            """SELECT m.node_id, m.content, m.metadata, m.created_at,
+                       m.access_count, m.last_accessed, m.ttl_seconds,
+                       f.rank
+                FROM memories_fts f
+                JOIN memories m ON f.rowid = m.id
+                WHERE memories_fts MATCH ?
+                ORDER BY f.rank LIMIT ?""",
+            (match, limit),
+        ).fetchall()
+
+    def _score_fts_rows(self, rows: list, words: List[str], limit: int) -> List[MemoryResult]:
+        """Blend normalised BM25 (70%) with the share of query words present (30%)."""
+        # BM25 rank values are negative (more negative = better match)
+        # Filter out None ranks (FTS5 can return NULL for corrupt index entries)
+        ranks = [row[7] for row in rows if row[7] is not None]
+        if not ranks:
+            return []
+        best_rank = min(ranks)  # Most negative = best
+        worst_rank = max(ranks)  # Closest to 0 = worst
+        rank_spread = worst_rank != best_rank
+
+        results = []
+        for row in rows:
+            bm25_rank = row[7]
+            if bm25_rank is None:
+                continue
+            result = self._row_to_result(row[:7])
+            # Normalize BM25: best -> 1.0, worst -> 0.1
+            if rank_spread:
+                bm25_norm = 0.1 + 0.9 * (worst_rank - bm25_rank) / (worst_rank - best_rank)
+            else:
+                bm25_norm = 1.0  # Single result or all identical ranks
+            content_lower = result.content.lower()
+            word_ratio = sum(1 for w in words if w in content_lower) / len(words)
+            result.relevance = 0.7 * bm25_norm + 0.3 * word_ratio
+            results.append(result)
+
+        results.sort(key=lambda r: r.relevance, reverse=True)
+        return results[:limit]
+
     def _text_search(self, query_text: str, limit: int = 20, entity_id: Optional[str] = None) -> List[MemoryResult]:
         """Text-based search using FTS5 (fast) or LIKE fallback."""
         query_lower = query_text.lower()
@@ -102,81 +258,15 @@ class SearchMixin:
         if not words:
             return []
 
-        # Sanitize words for FTS5 (strip special chars, filter reserved words)
-        fts_words = []
-        for w in words:
-            cleaned = self._sanitize_fts5_word(w)
-            if cleaned:
-                fts_words.append(cleaned)
-
         # Try FTS5 first (O(log n) vs O(n) for LIKE)
-        if getattr(self, "_fts_available", False) and fts_words:
+        if getattr(self, "_fts_available", False):
             try:
-                # FTS5 query: OR-match sanitized words, quote each for safety
-                fts_terms = " OR ".join(f'"{w}"' for w in fts_words)
-                # Add bigram phrases for queries with 3+ words (improves precision)
-                if len(fts_words) >= 3:
-                    bigrams = [f'"{fts_words[i]} {fts_words[i+1]}"' for i in range(len(fts_words) - 1)]
-                    fts_terms = fts_terms + " OR " + " OR ".join(bigrams)
-                if entity_id:
-                    rows = self._conn.execute(
-                        """SELECT m.node_id, m.content, m.metadata, m.created_at,
-                                   m.access_count, m.last_accessed, m.ttl_seconds,
-                                   f.rank
-                            FROM memories_fts f
-                            JOIN memories m ON f.rowid = m.id
-                            WHERE memories_fts MATCH ?
-                            AND (m.entity_id = ? OR m.entity_id IS NULL)
-                            ORDER BY f.rank LIMIT ?""",
-                        (fts_terms, entity_id, limit * 3),
-                    ).fetchall()
-                else:
-                    rows = self._conn.execute(
-                        """SELECT m.node_id, m.content, m.metadata, m.created_at,
-                                   m.access_count, m.last_accessed, m.ttl_seconds,
-                                   f.rank
-                            FROM memories_fts f
-                            JOIN memories m ON f.rowid = m.id
-                            WHERE memories_fts MATCH ?
-                            ORDER BY f.rank LIMIT ?""",
-                        (fts_terms, limit * 3),
-                    ).fetchall()
-
-                if not rows:
+                match = self._fts_match_expression(query_lower)
+                if match is None:
                     return []
-
-                results = []
-                # BM25 rank values are negative (more negative = better match)
-                # Filter out None ranks (FTS5 can return NULL for corrupt index entries)
-                ranks = [row[7] for row in rows if row[7] is not None]
-                if not ranks:
-                    return []
-                best_rank = min(ranks)  # Most negative = best
-                worst_rank = max(ranks)  # Closest to 0 = worst
-                rank_spread = worst_rank != best_rank
-
-                for row in rows:
-                    result = self._row_to_result(row[:7])
-                    bm25_rank = row[7]
-                    if bm25_rank is None:
-                        continue
-                    # Normalize BM25: best -> 1.0, worst -> 0.1
-                    if rank_spread:
-                        bm25_norm = 0.1 + 0.9 * (worst_rank - bm25_rank) / (worst_rank - best_rank)
-                    else:
-                        bm25_norm = 1.0  # Single result or all identical ranks
-
-                    # Word-match ratio (existing logic)
-                    content_lower = result.content.lower()
-                    matched = sum(1 for w in words if w in content_lower)
-                    word_ratio = matched / len(words)
-
-                    # Blend: 70% BM25 (IDF-weighted) + 30% word-match
-                    result.relevance = 0.7 * bm25_norm + 0.3 * word_ratio
-                    results.append(result)
-
-                results.sort(key=lambda r: r.relevance, reverse=True)
-                return results[:limit]
+                return self._score_fts_rows(
+                    self._fts_ranked_rows(match, entity_id, limit * 3), words, limit
+                )
             except Exception as e:
                 logger.warning(f"FTS5 search failed: {e} — attempting auto-repair")
                 _fts_now = _time.monotonic()
@@ -192,54 +282,12 @@ class SearchMixin:
                         _types_mod._last_fts_rebuild = _fts_now
                         logger.info("FTS5 index rebuilt successfully")
                         # Retry the query once after repair
-                        if entity_id:
-                            rows = self._conn.execute(
-                                """SELECT m.node_id, m.content, m.metadata, m.created_at,
-                                           m.access_count, m.last_accessed, m.ttl_seconds,
-                                           f.rank
-                                    FROM memories_fts f
-                                    JOIN memories m ON f.rowid = m.id
-                                    WHERE memories_fts MATCH ?
-                                    AND (m.entity_id = ? OR m.entity_id IS NULL)
-                                    ORDER BY f.rank LIMIT ?""",
-                                (fts_terms, entity_id, limit * 3),
-                            ).fetchall()
-                        else:
-                            rows = self._conn.execute(
-                                """SELECT m.node_id, m.content, m.metadata, m.created_at,
-                                           m.access_count, m.last_accessed, m.ttl_seconds,
-                                           f.rank
-                                    FROM memories_fts f
-                                    JOIN memories m ON f.rowid = m.id
-                                    WHERE memories_fts MATCH ?
-                                    ORDER BY f.rank LIMIT ?""",
-                                (fts_terms, limit * 3),
-                            ).fetchall()
-                        if not rows:
+                        match = self._fts_match_expression(query_lower)
+                        if match is None:
                             return []
-                        results = []
-                        ranks = [row[7] for row in rows if row[7] is not None]
-                        if not ranks:
-                            return []
-                        best_rank = min(ranks)
-                        worst_rank = max(ranks)
-                        rank_spread = worst_rank != best_rank
-                        for row in rows:
-                            result = self._row_to_result(row[:7])
-                            bm25_rank = row[7]
-                            if bm25_rank is None:
-                                continue
-                            if rank_spread:
-                                bm25_norm = 0.1 + 0.9 * (worst_rank - bm25_rank) / (worst_rank - best_rank)
-                            else:
-                                bm25_norm = 1.0
-                            content_lower = result.content.lower()
-                            matched = sum(1 for w in words if w in content_lower)
-                            word_ratio = matched / len(words)
-                            result.relevance = 0.7 * bm25_norm + 0.3 * word_ratio
-                            results.append(result)
-                        results.sort(key=lambda r: r.relevance, reverse=True)
-                        return results[:limit]
+                        return self._score_fts_rows(
+                            self._fts_ranked_rows(match, entity_id, limit * 3), words, limit
+                        )
                     except Exception as rebuild_err:
                         logger.warning(f"FTS5 rebuild also failed: {rebuild_err} — falling back to LIKE")
 

@@ -137,6 +137,29 @@ def _full_retrieval_available() -> bool:
         return False
 
 
+# Results a reduced Free-tier search returns.
+_REDUCED_SEARCH_LIMIT = 3
+
+
+def _free_tier_search_reduced() -> bool:
+    """Whether omega_query runs the reduced Free-tier search.
+
+    Dormant: the count comes from ``count_memories()``, which SQLiteStore
+    does not define, so this has been False in every release and Free search
+    above 2,000 memories is the full search. Naming the real method here
+    would change what Free users get, which is a pricing decision, not a fix.
+    """
+    if _full_retrieval_available():
+        return False
+    try:
+        from omega.bridge import _get_store
+        _store = _get_store()
+        _mem_count = _store.count_memories() if hasattr(_store, 'count_memories') else None
+    except Exception:
+        return False
+    return _mem_count is not None and _mem_count >= 2000
+
+
 def is_deploy_gate_cleared(session_id: str | None = None, max_age_sec: int = 1800) -> bool:
     """Check if the deploy gate was cleared recently (default: 30 min).
 
@@ -723,63 +746,50 @@ async def handle_omega_query(arguments: dict) -> dict:
         except ImportError:
             pass
 
-    # Quality degradation: free users over 2,000 memories get keyword-only search
-    _search_degraded = False
-    if not _full_retrieval_available():
-        try:
-            from omega.bridge import _get_store
-            _store = _get_store()
-            _mem_count = _store.count_memories() if hasattr(_store, 'count_memories') else None
-            if _mem_count is not None and _mem_count >= 2000:
-                _search_degraded = True
-        except Exception:
-            pass
+    # Reduced Free-tier search is the same ranked search with every filter
+    # the caller asked for, minus the reranker and LLM query expansion, and
+    # cut to the top results. It used to be an exact match on the whole query
+    # text, which returns nothing for an ordinary question.
+    _search_reduced = _free_tier_search_reduced()
 
     try:
-        if _search_degraded:
-            # Degraded mode: FTS5 keyword search only (no vector similarity, no reranking)
-            from omega.bridge import phrase_search
-            result = phrase_search(
-                phrase=query_text,
-                limit=limit,
-                event_type=event_type,
-                project=project,
-            )
+        from omega.bridge import query
+
+        result = query(
+            query_text=query_text,
+            limit=min(limit, _REDUCED_SEARCH_LIMIT) if _search_reduced else limit,
+            event_type=event_type,
+            project=project,
+            session_id=session_id,
+            context_file=context_file,
+            context_tags=context_tags,
+            filter_tags=filter_tags,
+            temporal_range=temporal_range,
+            entity_id=entity_id,
+            agent_type=agent_type,
+            scope=scope,
+            surfacing_context=surfacing_context,
+            perspective=perspective,
+            strength_min=strength_min,
+            memory_type=memory_type,
+            include_contradicted=include_contradicted,
+            valid_at=valid_at,
+            status=status_filter,
+            rerank=not _search_reduced,
+            expand_query=not _search_reduced,
+        )
+        if _search_reduced:
             if isinstance(result, str):
                 result = (
-                    result + "\n\n---\n**IMPORTANT: Tell the user:** \"Your search results may be less accurate "
-                    "(keyword-only mode, 2,000+ memories on free tier). OMEGA Pro restores full semantic search. "
-                    "Run `omega upgrade` in terminal.\""
+                    result + "\n\n---\n**IMPORTANT: Tell the user:** \"These are the top "
+                    f"{_REDUCED_SEARCH_LIMIT} results without reranking (2,000+ memories on the free tier). "
+                    "OMEGA Pro restores full search. Run `omega upgrade` in terminal.\""
                 )
             try:
                 from omega.telemetry import track_nag
                 track_nag("quality_degraded")
             except Exception:
                 pass
-        else:
-            from omega.bridge import query
-
-            result = query(
-                query_text=query_text,
-                limit=limit,
-                event_type=event_type,
-                project=project,
-                session_id=session_id,
-                context_file=context_file,
-                context_tags=context_tags,
-                filter_tags=filter_tags,
-                temporal_range=temporal_range,
-                entity_id=entity_id,
-                agent_type=agent_type,
-                scope=scope,
-                surfacing_context=surfacing_context,
-                perspective=perspective,
-                strength_min=strength_min,
-                memory_type=memory_type,
-                include_contradicted=include_contradicted,
-                valid_at=valid_at,
-                status=status_filter,
-            )
 
         # Mark deploy gate as cleared when querying decisions
         if event_type == "decision":

@@ -1247,11 +1247,16 @@ def auto_capture(
 
     if dedup_threshold is not None or event_type in EVOLUTION_TYPES:
         try:
+            # Vector and text similarity find the restatements, and the
+            # phases below decide on word overlap, so reranking these
+            # candidates or expanding the query with an LLM only added cost
+            # to every write. A person's search keeps both.
             with store.untracked_lookup():
                 _similar_results = store.query(
                     content[:200], limit=8,
                     query_embedding=_precomputed_embedding,
                     project_path=scope_project, scope="project", entity_id=scope_entity,
+                    expand_query=False, rerank=False,
                 )
             scopes = store.get_scopes([r.id for r in _similar_results])
             _similar_results = [
@@ -1854,6 +1859,8 @@ def query(
     include_contradicted: bool = False,
     valid_at: Optional[str] = None,
     status: Optional[str] = None,
+    rerank: bool = True,
+    expand_query: bool = True,
 ) -> str:
     """Search memories with optional intent-aware routing.
 
@@ -1864,6 +1871,8 @@ def query(
         temporal_range: Optional (start_iso, end_iso) tuple. Auto-inferred from query if not given.
         surfacing_context: SurfacingContext enum for context-aware scoring (error_debug, planning, etc.).
         strength_min: Minimum strength score (0.0-1.0). Filters out weak/decayed memories.
+        rerank: False skips the cross-encoder; the vector and text ranking remains.
+        expand_query: False skips LLM query expansion.
 
     Returns:
         Formatted markdown string with results.
@@ -1896,6 +1905,8 @@ def query(
             "query_hint": event_type,
             "temporal_boost_only": _temporal_boost_only,
             "scope": _scope,
+            "rerank": rerank,
+            "expand_query": expand_query,
         }
         if surfacing_context is not None:
             query_kwargs["surfacing_context"] = surfacing_context
@@ -3599,7 +3610,9 @@ def _check_graduation(memory_id: str) -> Optional[str]:
     Graduation: memory was diff-correlated (positive) in 2+ feedback signals -> promote priority.
     Decay: memory was surfaced 3+ times with zero correlation -> demote priority.
 
-    Reads from the feedback_signals list stored in memory metadata by record_feedback().
+    Reads the feedback_signals list record_feedback() keeps in memory metadata,
+    which holds the most recent signals (omega.feedback_signals), so both
+    counts are over that recent window.
 
     Returns "graduated", "decayed", or None.
     """

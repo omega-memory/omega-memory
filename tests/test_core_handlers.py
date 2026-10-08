@@ -193,31 +193,76 @@ class TestOmegaQuery:
         # Should have some content (even if "no results" message)
         assert len(text) > 0
 
-    def test_free_tier_query_degrades_after_soft_cap(self, monkeypatch):
-        """Free users at 2,000+ memories get keyword-only search + upgrade CTA."""
-        import omega.bridge as bridge
+    def test_free_tier_search_downgrade_is_dormant_on_the_real_store(self, monkeypatch):
+        """With 2,000+ memories and no Pro plugin, omega_query still runs the full search.
+
+        The downgrade reads count_memories(), which SQLiteStore does not
+        define. An earlier version of this test passed against a stub that
+        defined it, while the product never took the reduced path.
+        """
+        from omega.bridge import _get_store
         from omega.server import handlers
         from omega.server.handlers import handle_omega_query
 
-        class StoreStub:
-            def count_memories(self):
-                return 2000
-
-        monkeypatch.setattr(handlers, "_full_retrieval_available", lambda: False)
-        monkeypatch.setattr(bridge, "_get_store", lambda: StoreStub())
-        monkeypatch.setattr(
-            bridge,
-            "phrase_search",
-            lambda **kwargs: f"keyword search for {kwargs['phrase']}",
+        store = _get_store()
+        store._conn.executemany(
+            "INSERT INTO memories (node_id, content, metadata, created_at) VALUES (?, ?, '{}', ?)",
+            [(f"mem-bulk{i:08d}", f"bulk memory number {i}", "2026-01-01T00:00:00+00:00") for i in range(2000)],
         )
+        store._conn.commit()
+        monkeypatch.setattr(handlers, "_full_retrieval_available", lambda: False)
+
+        assert store.node_count() >= 2000
+        assert not hasattr(store, "count_memories")
+        assert handlers._free_tier_search_reduced() is False
 
         result = run_async(handle_omega_query({"query": "database migration"}))
 
         assert not _is_error(result)
+        assert "free tier" not in _text(result)
+
+    def test_reduced_free_tier_search_is_ranked_and_capped(self, monkeypatch):
+        """The reduced path is the ranked search: top 3, no reranker, no LLM expansion."""
+        import omega.query_expansion as query_expansion
+        import omega.reranker as reranker
+        import omega.sqlite_store._query as query_module
+        from omega.bridge import _get_store
+        from omega.server import handlers
+        from omega.server.handlers import handle_omega_query
+
+        store = _get_store()
+        target = store.store(
+            content="We moved the billing database migration to alembic with offline scripts.",
+            metadata={"event_type": "decision"},
+        )
+        for i in range(6):
+            store.store(
+                content=f"Unrelated note {i}: the office database of plants needs watering on Fridays.",
+                metadata={"event_type": "memory"},
+            )
+        model_calls = []
+        monkeypatch.setattr(handlers, "_free_tier_search_reduced", lambda: True)
+        monkeypatch.setattr(query_module, "STRONG_SIGNAL_THRESHOLD", 2.0)
+        monkeypatch.setattr(
+            reranker, "cross_encoder_score",
+            lambda *a, **k: model_calls.append("reranker") or None,
+        )
+        monkeypatch.setattr(
+            query_expansion, "expand_query",
+            lambda *a, **k: model_calls.append("expansion") or {},
+        )
+
+        result = run_async(handle_omega_query(
+            {"query": "what did we decide about the billing database migration", "limit": 10}
+        ))
+
+        assert not _is_error(result)
         text = _text(result)
-        assert "keyword search for database migration" in text
-        assert "keyword-only mode" in text
-        assert "OMEGA Pro restores full semantic search" in text
+        returned = re.findall(r"`(mem-[a-f0-9]+)`", text.split("---")[0])
+        assert returned[0] == target, "an ordinary question must still find its memory, ranked first"
+        assert len(returned) <= 3
+        assert model_calls == []
+        assert "top 3 results without reranking" in text
         assert "omega upgrade" in text
 
     def test_query_missing_query_error(self):

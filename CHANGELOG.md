@@ -30,6 +30,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the server could not accept new ones. Each connection now closes within
   30 seconds whatever its hook does, and closing no longer waits on a
   caller that stopped reading.
+- **The reduced Free-tier search would have found nothing.** The search that
+  Free installs are meant to fall back to above 2,000 memories matched the
+  whole question as one exact phrase, so 0 of 40 test questions returned
+  anything. It is now the normal ranked search without the reranker or query
+  expansion, cut to the top 3 results; 28 of the 40 found the right memory.
+  Nobody's results change: that fallback is not switched on in 1.5.19 or in
+  this release, and Free search above 2,000 memories remains the full search.
+
+### Performance
+
+Measured on one machine (14-core Apple M4 Pro) against a fixed-seed corpus of
+10,000 memories, with the models a default install uses (bge-small-en-v1.5
+and ms-marco-MiniLM-L-6-v2). "CPU" is processor time across all threads.
+Together, saving a memory went from 37 to 18 ms and from 116 to 24 ms of CPU
+(medians), and a search from 12.9 to 9.6 ms.
+
+- **The embedding and reranker models use far less CPU.** ONNX Runtime ran one
+  thread per core and kept them spinning after each inference. Each model now
+  uses at most 4 threads (`OMEGA_ONNX_THREADS` overrides) that sleep when idle.
+  Embedding one memory: 52 → 16 ms of CPU. Embedding 32: 1,632 → 655 ms of
+  CPU, 237 → 209 ms wall. Reranking 10 results: 206 → 99 ms of CPU, 28 → 27 ms
+  wall. The 40 to 60 ms of CPU burned in the 200 ms after every inference,
+  with nothing running, is gone. A single embedding takes about 2 ms longer
+  (4.7 → 6.3 ms), because a sleeping thread has to wake.
+- **Saving a memory no longer runs the reranker.** The cross-encoder ran
+  inside every store: once to rank the similar memories the store checks for
+  duplicates, and once to score contradiction candidates that could not
+  become contradictions at any score. The duplicate check now uses vector and
+  text similarity, and contradiction scoring runs only when a candidate's
+  wording could make it one. Reranker calls per store: 0.57 → 0.01. With the
+  thread change above, CPU per store: 116 → 41 ms (median), 271 → 72 ms (p90).
+  Across 120 test writes (restatements, updates, extensions and new facts),
+  every dedup, evolution, retirement and contradiction outcome was the same as
+  before. Searches still use the reranker.
+- **Full-text search no longer scores nearly every memory.** The text half of
+  a search matched any word of the query, so common words made it rank almost
+  the whole store, and the cost grew with it. It now matches a memory that has
+  one of the query's rarest words (up to 8, within a fixed budget), or all of
+  its words together, or two adjacent words as a phrase; stopwords are left
+  out. On a short search: 5,710 → 772 SQL statements, 6.4 → 1.6 ms. On the
+  longer lookup a store runs: 12,206 → 3,020 statements, 24.3 → 5.6 ms. A
+  whole search: 12.9 → 9.6 ms (median). Results did not get worse: on 80
+  probe searches the right memory came first 57 times (was 50), and the
+  built-in `omega eval-retrieval` check scored the same or slightly higher on
+  three samples of 100 (hit rate 95/88/92% → 96/88/92%). In the 120 test
+  writes above, 119 outcomes were unchanged. The other was an existing memory
+  restated with one sentence added: the lookup now finds that exact memory,
+  which 1.5.19 had missed, and the unchanged duplicate rule then treats the
+  write as a repeat and drops it, where 1.5.19 had appended the new sentence
+  to an older near-copy. Small stores match every word, as before.
+- **A memory's feedback history is capped.** Every feedback signal was
+  appended to the memory and never removed, and each one rewrote the whole
+  list, so a memory that surfaced often carried thousands of entries. Each
+  memory now keeps its 20 most recent signals plus a running count per rating
+  (`feedback_counts`); its score and total are unchanged. The first start
+  after upgrading trims existing memories once (about 0.15 s for 10,000
+  memories; database schema 15 → 16). On the test corpus the busiest memory's
+  record shrank from 208 KB to 4.7 KB, recording feedback on it went from
+  0.52 to 0.04 ms, and the database from 43.0 to 37.7 MB after compaction.
+- **Capability checks no longer rescan installed packages.** Saving a memory
+  asks up to three times whether a plugin provides a capability, and every
+  check reread the entry points of all installed packages: 0.7 ms each. The
+  scan is now reused for a minute (under 0.001 ms per check). What a plugin
+  reports is still read every time, so a license change shows at once.
+- **The reranker download keeps one copy of the model.** It left a second
+  copy of the model file in an `onnx/` folder, about 91 MB for the default
+  model. New downloads keep one, and an existing duplicate of the default
+  model is removed the next time the reranker loads (183 → 92 MB on disk).
+- **The memory watchdog no longer warns every 15 seconds.** Once a server was
+  above half its memory limit, which is normal with both models loaded, each
+  check forced a full garbage collection and logged a WARNING. It now acts
+  only when memory has grown by 64 MB since the last time, and warns only if
+  the server is still within 20% of its limit afterwards. Five minutes at
+  steady memory: 20 warnings and 20 forced collections → 1 info line and 1
+  collection.
 
 ## [1.5.19] - 2026-09-30
 

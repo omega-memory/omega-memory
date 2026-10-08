@@ -415,11 +415,11 @@ class TestSchemaMigration:
 
     def test_schema_version_is_8(self, store):
         """SCHEMA_VERSION should be 8."""
-        assert SCHEMA_VERSION == 15
+        assert SCHEMA_VERSION == 16
         row = store._conn.execute(
             "SELECT version FROM schema_version LIMIT 1"
         ).fetchone()
-        assert row[0] == 15
+        assert row[0] == 16
 
     def test_end_date_column_exists(self, store):
         """The memories table should have an end_date column."""
