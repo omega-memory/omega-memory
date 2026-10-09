@@ -34,8 +34,6 @@ _FALLBACK_SCRIPTS = {
     "surface_memories": "surface_memories",
     "auto_capture": "auto_capture",
     "assistant_capture": "assistant_capture",
-    "coord_session_start": "coord_session_start",
-    "coord_session_stop": "coord_session_stop",
     "coord_heartbeat": "coord_heartbeat",
     "auto_claim_file": "auto_claim_file",
     "pre_add_guard": "pre_add_guard",
@@ -48,6 +46,10 @@ _FALLBACK_SCRIPTS = {
     "pre_alignment_gate": "pre_alignment_gate",
     "trace_capture": "trace_capture",
 }
+
+_CORE_HOOKS = frozenset({
+    "session_start", "session_stop", "surface_memories", "auto_capture", "assistant_capture",
+})
 
 # Hooks that require longer timeouts (e.g., git network operations)
 _SLOW_HOOKS = {"pre_push_guard"}
@@ -65,10 +67,7 @@ _BLOCKING_HOOKS = {
 # These capture high-value content that would otherwise be silently dropped.
 _BEST_EFFORT_HOOKS = {
     "assistant_capture",
-    "coord_session_stop",
     "coord_heartbeat",       # heartbeat must reach Supabase even without daemon
-    "coord_session_start",   # belt-and-suspenders: omega_welcome also registers,
-                             # but fallback covers agents that skip omega_welcome
     "trace_capture",         # captures content that would otherwise be lost
 }
 
@@ -257,6 +256,42 @@ def _fallback(hook_name, payload):
         print(f"OMEGA hook fallback error ({hook_name}): {e}", file=sys.stderr)
 
 
+def _plugin_fallback(hook_name, payload):
+    """Run a discovered extension hook in-process; return whether one existed."""
+    if hook_name in _CORE_HOOKS:
+        return False
+    try:
+        from omega import plugins
+        handler = plugins.plugin_hook_handler(hook_name)
+    except Exception as error:
+        print(f"OMEGA plugin hook lookup error ({hook_name}): {error}", file=sys.stderr)
+        return False
+    if handler is None:
+        return False
+    try:
+        result = handler(payload)
+        if not isinstance(result, dict):
+            raise TypeError("plugin hook response must be a dict")
+        if result.get("error"):
+            print(f"OMEGA plugin hook error ({hook_name}): {result['error']}", file=sys.stderr)
+            if hook_name in _BLOCKING_HOOKS:
+                raise SystemExit(2)
+        exit_code = result.get("exit_code", 0)
+        if exit_code and hook_name in _BLOCKING_HOOKS:
+            if result.get("output"):
+                print(result["output"])
+                print(result["output"], file=sys.stderr)
+            raise SystemExit(exit_code)
+        _print_answer(payload, [result])
+    except SystemExit:
+        raise
+    except Exception as error:
+        print(f"OMEGA plugin hook error ({hook_name}): {error}", file=sys.stderr)
+        if hook_name in _BLOCKING_HOOKS:
+            raise SystemExit(2) from error
+    return True
+
+
 def _print_answer(payload, results):
     """Print what the hooks said, where Claude Code hands it to the model.
 
@@ -376,18 +411,19 @@ def main():
         # and best-effort hooks (high-value captures that shouldn't be dropped).
         # Skip purely informational hooks to prevent the fallback stampede where
         # concurrent Python processes starve each other on CPU + SQLite locks.
-        blocking = [h for h in hook_names if h in _BLOCKING_HOOKS]
-        best_effort = [h for h in hook_names if h in _BEST_EFFORT_HOOKS]
-        if blocking:
-            for name in blocking:
-                _fallback(name, payload)
-        if best_effort:
-            for name in best_effort:
-                try:
+        ran_fallback = False
+        for name in hook_names:
+            if name in _BLOCKING_HOOKS:
+                if not _plugin_fallback(name, payload):
                     _fallback(name, payload)
-                except Exception:
-                    pass  # Never block session for best-effort hooks
-        if blocking or best_effort:
+                ran_fallback = True
+            elif name in _BEST_EFFORT_HOOKS:
+                if not _plugin_fallback(name, payload):
+                    _fallback(name, payload)
+                ran_fallback = True
+            elif name not in _CORE_HOOKS and _plugin_fallback(name, payload):
+                ran_fallback = True
+        if ran_fallback:
             elapsed_ms = (time.monotonic() - t0) * 1000
             _log_timing("+".join(hook_names), elapsed_ms, "fallback")
         else:

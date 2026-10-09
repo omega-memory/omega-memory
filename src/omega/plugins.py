@@ -131,3 +131,25 @@ def get_capabilities() -> set[str]:
 def has_capability(name: str) -> bool:
     """Return True when an installed plugin provides ``name``."""
     return name in get_capabilities()
+
+
+def plugin_hook_handler(name: str) -> Callable | None:
+    """Return the first discovered plugin handler for a hook, if any."""
+    try:
+        discovered = _capability_plugins()
+    except Exception as exc:
+        logger.warning("Failed to discover plugin hook %s: %s", name, exc)
+        return None
+    for plugin in discovered:
+        try:
+            handlers = getattr(plugin, "HOOK_HANDLERS", None)
+            if callable(handlers):
+                handlers = handlers()
+            handler = handlers.get(name) if isinstance(handlers, dict) else None
+            if handler is not None:
+                if callable(handler):
+                    return handler
+                logger.warning("Plugin %s provided non-callable hook %s", type(plugin).__name__, name)
+        except Exception as exc:
+            logger.warning("Plugin %s failed to provide hook %s: %s", type(plugin).__name__, name, exc)
+    return None
