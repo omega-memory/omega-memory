@@ -40,7 +40,7 @@ pip install onnxruntime
 Or install OMEGA with all dependencies:
 
 ```bash
-pip install "omega-memory[all]"
+pip install "omega-memory[full]"
 ```
 
 Note: CoreML acceleration is intentionally disabled due to a memory leak in Apple's ANE runtime. CPU-only inference is used.

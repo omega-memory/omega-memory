@@ -158,45 +158,7 @@ omega doctor
 ps aux | grep omega.server.mcp_server
 ```
 
-## Router configuration (optional)
-
-If you installed `omega-memory[router]`, configure API keys in `~/.omega/secrets.json`:
-
-```json
-{
-  "anthropic_api_key": "<anthropic-api-key>",
-  "openai_api_key": "<openai-api-key>",
-  "google_api_key": "<google-api-key>",
-  "groq_api_key": "<groq-api-key>",
-  "xai_api_key": "<xai-api-key>"
-}
-```
-
-!!! warning "Protect your secrets"
-    `omega setup` creates `secrets.json` with `chmod 600` (owner read/write only). Never commit this file to version control.
-
-You can also set API keys as environment variables:
-
-```bash
-export ANTHROPIC_API_KEY="<anthropic-api-key>"
-export OPENAI_API_KEY="<openai-api-key>"
-export GOOGLE_API_KEY="<google-api-key>"
-export GROQ_API_KEY="<groq-api-key>"
-export XAI_API_KEY="<xai-api-key>"
-```
-
-## Cloud sync configuration (optional)
-
-If you installed `omega-memory[cloud]`, configure Supabase credentials:
-
-```bash
-omega cloud setup
-```
-
-This prompts for your Supabase URL and anon key, stored in `~/.omega/secrets.json`. Sync runs automatically:
-
-- **Pull**: Once per day at session start
-- **Push**: At session end after `sync_all`
+LLM routing and cloud sync, with their configuration, are available in [OMEGA Pro](https://omegamax.co/pro).
 
 ## Auto-maintenance
 
@@ -208,8 +170,6 @@ OMEGA runs background maintenance tasks on a schedule, tracked by marker files i
 | Compact | 14 days | `last-compact` | Merges similar memories into consolidated nodes |
 | Backup | 7 days | `last-backup` | Exports full database to `~/.omega/backups/` |
 | Doctor | 7 days | `last-doctor` | Runs health checks, logs warnings |
-| Cloud pull | 1 day | `last-cloud-pull` | Syncs from Supabase (if configured) |
-| Cloud push | per session | `last-cloud-push` | Syncs to Supabase at session end |
 
 All maintenance runs at session start and is non-blocking.
 

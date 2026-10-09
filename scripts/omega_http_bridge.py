@@ -131,7 +131,7 @@ def _handle_omega_route_prompt(args: Dict[str, Any]) -> str:
     try:
         from omega.router.engine import route_prompt
     except ImportError:
-        return '{"error": "Router not installed. pip install omega-memory[router]"}'
+        return '{"error": "Router not available in this installation"}'
 
     prompt = args.get("prompt", "")
     priority = args.get("priority", "balanced")

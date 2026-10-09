@@ -7,73 +7,37 @@ description: Install OMEGA and set up persistent memory for Claude Code
 
 ## Install from PyPI
 
-=== "Core (memory + coordination)"
+=== "Core"
 
     ```bash
-    pip install omega-memory
+    pip install "omega-memory[server]"
     ```
 
-    Includes all 24 memory tools and 28 coordination tools. This is everything most users need.
-
-=== "With LLM routing"
-
-    ```bash
-    pip install omega-memory[router]
-    ```
-
-    Adds 10 routing tools to send prompts to the optimal model across Anthropic, OpenAI, Google, Groq, and xAI.
-
-=== "With entity registry"
-
-    ```bash
-    pip install omega-memory[entity]
-    ```
-
-    Adds 8 entity tools for tracking companies, LLCs, and organizational structures. Includes encryption support.
-
-=== "With PDF ingestion"
-
-    ```bash
-    pip install omega-memory[knowledge-pdf]
-    ```
-
-    Adds document ingestion with Docling for high-quality PDF extraction with native markdown output.
-
-    For a lighter alternative using pdfplumber only:
-
-    ```bash
-    pip install omega-memory[knowledge-pdf-lite]
-    ```
+    Installs the memory engine and the MCP server. This is everything most users need. Keep the quotes: zsh treats bare square brackets as a pattern.
 
 === "With encryption"
 
     ```bash
-    pip install omega-memory[encrypt]
+    pip install "omega-memory[encrypt]"
     ```
 
-    Adds AES-256 encrypted secure profile storage with macOS Keychain integration.
-
-=== "With cloud sync"
-
-    ```bash
-    pip install omega-memory[cloud]
-    ```
-
-    Adds Supabase cloud sync for cross-device memory sharing.
+    Adds encrypted local storage with macOS Keychain integration.
 
 === "Everything"
 
     ```bash
-    pip install omega-memory[full]
+    pip install "omega-memory[full]"
     ```
 
-    Installs all optional modules: router, entity, knowledge-pdf, encrypt, and cloud.
+    Installs every optional extra: `server` and `encrypt`.
+
+Multi-agent coordination, LLM routing, entities, the knowledge base, encrypted profiles and cloud sync are available in [OMEGA Pro](https://omegamax.co/pro).
 
 ## Install from source
 
 ```bash
-git clone https://github.com/omega-memory/omega.git
-cd omega
+git clone https://github.com/omega-memory/omega-memory.git
+cd omega-memory
 pip install -e ".[dev]"
 omega setup
 ```
