@@ -121,20 +121,9 @@ When you edit a file, OMEGA automatically claims it so other agents know not to 
 
 When you close the session, OMEGA captures a summary of what was accomplished and releases all file and branch claims.
 
-## Multi-agent coordination
-
-If you run multiple Claude Code sessions on the same project, OMEGA keeps them from stepping on each other:
-
-```
-[COORD] Team (2 active):
-  Maple (you) — working on src/auth.ts
-  Cedar — working on src/api/routes.ts
-```
-
-File claims, branch ownership, and task assignments all happen through the hook system. See the [Coordination guide](../guides/coordination.md) for details.
+Multi-agent coordination across sessions (file claims, branch ownership, task assignment) is available in [OMEGA Pro](https://omegamax.co/pro).
 
 ## Next steps
 
 - **[Configuration](configuration.md)** — Customize storage paths, hooks, and environment variables.
-- **[MCP Tools Reference](../reference/mcp-tools.md)** — All 70 MCP tools with parameters.
-- **[Coordination guide](../guides/coordination.md)** — Deep dive into multi-agent workflows.
+- **[MCP Tools Reference](../reference/mcp-tools.md)** — Every MCP tool with its parameters.
