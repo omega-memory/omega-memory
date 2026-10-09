@@ -89,12 +89,12 @@ def test_hooks_install_from_core_manifest_when_pro_is_present_but_ships_no_manif
 
 
 def test_hooks_install_from_full_manifest_when_one_is_shipped(claude_home, core_only_data_dir):
-    full = {"SessionStart": [{"script": "fast_hook.py session_start+coord_session_start", "timeout": 5, "matcher": ""}]}
+    full = {"SessionStart": [{"script": "fast_hook.py session_start+extension_hook", "timeout": 5, "matcher": ""}]}
     (core_only_data_dir / "hooks.json").write_text(json.dumps(full))
 
     cli._inject_settings_hooks(claude_home / "hooks")
 
-    assert [shlex.split(c)[-1] for c in _commands(_settings(claude_home))] == ["session_start+coord_session_start"]
+    assert [shlex.split(c)[-1] for c in _commands(_settings(claude_home))] == ["session_start+extension_hook"]
 
 
 def test_malformed_settings_json_is_a_setup_failure_and_is_left_untouched(claude_home, core_only_data_dir):

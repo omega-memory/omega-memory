@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Hooks Core does not own are served by plugins.** The hook server and
+  `fast_hook.py` (when no daemon answers) hand any hook name outside Core's
+  own five to the first installed plugin that lists it in `HOOK_HANDLERS`,
+  and stay silent when none does. Core no longer ships session scripts for
+  an extension's workflow. OMEGA Pro users need the Pro release that ships
+  alongside this one.
+
 ## [1.5.20] - 2026-10-08
 
 ### Fixed
@@ -931,7 +940,7 @@ Together, saving a memory went from 37 to 18 ms and from 116 to 24 ms of CPU
 - Hook log rotation at 5 MB cap to prevent disk fill
 - `pre_push_guard` now blocks pushes on divergence via `sys.exit(2)` (was advisory-only)
 - `auto_claim_file` now surfaces `[CONFLICT]` warnings instead of silently swallowing claim conflicts
-- Hook timeouts increased: `coord_session_start` 3s → 10s, `coord_session_stop` 3s → 8s
+- Hook timeouts increased: coordination session start 3s → 10s, coordination session stop 3s → 8s
 - Git fetch subprocess timeout reduced from 15s to 5s to fit within hook timeouts
 - Replaced deprecated `datetime.utcnow()` with `datetime.now(timezone.utc)` in hooks and coordination
 - Coordination tool count: 25 handlers (was 24)

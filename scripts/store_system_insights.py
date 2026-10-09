@@ -20,14 +20,14 @@ INSIGHTS = [
             "sequentially within a single timeout window. Put fast, critical operations first "
             "(coord cleanup ~50ms) to guarantee completion. Heavy operations (session summary "
             "~5-6s) go last -- if timeout kills them, nothing critical is lost. "
-            "Config: coord_session_stop+session_stop+assistant_capture."
+            "Config: the coordination stop hook+session_stop+assistant_capture."
         ),
         "tags": ["hooks", "coordination", "session_stop", "timeouts"],
     },
     {
         "content": (
             "Three-layer defense for stale sessions: (1) _BEST_EFFORT_HOOKS ensures "
-            "coord_session_stop runs even when daemon is down -- prevents most leaks. "
+            "the coordination stop hook runs even when daemon is down -- prevents most leaks. "
             "(2) Heartbeat-based cleanup covers both active and stopped statuses -- catches "
             "partial stop hook execution. (3) PID liveness check on already-stale sessions -- "
             "catches crash/kill -9. Each layer handles a different failure mode."
@@ -37,8 +37,8 @@ INSIGHTS = [
     {
         "content": (
             "Three failure modes compound for session leaks: (a) Stop hook has 8s timeout but "
-            "session_stop alone can take 5-6s, leaving coord_session_stop to get killed. "
-            "(b) coord_session_stop wasn't in _BEST_EFFORT_HOOKS, so daemon-down = silently "
+            "session_stop alone can take 5-6s, leaving the coordination stop hook to get killed. "
+            "(b) the coordination stop hook wasn't in _BEST_EFFORT_HOOKS, so daemon-down = silently "
             "skipped. (c) _clean_stale_sessions checked heartbeat age but never PID liveness, "
             "and only checked status='active' missing stopped sessions."
         ),

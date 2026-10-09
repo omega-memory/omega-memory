@@ -359,7 +359,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hook log rotation at 5 MB cap to prevent disk fill
 - `pre_push_guard` now blocks pushes on divergence via `sys.exit(2)` (was advisory-only)
 - `auto_claim_file` now surfaces `[CONFLICT]` warnings instead of silently swallowing claim conflicts
-- Hook timeouts increased: `coord_session_start` 3s → 10s, `coord_session_stop` 3s → 8s
+- Hook timeouts increased: coordination session start 3s → 10s, coordination session stop 3s → 8s
 - Git fetch subprocess timeout reduced from 15s to 5s to fit within hook timeouts
 - Replaced deprecated `datetime.utcnow()` with `datetime.now(timezone.utc)` in hooks and coordination
 - Coordination tool count: 25 handlers (was 24)

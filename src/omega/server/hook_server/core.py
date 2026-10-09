@@ -85,7 +85,10 @@ def register_hook_handler(name: str, handler: HookHandler) -> None:
 async def _dispatch(name: str, request: dict) -> dict:
     handler = HOOK_HANDLERS.get(name)
     if handler is None:
-        return {"output": "", "error": f"Unknown hook: {name}"}
+        from omega import plugins
+        handler = plugins.plugin_hook_handler(name)
+        if handler is None:
+            return {"output": "", "error": f"Unknown hook: {name}"}
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_HOOK_EXECUTOR, handler, request)
 

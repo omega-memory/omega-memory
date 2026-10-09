@@ -937,7 +937,7 @@ async def handle_omega_welcome(arguments: dict) -> dict:
 
     # Register this session in coordination — the MCP handler is the most
     # reliable registration path because it runs in-process (no subprocess
-    # timeout, correct PID).  The coord_session_start hook often times out
+    # timeout, correct PID).  The session-start plugin hook often times out
     # under SQLite contention with many concurrent agents.
     try:
         from omega_platform.orchestrator.coordination import get_manager
