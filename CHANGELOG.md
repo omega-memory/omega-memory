@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Hooks Core does not own are served by plugins.** The hook server and
+  `fast_hook.py` (when no daemon answers) hand any hook name outside Core's
+  own five to the first installed plugin that lists it in `HOOK_HANDLERS`,
+  and stay silent when none does. Core no longer ships session scripts for
+  an extension's workflow. OMEGA Pro users need the Pro release that ships
+  alongside this one.
+
 ## [1.5.20] - 2026-10-08
 
 ### Fixed
