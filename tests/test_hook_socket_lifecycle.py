@@ -273,7 +273,7 @@ def test_session_start_waits_for_a_socket_that_appears_after_it_fires(short_dir,
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix socket lifecycle")
-@pytest.mark.parametrize("hook_names", ["session_start", ["session_start", "coord_session_start"]])
+@pytest.mark.parametrize("hook_names", ["session_start", ["session_start", "extension_hook"]])
 def test_session_start_stops_waiting_for_a_socket_at_the_end_of_the_window(hook_names, short_dir, monkeypatch):
     fast_hook, sleeps = _load_fast_hook(short_dir / "hook.sock", short_dir / "owner.json", monkeypatch)
 

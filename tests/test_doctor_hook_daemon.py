@@ -26,7 +26,7 @@ def test_count_skipped_core_hooks_counts_only_core_hooks_skipped_for_lack_of_dae
     lines = [
         SKIPPED.format("auto_capture"),
         SKIPPED.format("surface_memories"),
-        SKIPPED.format("session_start+coord_session_start"),
+        SKIPPED.format("session_start+extension_hook"),
         SKIPPED.format("coord_heartbeat"),  # Pro hook: not a core hook
         DAEMON.format("auto_capture"),  # served by the daemon: not skipped
         "[2026-09-16T13:04:26] hook_server/auto_capture: OK (148ms)",

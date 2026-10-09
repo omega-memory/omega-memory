@@ -173,8 +173,8 @@ Claude Code hook event
 
 | # | Hook | Matcher | Batch | Purpose |
 |---|------|---------|-------|---------|
-| 1 | SessionStart | all | session_start + coord_session_start | Welcome + register + git sync + session resume |
-| 2 | Stop | all | session_stop + coord_session_stop | Summary + deregister + release claims |
+| 1 | SessionStart | all | session_start + plugin hooks | Welcome + register + git sync + session resume |
+| 2 | Stop | all | session_stop + plugin hooks | Summary + deregister + release claims |
 | 3 | UserPromptSubmit | all | auto_capture | Lesson/decision auto-capture |
 | 4 | PostToolUse | Edit, Write, NotebookEdit | surface_memories + coord_heartbeat + auto_claim_file | Surface context + heartbeat + file claim |
 | 5 | PostToolUse | Bash, Read | surface_memories + coord_heartbeat | Surface context + heartbeat |
