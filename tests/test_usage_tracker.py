@@ -33,9 +33,8 @@ def test_cost_estimation(tmp_path):
         output_tokens=100_000,
     )
     cost = tracker.get_cost_estimate(days=30)
-    # Opus: 15/M input + 75/M output = $15 + $7.50 = $22.50
-    assert cost["total_usd"] > 20
-    assert cost["total_usd"] < 25
+    # Opus 4.6: 5/M input + 25/M output = $5 + $2.50 = $7.50
+    assert abs(cost["total_usd"] - 7.5) < 1e-6
     tracker.close()
 
 
@@ -91,3 +90,14 @@ def test_usage_windows_exclude_calls_older_than_the_window(tmp_path):
     assert tracker.get_cost_estimate(days=7)["total_calls"] == 1
     assert tracker.get_top_tools(days=7)[0]["call_count"] == 1
     tracker.close()
+
+
+def test_cost_estimation_list_prices(tmp_path):
+    from omega.usage_tracker import _estimate_cost
+
+    # Haiku 4.5: $1 in, $5 out, $0.10 cache read, $1.25 cache write per 1M
+    assert abs(_estimate_cost("claude-haiku-4-5", 1_000_000, 1_000_000, 1_000_000, 1_000_000) - 7.35) < 1e-6
+    # Models outside the table still price at their list rate
+    assert abs(_estimate_cost("claude-opus-4-7", 1_000_000, 0) - 5.0) < 1e-6
+    assert abs(_estimate_cost("gpt-5.5", 1_000_000, 0) - 5.0) < 1e-6
+    assert _estimate_cost("nomic-embed-text", 1_000_000, 0) == 0.0
