@@ -9,11 +9,15 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import llm_prices
 
+
+# Anthropic, OpenAI and Google models are priced from llm-prices (read from each
+# provider's pricing page, dated per row); this table covers the rest.
 MODEL_PRICING = {  # per 1M tokens (USD)
-    "claude-opus-4-6": {"input": 15.0, "output": 75.0, "cache_read": 1.5, "cache_write": 18.75},
+    "claude-opus-4-6": {"input": 5.0, "output": 25.0, "cache_read": 0.5, "cache_write": 6.25},
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.75},
-    "claude-haiku-4-5": {"input": 0.8, "output": 4.0, "cache_read": 0.08, "cache_write": 1.0},
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0, "cache_read": 0.1, "cache_write": 1.25},
     "nomic-embed-text": {"input": 0.0, "output": 0.0},
 }
 
@@ -41,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at);
 
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int,
                    cache_read: int = 0, cache_write: int = 0) -> float:
-    pricing = MODEL_PRICING.get(model, MODEL_PRICING.get("claude-sonnet-4-6", {}))
+    pricing = _list_pricing(model) or MODEL_PRICING.get(model, MODEL_PRICING.get("claude-sonnet-4-6", {}))
     cost = (
         input_tokens * pricing.get("input", 3.0) / 1_000_000
         + output_tokens * pricing.get("output", 15.0) / 1_000_000
@@ -49,6 +53,20 @@ def _estimate_cost(model: str, input_tokens: int, output_tokens: int,
         + cache_write * pricing.get("cache_write", 3.75) / 1_000_000
     )
     return round(cost, 6)
+
+
+def _list_pricing(model: str) -> dict:
+    price = llm_prices.lookup(model)
+    if price is None or price.provider not in ("anthropic", "openai", "google"):
+        return {}
+    if price.input is None or price.output is None:
+        return {}
+    return {
+        "input": price.input,
+        "output": price.output,
+        "cache_read": price.cache_read if price.cache_read is not None else price.input,
+        "cache_write": price.cache_write.get("5m", price.input),
+    }
 
 
 def _window_start(days: int) -> str:
